@@ -1,0 +1,18 @@
+# World Policy - The Laws of the Virtual World
+
+# Whitelisted tools and actions
+allowed_tools:
+  - "read_file"
+  - "list_dir"
+  - "cat"
+
+# Explicitly forbidden patterns (regex or exact match)
+# Note: In a real system, we prefer Whitelisting, but Blacklisting is useful for demonstration.
+forbidden_patterns:
+  - "rm -rf"
+  - "delete"
+  - "api_key_export"
+
+# State Constraints
+max_files_opened: 3
+allow_network_outbound: false
