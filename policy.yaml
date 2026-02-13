@@ -1,18 +1,44 @@
-# World Policy - The Laws of the Virtual World
+# policy.yaml — The "Laws of Physics" for the Agent Hypervisor demo world.
+#
+# This file defines what exists and what is possible in the agent's virtual universe.
+# The Hypervisor loads this at startup and enforces it deterministically on every
+# intent proposal. No LLM is involved in policy evaluation.
+#
+# Key principle: the whitelist (allowed_tools) is the primary boundary.
+# The deny list (forbidden_patterns) is a secondary safety net.
+# When in doubt, prefer extending the whitelist over relaxing the deny list.
 
-# Whitelisted tools and actions
+
+# --- Whitelist: tools that exist in this world ---
+# Only tools listed here can be proposed by agents. Any other tool name is
+# treated as non-existent — the agent receives "not available", not "forbidden".
+# This is the ontological boundary: unknown tools simply do not exist.
 allowed_tools:
-  - "read_file"
-  - "list_dir"
-  - "cat"
+  - "read_file"   # Read the contents of a file (subject to max_files_opened)
+  - "list_dir"    # List directory contents (no side effects)
+  - "cat"         # Alias for read_file in some agent frameworks
 
-# Explicitly forbidden patterns (regex or exact match)
-# Note: In a real system, we prefer Whitelisting, but Blacklisting is useful for demonstration.
+
+# --- Deny list: argument patterns that are always blocked ---
+# These match against the args string of any proposed intent, regardless of tool.
+# Example: an agent proposing execute_shell("rm -rf /") is blocked by "rm -rf"
+#          even before the tool whitelist check runs.
+# Note: this list demonstrates the concept; a production system would use
+# regex patterns and cover many more dangerous operations.
 forbidden_patterns:
-  - "rm -rf"
-  - "delete"
-  - "api_key_export"
+  - "rm -rf"          # Recursive deletion — destructive and irreversible
+  - "delete"          # Broad deletion keyword caught as a safety net
+  - "api_key_export"  # Prevent exfiltration of secrets via argument strings
 
-# State Constraints
+
+# --- State constraints: cumulative session limits ---
+
+# Maximum number of read_file intents that can be approved in a single session.
+# After this limit is reached, further read_file proposals are blocked regardless
+# of the file name. Demonstrates how the Hypervisor enforces "world physics"
+# beyond a simple permission check.
 max_files_opened: 3
+
+# Whether the agent is permitted to initiate outbound network connections.
+# Currently informational — future versions will enforce this in the hypervisor.
 allow_network_outbound: false

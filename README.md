@@ -1,5 +1,9 @@
 # Agent Hypervisor
 
+![License](https://img.shields.io/github/license/sv-pro/agent-hypervisor)
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Status](https://img.shields.io/badge/status-proof--of--concept-yellow)
+
 ## Deterministic Virtualization of Reality for AI Agents
 
 > We do not make agents safe. We make the world they live in safe.
@@ -333,14 +337,22 @@ We're seeking:
 
 ## Contributing
 
-Interested in this approach? We'd love to discuss:
+Interested in this approach? We'd love to discuss architecture feedback, implementation ideas, integration scenarios, and research collaboration.
 
-- Architecture feedback
-- Implementation ideas
-- Integration scenarios
-- Research collaboration
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved.
 
-[Open an issue](https://github.com/yourhandle/agent-hypervisor/issues) or start a discussion.
+[Open an issue](https://github.com/sv-pro/agent-hypervisor/issues) or start a discussion.
+
+---
+
+## Documentation
+
+Full documentation is in [docs/](docs/):
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Deep technical specification
+- [docs/HELLO_WORLD.md](docs/HELLO_WORLD.md) — Step-by-step tutorial
+- [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) — Comparison with existing security approaches
+- [CONCEPT.md](CONCEPT.md) — Foundational philosophical and architectural definition
 
 ---
 
@@ -357,7 +369,7 @@ Agent Hypervisor complements these by operating at a different abstraction level
 
 ## License
 
-[To be determined — likely Apache 2.0 or MIT]
+MIT — see [LICENSE](LICENSE)
 
 ---
 
@@ -368,8 +380,8 @@ If you reference this concept in research:
 ```bibtex
 @misc{agent_hypervisor_2026,
   title={Agent Hypervisor: Deterministic Virtualization of Reality for AI Agents},
-  author={[Your Name]},
+  author={Sergey Vlasov},
   year={2026},
-  url={https://github.com/yourhandle/agent-hypervisor}
+  url={https://github.com/sv-pro/agent-hypervisor}
 }
 ```
