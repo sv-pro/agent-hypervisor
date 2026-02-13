@@ -19,6 +19,8 @@ Current AI agent security is failing:
 - **Anthropic (Feb 2026)**: Even after reducing attack success rate to 1%, "still represents meaningful risk"
 - **OpenAI (Dec 2025)**: Prompt injection "unlikely to ever be fully solved"
 - **Research (Oct 2025)**: 90-100% bypass rate on published defenses under adaptive attacks
+- **Radware / ShadowLeak (2025)**: A single crafted email is enough to make ChatGPT's Deep Research agent silently exfiltrate a user's entire Gmail inbox — no user interaction required
+- **Radware / ZombieAgent (Jan 2026)**: Indirect prompt injection can implant persistent malicious rules into an agent's long-term memory, hijacking every future session. Execution happens entirely inside OpenAI's cloud — no endpoint logs, no network alerts, no traditional security tool sees it. A single malicious email can seed a worm-like campaign that spreads across an organization's contacts autonomously
 
 Why? Because we're solving the wrong problem:
 
