@@ -1,10 +1,8 @@
 # Agent Hypervisor
 
-## Deterministic Virtualization of Reality for AI Agents
+**Deterministic Virtualization of Reality for AI Agents**
 
 > We do not make agents safe. We make the world they live in safe.
-
-**Note**: This is a minimal reference implementation of the [Agent Hypervisor](CONCEPT.md) architectural pattern. It is not a product or a framework — it is a Hello World demonstration of the core mechanism.
 
 ---
 
@@ -17,7 +15,6 @@ Current AI agent security is failing:
 - **Research (Oct 2025)**: 90-100% bypass rate on published defenses under adaptive attacks
 
 Why? Because we're solving the wrong problem:
-
 - ✗ Teaching agents to be "good" (alignment)
 - ✗ Filtering inputs/outputs (guardrails)
 - ✗ Monitoring and blocking actions (policies)
@@ -28,11 +25,10 @@ Why? Because we're solving the wrong problem:
 
 ## The Insight
 
-> AI agents should not live in reality.
+> AI agents should not live in reality.  
 > They should live in virtualized reality.
 
 Just as a VM doesn't see physical RAM, an AI agent shouldn't see:
-
 - Raw emails (with hidden prompt injections)
 - Direct file system access
 - Unmediated external APIs
@@ -44,12 +40,12 @@ Just as a VM doesn't see physical RAM, an AI agent shouldn't see:
 
 ## What Makes This Different
 
-| Traditional Security         | Agent Hypervisor                          |
-| ---------------------------- | ----------------------------------------- |
-| "You can't do X" (policy)    | X doesn't exist in your world (ontology)  |
-| Runtime monitoring           | Construction-time impossibility           |
-| Blocking dangerous actions   | Dangerous actions are not possible        |
-| Permission denial            | Capability absence                        |
+| Traditional Security | Agent Hypervisor |
+|---------------------|------------------|
+| "You can't do X" (policy) | X doesn't exist in your world (ontology) |
+| Runtime monitoring | Construction-time impossibility |
+| Blocking dangerous actions | Dangerous actions are not possible |
+| Permission denial | Capability absence |
 
 **Key difference**: Not enforcement, but virtualization.
 
@@ -107,7 +103,7 @@ This isn't a "rule" the agent might bypass. It's **physics**.
 
 ## The Architecture
 
-```text
+```
 ┌─────────────────────────────────────────┐
 │          Reality                         │
 │  • File system                           │
@@ -134,50 +130,6 @@ This isn't a "rule" the agent might bypass. It's **physics**.
 │  • Cannot escape by construction         │
 └─────────────────────────────────────────┘
 ```
-
----
-
-## Hello World Demo
-
-This repo implements the core mechanism: **intercepting agent intentions and enforcing a deterministic policy.**
-
-The demo consists of:
-
-- **`agent_stub.py`**: A stub that proposes actions (Intents).
-- **`hypervisor.py`**: The engine that evaluates intents against the World Policy.
-- **`policy.yaml`**: A YAML file defining what is allowed in this virtual world.
-
-### Prerequisites
-
-- Python 3.8+
-- `pyyaml`
-
-```bash
-pip install pyyaml
-```
-
-### Run the Demo
-
-The simulation runs through a series of safe, unsafe, and state-dependent scenarios.
-
-```bash
-python3 demo_scenarios.py
-```
-
-### Run Tests
-
-Verify the deterministic nature of the hypervisor.
-
-```bash
-pytest
-```
-
-### Structure
-
-- [CONCEPT.md](CONCEPT.md): The philosophical and architectural definition.
-- [policy.yaml](policy.yaml): The "Laws of Physics" for this demo world.
-- [hypervisor.py](hypervisor.py): The code that enforces the policy.
-- [agent_stub.py](agent_stub.py): A simple agent loop.
 
 ---
 
@@ -301,7 +253,7 @@ Agent Hypervisor offers construction-time safety instead of detection-time block
 ## Roadmap
 
 - [x] Concept formulation
-- [~] Reference implementation (Python) — in progress
+- [ ] Reference implementation (Python)
 - [ ] Example scenarios
   - [ ] Email agent with prompt injection defense
   - [ ] Code execution agent with taint tracking
@@ -318,12 +270,11 @@ Agent Hypervisor offers construction-time safety instead of detection-time block
 
 ## Status
 
-🚧 **In Progress**
+🚧 **Concept Stage** 
 
-The architectural concept is defined and a Hello World implementation exists. It has not yet been fully tested. This is not a production-ready library.
+This is an architectural concept, not a product. It defines a layer of abstraction for agent security that currently doesn't exist in the industry.
 
 We're seeking:
-
 - Feedback from security researchers
 - Collaboration with agent framework developers
 - Academic partnerships for formal verification
@@ -357,7 +308,7 @@ Agent Hypervisor complements these by operating at a different abstraction level
 
 ## License
 
-[To be determined — likely Apache 2.0 or MIT]
+[To be determined - likely Apache 2.0 or MIT]
 
 ---
 
