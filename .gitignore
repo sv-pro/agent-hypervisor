@@ -26,3 +26,4 @@ htmlcov/
 
 # Logs
 *.log
+CLAUDE_CODE_PROMPT*.md

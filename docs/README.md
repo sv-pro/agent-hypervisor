@@ -36,13 +36,33 @@ Read this if you want to *try* building with Agent Hypervisor.
 
 ---
 
+### [ARCHITECTURE_DIAGNOSIS.md](ARCHITECTURE_DIAGNOSIS.md)
+
+**Why agent vulnerabilities are architecturally predictable.**
+
+Case studies of ZombieAgent, ShadowLeak, prompt injection, and tool exfiltration — showing why each is an inevitable consequence of agents living in raw reality, and how a Hypervisor prevents each attack class at the architectural level.
+
+Read this if you want to understand *why the problem exists* and what makes Agent Hypervisor fundamentally different from filtering.
+
+---
+
 ### [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md)
 
 **Comparative analysis against six existing security approaches.**
 
 Covers system prompts/alignment, guardrails, policy engines, sandboxing, monitoring, and multi-layer defense-in-depth. Shows where each approach fails under adaptive attacks and how Agent Hypervisor complements (not replaces) them.
 
-Read this if you want to understand *why* existing solutions are insufficient.
+Read this if you want to understand *why existing solutions are insufficient*.
+
+---
+
+### [GLOSSARY.md](GLOSSARY.md)
+
+**Key terms defined.**
+
+Concise definitions of Agent, Hypervisor, Semantic Event, Intent Proposal, Taint, Provenance, Ontological Boundary, Physics Law, and other terms used throughout the documentation.
+
+Read this when you encounter an unfamiliar term.
 
 ---
 
@@ -52,6 +72,7 @@ For a new reader:
 
 1. [README.md](../README.md) — Overview and quick start
 2. [CONCEPT.md](../CONCEPT.md) — Foundational definitions
-3. [ARCHITECTURE.md](ARCHITECTURE.md) — Technical depth
-4. [HELLO_WORLD.md](HELLO_WORLD.md) — Hands-on tutorial
-5. [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md) — Positioning
+3. [ARCHITECTURE_DIAGNOSIS.md](ARCHITECTURE_DIAGNOSIS.md) — Why the problem exists
+4. [ARCHITECTURE.md](ARCHITECTURE.md) — Technical depth
+5. [HELLO_WORLD.md](HELLO_WORLD.md) — Hands-on tutorial
+6. [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md) — Positioning

@@ -1,79 +1,75 @@
 # Contributing to Agent Hypervisor
 
-Agent Hypervisor is an early-stage architectural concept and proof-of-concept implementation. At this stage, the most valuable contributions are conceptual feedback, implementation ideas, and documentation improvements.
+Thank you for your interest. Agent Hypervisor is an early-stage proof-of-concept exploring an architectural approach to AI agent security. At this stage, **conceptual feedback is the most valuable contribution**.
 
 ---
 
-## Ways to Contribute
+## Types of Contributions Welcome
 
-### Providing Conceptual Feedback
+### 1. Conceptual Feedback (Most Valuable Now)
 
-If you have thoughts on the Agent Hypervisor approach — whether you agree, disagree, or see gaps — please open a [Discussion](https://github.com/sv-pro/agent-hypervisor/discussions). The most useful feedback addresses:
+- Is the "reality virtualization" abstraction compelling?
+- Are there fundamental flaws in the approach?
+- What attack vectors does this not address?
+- How does this compare to your security approach?
 
-- Whether the ontological framing (existence vs. permission) holds up under real-world agent architectures
-- Scenarios where the current model breaks or is insufficient
-- Comparisons with approaches not covered in [VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md)
+Open a [Discussion](https://github.com/sv-pro/agent-hypervisor/discussions).
 
-### Reporting Bugs
+### 2. Documentation Improvements
 
-Open an [Issue](https://github.com/sv-pro/agent-hypervisor/issues) using the **Bug Report** template. Include:
+- Clarifications to existing docs
+- Additional examples or analogies
+- Better diagrams
+- Typo fixes
 
-- Python version and OS
-- Steps to reproduce
-- Expected vs. actual output
+Open a [Pull Request](https://github.com/sv-pro/agent-hypervisor/pulls).
 
-### Suggesting Features
+### 3. Code Examples
 
-Open an [Issue](https://github.com/sv-pro/agent-hypervisor/issues) using the **Feature Request** template. Frame suggestions in terms of the architecture: which layer does this affect (Universe, Hypervisor, Physics Laws, Agent Interface)?
+- Integration with agent frameworks (LangChain, LangGraph, raw API)
+- Additional demo scenarios
+- Physics law implementations
 
-### Improving Documentation
+Add to the `examples/` directory via Pull Request.
 
-Documentation PRs are welcome without prior discussion. The bar for acceptance is: is it accurate, and does it make the concept clearer?
+### 4. Real-World Use Cases
 
-### Code Contributions
+- "I would use this for..."
+- "This would solve my problem with..."
+- "This doesn't address..."
 
-For non-trivial code changes, please open an Issue or Discussion first to align on approach before writing code. This is a proof-of-concept codebase; the priority is clarity and educational value over features.
+Open an [Issue](https://github.com/sv-pro/agent-hypervisor/issues) with the `use-case` label.
+
+---
+
+## What We're NOT Looking For (Yet)
+
+- ❌ Production-readiness improvements (it's a PoC)
+- ❌ Enterprise feature requests
+- ❌ Performance optimizations
+
+Focus now is on **validating the architectural approach**.
 
 ---
 
 ## Development Setup
 
-**Requirements**: Python 3.8+
-
 ```bash
-# Clone the repo
 git clone https://github.com/sv-pro/agent-hypervisor.git
 cd agent-hypervisor
-
-# Install dependencies
 pip install pyyaml pytest
-
-# Run the demo
-python3 demo_scenarios.py
-
-# Run tests
-pytest
+pytest          # Run tests
+python3 demo_scenarios.py  # Run demo
 ```
-
----
-
-## Running Tests
-
-```bash
-pytest
-```
-
-Tests live in `tests/`. Each test is self-contained and uses a fresh `Hypervisor` instance. Tests are also usage examples — reading them is a good way to understand the API.
 
 ---
 
 ## Code Style
 
-- Follow [PEP 8](https://peps.python.org/pep-0008/)
-- Add type hints to all function signatures
-- Write docstrings that explain **why**, not just what
-- Keep it minimal: this is a proof-of-concept, not a framework
-- Every safety property should be expressible as a deterministic unit test
+- Python 3.8+, type hints on all public APIs
+- Docstrings that explain **why**, not just what
+- Every safety property must be expressible as a deterministic unit test
+- Keep it minimal — this is a PoC, not a framework
 
 ---
 
@@ -81,13 +77,13 @@ Tests live in `tests/`. Each test is self-contained and uses a fresh `Hypervisor
 
 When contributing code, keep these in mind:
 
-1. **Deterministic**: No LLM calls or probabilistic logic in the critical evaluation path
-2. **Educational**: Code should teach the concept to someone reading it for the first time
-3. **Testable**: Every decision the Hypervisor makes should be reproducible in a unit test
-4. **Minimal**: Resist adding abstractions that aren't needed for the current proof-of-concept
+1. **Deterministic** — no LLM calls or probabilistic logic in the evaluation path
+2. **Educational** — code should teach the concept to a new reader
+3. **Testable** — every Hypervisor decision must be reproducible in a unit test
+4. **Minimal** — resist abstractions not needed for the current proof-of-concept
 
 ---
 
 ## Questions?
 
-Start a [Discussion](https://github.com/sv-pro/agent-hypervisor/discussions) — we're interested in hearing from security researchers, agent framework developers, and anyone working on the AI safety problem.
+Start a [Discussion](https://github.com/sv-pro/agent-hypervisor/discussions).
