@@ -8,5 +8,9 @@ and agent_stub directly, regardless of which directory pytest is invoked from.
 import sys
 import os
 
-# Ensure the repo root is on the path so tests can import hypervisor, agent_stub, etc.
-sys.path.insert(0, os.path.dirname(__file__))
+_root = os.path.dirname(__file__)
+
+# Add src/ so tests can import hypervisor, agent_stub directly (e.g. `from hypervisor import Hypervisor`).
+# Add repo root so conftest itself and any root-level helpers are importable.
+sys.path.insert(0, os.path.join(_root, "src"))
+sys.path.insert(0, _root)

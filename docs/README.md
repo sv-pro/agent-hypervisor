@@ -1,78 +1,66 @@
-# Documentation Index
+# Agent Hypervisor Documentation
 
-## Agent Hypervisor — Documentation
+## Getting Started
 
-Start with the root [README.md](../README.md) for an overview of the project, quick start instructions, and the core concepts.
+**New to Agent Hypervisor?** Start here:
 
----
-
-## Documents
-
-### [CONCEPT.md](../CONCEPT.md)
-
-**The philosophical and architectural definition of Agent Hypervisor.**
-
-Read this first if you want to understand *why* this approach exists and the precise formal definitions of its core primitives (Semantic Events, Intent Proposals, Deterministic World Policy). This is the canonical reference document.
+1. **[Concept](CONCEPT.md)** — Understand the "why" (15 min read)
+2. **[Hello World](HELLO_WORLD.md)** — See it in action (10 min tutorial)
+3. **[Architecture](ARCHITECTURE.md)** — Understand the "how" (30 min deep dive)
 
 ---
 
-### [ARCHITECTURE.md](ARCHITECTURE.md)
+## Understanding the Problem
 
-**Deep technical specification of the architecture.**
-
-Covers the five-layer stack, the Universe definition model, the Virtualization Engine, Intent Processing, and Physics Laws. Includes formal properties (determinism, taint containment, provenance preservation) and integration patterns for wrapping existing agent frameworks.
-
-Read this if you want to understand *how* to build an Agent Hypervisor.
+- **[Architecture Diagnosis](ARCHITECTURE_DIAGNOSIS.md)** — Why current vulnerabilities are
+  architecturally predictable
+- **[Timeline](TIMELINE.md)** — Industry developments context
 
 ---
 
-### [HELLO_WORLD.md](HELLO_WORLD.md)
+## Comparing Approaches
 
-**Step-by-step tutorial: building a safe email agent.**
-
-Walks through defining a Universe, creating a Hypervisor, wrapping an existing LangChain agent, and testing it against a malicious email containing a hidden prompt injection. Shows the full flow from raw input to deterministic decision.
-
-Read this if you want to *try* building with Agent Hypervisor.
+- **[vs Existing Solutions](VS_EXISTING_SOLUTIONS.md)** — How this compares to guardrails,
+  policy engines, sandboxing, and multi-layer defense
 
 ---
 
-### [ARCHITECTURE_DIAGNOSIS.md](ARCHITECTURE_DIAGNOSIS.md)
+## Practical Implementation
 
-**Why agent vulnerabilities are architecturally predictable.**
-
-Case studies of ZombieAgent, ShadowLeak, prompt injection, and tool exfiltration — showing why each is an inevitable consequence of agents living in raw reality, and how a Hypervisor prevents each attack class at the architectural level.
-
-Read this if you want to understand *why the problem exists* and what makes Agent Hypervisor fundamentally different from filtering.
+- **[Workarounds](WORKAROUNDS.md)** — What you can implement TODAY while Agent Hypervisor matures
+- **[Glossary](GLOSSARY.md)** — Key terms defined
 
 ---
 
-### [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md)
+## Navigation by Role
 
-**Comparative analysis against six existing security approaches.**
+### Security Researchers
 
-Covers system prompts/alignment, guardrails, policy engines, sandboxing, monitoring, and multi-layer defense-in-depth. Shows where each approach fails under adaptive attacks and how Agent Hypervisor complements (not replaces) them.
+Start: [Architecture Diagnosis](ARCHITECTURE_DIAGNOSIS.md) → [Architecture](ARCHITECTURE.md)
 
-Read this if you want to understand *why existing solutions are insufficient*.
+### AI Developers
+
+Start: [Hello World](HELLO_WORLD.md) → [Workarounds](WORKAROUNDS.md)
+
+### Enterprise Decision Makers
+
+Start: [Concept](CONCEPT.md) → [vs Existing Solutions](VS_EXISTING_SOLUTIONS.md)
+
+### Academic Researchers
+
+Start: [Architecture](ARCHITECTURE.md) → [Architecture Diagnosis](ARCHITECTURE_DIAGNOSIS.md)
 
 ---
 
-### [GLOSSARY.md](GLOSSARY.md)
+## Quick Reference
 
-**Key terms defined.**
-
-Concise definitions of Agent, Hypervisor, Semantic Event, Intent Proposal, Taint, Provenance, Ontological Boundary, Physics Law, and other terms used throughout the documentation.
-
-Read this when you encounter an unfamiliar term.
-
----
-
-## Reading Order
-
-For a new reader:
-
-1. [README.md](../README.md) — Overview and quick start
-2. [CONCEPT.md](../CONCEPT.md) — Foundational definitions
-3. [ARCHITECTURE_DIAGNOSIS.md](ARCHITECTURE_DIAGNOSIS.md) — Why the problem exists
-4. [ARCHITECTURE.md](ARCHITECTURE.md) — Technical depth
-5. [HELLO_WORLD.md](HELLO_WORLD.md) — Hands-on tutorial
-6. [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md) — Positioning
+| Document | Purpose | Length | Audience |
+| --- | --- | --- | --- |
+| [CONCEPT.md](CONCEPT.md) | Philosophical foundation | 15 min | Everyone |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Technical details | 30 min | Developers |
+| [HELLO_WORLD.md](HELLO_WORLD.md) | Tutorial | 10 min | Developers |
+| [ARCHITECTURE_DIAGNOSIS.md](ARCHITECTURE_DIAGNOSIS.md) | Problem analysis | 20 min | Security researchers |
+| [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md) | Comparisons | 15 min | Evaluators |
+| [WORKAROUNDS.md](WORKAROUNDS.md) | Practical guide | 15 min | Implementers |
+| [TIMELINE.md](TIMELINE.md) | Context | 5 min | Everyone |
+| [GLOSSARY.md](GLOSSARY.md) | Definitions | Reference | Everyone |

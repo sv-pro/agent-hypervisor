@@ -13,8 +13,11 @@ Run with:
     pytest
 """
 
+import os
 import pytest
 from hypervisor import Hypervisor
+
+_POLICY_PATH = os.path.join(os.path.dirname(__file__), "../config/policy.yaml")
 
 
 @pytest.fixture
@@ -25,7 +28,7 @@ def hv() -> Hypervisor:
     A new instance resets WorldState, ensuring that state-dependent tests
     (e.g., max_files_opened) are not affected by execution order.
     """
-    return Hypervisor("policy.yaml")
+    return Hypervisor(_POLICY_PATH)
 
 
 # ---------------------------------------------------------------------------
