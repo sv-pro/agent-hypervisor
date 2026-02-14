@@ -51,17 +51,12 @@ Expected output:
 """
 
 
-import sys
 from pathlib import Path
-
-# Add src/ to path so we can import hypervisor and agent_stub directly.
-_repo_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(_repo_root / "src"))
 
 from hypervisor import Hypervisor
 from agent_stub import AgentStub
 
-_POLICY_PATH = _repo_root / "config" / "policy.yaml"
+_POLICY_PATH = Path(__file__).parent.parent.parent / "config" / "policy.yaml"
 
 
 def run_demo() -> None:
