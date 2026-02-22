@@ -14,7 +14,7 @@ This framework provides a vocabulary for honest evaluation. Three categories, or
 
 ## The Three Categories
 
-### 🔴 Crutch
+### 🔴 Костыль — Crutch
 
 A crutch treats symptoms. It does not change the architecture that produces the vulnerability. It operates probabilistically on the surface of the problem.
 
@@ -31,7 +31,7 @@ A crutch treats symptoms. It does not change the architecture that produces the 
 
 ---
 
-### 🟡 Workaround
+### 🟡 Воркараунд — Workaround
 
 A workaround solves the immediate problem without solving the root cause. It is production-ready, deployable today, and provides partial protection. It buys time and reduces risk in the short term.
 
@@ -48,7 +48,7 @@ A workaround solves the immediate problem without solving the root cause. It is 
 
 ---
 
-### 🟢 Bridge
+### 🟢 Мост — Bridge
 
 A bridge introduces architectural thinking. It may not be a complete solution, but it establishes the right abstractions, teaches the right patterns, and is composable with a proper architectural approach.
 
@@ -153,9 +153,41 @@ Production-grade, continuously updated, enterprise support. Better detection rat
 
 ---
 
+### GitHub Agentic Workflows (GH-AW)
+**Type:** Agentic workflow platform with integrated security architecture
+**Approach:** Three-layer defense (Substrate, Configuration, Plan) with SafeOutputs, network firewall, and MCP sandboxing
+
+**Classification: 🟢 Bridge (strongest of the current generation)**
+
+GH-AW is the most architecturally interesting system in this landscape — not because it is complete, but because it independently arrived at several of the same abstractions that Agent Hypervisor proposes.
+
+**What it gets right:**
+
+SafeOutputs is Intent Proposal by another name. The agent never writes to external state directly — it produces buffered artifacts, and a separate deterministic pipeline decides what gets externalized. This is the correct separation of concerns: agent reasons, environment executes.
+
+Permission separation is enforced by construction, not policy. The agent job runs read-only. Write operations happen in separate jobs with scoped permissions. A compromised agent cannot directly modify repository state — not because it is told not to, but because the architecture does not give it the capability.
+
+Content sanitization runs at the input boundary before the agent sees the content, not at the output. This is the right order.
+
+Network containment is deterministic: iptables + domain allowlist. No LLM in that path.
+
+**Where it falls short:**
+
+Threat Detection — the gate before write operations — is LLM-based. This is the precise point where determinism is required, and GitHub chose probabilistic analysis. A security-focused prompted agent examines outputs and emits a pass/fail verdict. That verdict is bypassable under adaptive attacks. The rest of the architecture earns determinism, then surrenders it at the most critical checkpoint.
+
+No provenance tracking. Data does not carry its origin as a type. Taint does not propagate automatically through operations. The system sanitizes inputs well, but once content enters the agent's context, its origin is lost.
+
+No semantic virtualization. The agent operates on sanitized content, but that content is still raw text from the agent's perspective — not typed Semantic Events with trust levels and capability constraints.
+
+*Migration path:* SafeOutputs → Intent Proposal layer (already structurally equivalent). LLM threat detection → Deterministic physics laws (TaintContainmentLaw replaces the probabilistic gate). Content sanitization pipeline → Virtualization Boundary (Layer 4). The architecture is one abstraction shift away from the full model.
+
+*Strategic note:* GH-AW proves the market for architectural security at scale. GitHub independently validated the SafeOutputs/permission-separation approach. The remaining gap — probabilistic threat detection at the write gate — is exactly the gap Agent Hypervisor addresses.
+
+---
+
 ## The Pattern
 
-Every tool in this landscape operates **after** the agent has been exposed to raw reality. The best ones (NeMo, IronClaw) introduce fragments of the right abstractions. None of them change the fundamental architecture.
+Every tool in this landscape operates **after** the agent has been exposed to raw reality. The best ones (GH-AW, NeMo) introduce fragments of the right abstractions. None of them complete the model.
 
 The question is not "which crutch is best?" The question is "what does the world look like when we stop needing crutches?"
 
