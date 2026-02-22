@@ -22,6 +22,8 @@ Why agents are unsafe by construction. Semantic reality virtualization. Five-lay
 Twelve architectural principles for building secure agentic systems. A standard to evaluate implementations against.
 *Audience: builders of agentic applications.*
 
+See also: [docs](docs/)
+
 ---
 
 **Status**
