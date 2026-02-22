@@ -19,6 +19,9 @@ dist/
 coverage.xml
 htmlcov/
 
+# Node.js
+node_modules/
+
 # Editor and OS files
 .DS_Store
 *.swp

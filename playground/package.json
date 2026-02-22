@@ -1,0 +1,17 @@
+{
+  "name": "agent-hypervisor-demo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/hypervisor",
+    "packages/agent",
+    "packages/server",
+    "packages/dashboard"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/server & npm run dev --workspace=packages/dashboard",
+    "build": "npm run build --workspace=packages/hypervisor && npm run build --workspace=packages/agent && npm run build --workspace=packages/server && npm run build --workspace=packages/dashboard",
+    "dev:server": "npm run dev --workspace=packages/server",
+    "dev:dashboard": "npm run dev --workspace=packages/dashboard"
+  }
+}

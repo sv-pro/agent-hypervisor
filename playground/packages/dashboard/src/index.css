@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #080c14;
+  --color-surface: #0d1117;
+  --color-card: #111827;
+  --color-border: #1e2733;
+  --color-dim: #4b5563;
+  --color-muted: #6b7280;
+  --color-text: #d1d5db;
+  --color-bright: #f1f5f9;
+  --color-allow: #3b82f6;
+  --color-deny: #f97316;
+  --color-approve: #a855f7;
+  --color-sim: #6366f1;
+  --color-trusted: #22d3ee;
+  --color-untrusted: #fb923c;
+  --color-taint: #64748b;
+  --color-amber: #f59e0b;
+  --color-green: #10b981;
+
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes ruleGlow {
+  0%   { background: rgba(245,158,11,.22); }
+  100% { background: rgba(245,158,11,.06); }
+}
+
+@keyframes taintRing {
+  0%,100% { box-shadow: 0 0 0 0 rgba(100,116,139,0); }
+  50%     { box-shadow: 0 0 0 6px rgba(100,116,139,.25); }
+}
+
+@keyframes replanIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-rule-glow {
+  animation: ruleGlow 1.5s ease-out;
+}
+
+.animate-taint-ring {
+  animation: taintRing 2s infinite;
+}
+
+.animate-replan-in {
+  animation: replanIn 0.4s ease-out;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
