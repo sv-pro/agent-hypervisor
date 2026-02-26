@@ -4,6 +4,12 @@ Key terms used in Agent Hypervisor documentation and code.
 
 ---
 
+## AI Aikido
+
+Principle of using LLM capabilities at design-time to generate deterministic runtime artifacts.
+
+---
+
 ## Agent
 
 An AI system (LLM-based or otherwise) that perceives inputs and proposes actions to achieve goals. In the Agent Hypervisor model, an agent never executes actions directly — it only proposes intents.
@@ -12,7 +18,7 @@ An AI system (LLM-based or otherwise) that perceives inputs and proposes actions
 
 ## Architectural Predictability
 
-The property that a class of attacks is not a surprise exploit but an inevitable consequence of the current system architecture. Prompt injection is architecturally predictable because agents cannot structurally distinguish trusted instructions from untrusted data. See [docs/ARCHITECTURE_DIAGNOSIS.md](ARCHITECTURE_DIAGNOSIS.md).
+The property that a class of attacks is not a surprise exploit but an inevitable consequence of the current system architecture. Prompt injection is architecturally predictable because agents cannot structurally distinguish trusted instructions from untrusted data. See [docs/VULNERABILITY_CASE_STUDIES.md](VULNERABILITY_CASE_STUDIES.md).
 
 ---
 
@@ -22,9 +28,21 @@ Safety that is guaranteed by how the system is built, as opposed to detection-ti
 
 ---
 
+## Bounded Security
+
+Security whose limits are explicit, measurable, and improvable — as opposed to probabilistic security whose failure rate is unknown.
+
+---
+
 ## Deterministic World Policy
 
 A set of rules — "physics laws" — that the Hypervisor enforces on every intent proposal. The key property is determinism: the same intent + policy + world state always produces the same decision. This makes safety properties formally unit-testable.
+
+---
+
+## Compiled Physics
+
+The deterministic runtime artifacts produced by the World Manifest Compiler — the "laws of nature" governing the agent's world.
 
 ---
 
@@ -40,15 +58,33 @@ Analogous to a classical OS hypervisor, which virtualizes CPU and RAM. The Agent
 
 ---
 
+## Design-Time HITL
+
+Human-in-the-loop model where human judgment is amortized through design-phase review rather than runtime intervention.
+
+---
+
 ## Intent Proposal
 
 A structured request from an agent describing what action it wants to perform and on what target. The agent proposes; the Hypervisor decides whether the intent can exist as a consequence in the virtual world. Agents never execute directly.
 
 ---
 
+## L∞ Layer
+
+Semantic security layer in the L∞ stack — the agent-level analogue of a WAF.
+
+---
+
 ## Ontological Boundary
 
 A security boundary defined by existence, not permission. Traditional security asks "are you allowed to do X?" An ontological boundary asks "does X exist in your world?" If it doesn't exist, there is nothing to bypass.
+
+---
+
+## Ontological Security
+
+Security through non-existence of dangerous actions, not through prohibition.
 
 ---
 
@@ -112,4 +148,16 @@ Mutable state tracked by the Hypervisor across a session — for example, how ma
 
 ---
 
-*See [CONCEPT.md](../CONCEPT.md) for the foundational definitions and [docs/ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification.*
+## World Manifest
+
+Formal definition of what exists in an agent's universe — actions, trust model, capabilities, taint rules, escalation conditions.
+
+---
+
+## World Manifest Compiler
+
+The compilation phase that transforms a manifest into deterministic runtime artifacts — policy tables, schemas, taint matrices.
+
+---
+
+*See [WHITEPAPER.md](WHITEPAPER.md) for the foundational definitions and [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) for the full technical specification.*
