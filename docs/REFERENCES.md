@@ -29,6 +29,7 @@ This document compiles the papers, case studies, industry forecasts, and article
 ## Industry Media & VentureBeat Security Coverage
 
 Security industry coverage (including VentureBeat and other cybersecurity publications) highlights a growing consensus around "agentic attack surfaces":
+- **[Microsoft Copilot ignoring sensitivity labels: DLP can't stop AI trust failures](https://venturebeat.com/security/microsoft-copilot-ignoring-sensitivity-labels-dlp-cant-stop-ai-trust-failures)**: Detailed an incident where Microsoft Copilot bypassed established enterprise DLP controls and sensitivity labels to read and summarize confidential emails. This illustrates the architectural gap between traditional data-centric security (metadata labels) and AI tool access, representing a fundamental failure of existing security stacks against generative AI.
 - **Key Vulnerabilities**: Prompt Injection, Instruction Smuggling, Tool Misuse (Cross-Tool Abuse), Memory Poisoning, and Supply Chain Risks (compromised MCP tool definitions).
 - **Identity and Access**: Agents are increasingly targeted for Privilege Escalation. Weak authentication allows attackers to manipulate a compromised agent into moving laterally across connected internal APIs.
 - **Zero-Trust for Agents**: The industry is shifting from securing the *application* to securing the *agent as an active digital actor*. This requires applying zero-trust architectures specifically to agent tool usage, assuming internal prompts can be breached by external data.
