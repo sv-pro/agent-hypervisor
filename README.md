@@ -4,51 +4,70 @@
 
 ---
 
-We are surprised by gravity.
+## The Problem
 
-AI agent vulnerabilities are not bugs. They are architectural consequences.
+Modern AI agents inhabit **raw reality**: unmediated input, shared mutable memory, direct tool execution, irreversible consequences. Every guardrail, classifier, and LLM-based safety layer placed on this foundation is probabilistic — and [bypassable](docs/VULNERABILITY_CASE_STUDIES.md).
 
----
+These vulnerabilities are not bugs. They are **architectural consequences**. No amount of behavioral filtering fixes a system that hands an agent unstructured text and unlimited tools.
 
-## The Problem: Raw Reality
+## The Shift
 
-Modern agentic systems place the agent directly into reality. The result is predictable:
+Traditional security asks: *"Can the agent do X?"* — then tries to detect and block dangerous actions at runtime.
 
-- **Raw input.** Emails, documents, and tool responses arrive as unmediated text. There is no distinction between data and instruction at the boundary.
-- **Shared mutable memory.** The agent reads and writes to memory without provenance tracking. Any write can corrupt future reasoning.
-- **Direct tool execution.** The agent calls tools with immediate effect. No proposal, no interception, no validation.
-- **Irreversible consequences.** Sent emails, deleted files, triggered APIs — the agent has no concept of reversibility.
+Agent Hypervisor asks: **"Does X exist in the agent's universe?"**
 
-Given this architecture, prompt injection, memory poisoning, and tool abuse are not bugs. They are the mathematically inevitable consequence of the design.
+This is the move from **permission-based security** to **ontological security**. Dangerous actions are not prohibited by policy — they do not exist by construction.
 
----
-
-## The Shift: Permission Security → Ontological Security
-
-Traditional security asks: *Can agent X perform action Y?*
-
-This is a behavioral question. The answer is always probabilistic — a policy check, a classifier output, a guardrail. Bypassable under sufficient pressure.
-
-Agent Hypervisor asks a different question: *Does action Y exist in agent X's universe?*
-
-If the action does not exist in the agent's constructed world, the agent cannot formulate the intent. There is nothing to permit or deny. The attack surface does not exist.
+## How It Works
 
 ```
-Reality → Hypervisor → Agent
+┌──────────────────────────────────────────┐
+│              Raw Reality                 │
+│   (unstructured input, external APIs,    │
+│    files, networks, user messages)       │
+└────────────────┬─────────────────────────┘
+                 │
+    ┌────────────▼────────────────────┐
+    │     Agent Hypervisor            │
+    │                                 │
+    │  ● Semantic Events (in)         │
+    │    Raw input → structured,      │
+    │    attributed, taint-tracked    │
+    │                                 │
+    │  ● Deterministic Policy         │
+    │    Physics laws — no LLM on     │
+    │    the critical security path   │
+    │                                 │
+    │  ● Intent Proposals (out)       │
+    │    Agent proposes actions;      │
+    │    hypervisor decides           │
+    └────────────┬────────────────────┘
+                 │
+    ┌────────────▼────────────────────┐
+    │           Agent                 │
+    │                                 │
+    │  Perceives only Semantic Events │
+    │  Can only propose Intent        │
+    │  Never executes directly        │
+    └─────────────────────────────────┘
 ```
 
-The hypervisor virtualizes what the agent perceives and what the agent can do — not by filtering behavior, but by constructing a different world.
+The hypervisor **virtualizes the agent's perception and actions** — not just its behavior. The agent lives inside a constructed world where security properties are enforced as physics laws, not policies.
+
+> *"We do not make agents safe. We make the world they live in safe."*
 
 ---
 
 ## What Already Works
 
-The reference implementation demonstrates:
+| Capability                        | How                                                                                                                                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prompt injection containment**  | External input arrives as taint-tracked Semantic Events. Injected instructions cannot cross trust boundaries — taint propagates automatically and is enforced as a physics law.              |
+| **Taint containment**             | Data from untrusted sources carries a taint label through every transformation. Tainted data cannot reach privileged actions without explicit sanitization.                                  |
+| **Provenance tracking**           | Every piece of data carries its origin and handling history as part of its type. Provenance is not metadata — it is an architectural invariant.                                              |
+| **Deterministic intent handling** | Agent proposes Intent Proposals; the hypervisor evaluates them against a deterministic policy (tool whitelist, forbidden patterns, state limits). No LLM sits on the critical decision path. |
 
-- **Prompt injection containment.** Untrusted input enters as a typed Semantic Event. The instruction/data boundary is enforced at Layer 1 before the agent perceives it.
-- **Taint containment.** Data from untrusted sources is marked tainted at the boundary. Taint propagates automatically. A tainted object cannot reach Layer 5 — not because a policy denies it, but because the type system makes it impossible.
-- **Provenance tracking.** Every object in the agent's world carries its origin. Memory writes are attributed. There is no anonymous data.
-- **Deterministic intent handling.** The agent cannot execute actions directly. It emits Intent Proposals evaluated by a deterministic World Policy — no LLM in the critical path, same input always produces the same decision, fully unit-testable.
+See [examples/](examples/) for runnable demonstrations.
 
 ---
 
@@ -58,30 +77,33 @@ The reference implementation demonstrates:
 git clone https://github.com/sv-pro/agent-hypervisor.git
 cd agent-hypervisor
 pip install -e .
-
-# Core demonstration
 python examples/basic/01_simple_demo.py
 ```
+
+The demo runs seven scenarios through the hypervisor, showing three layers of physics enforcement: forbidden patterns, tool whitelist, and state limits. Each scenario prints the agent's proposed action and the hypervisor's deterministic decision.
 
 ---
 
 ## Documents
 
-📐 **[CONCEPT.md](CONCEPT.md)** ← *canonical architecture document*
-The full problem analysis, five-layer architecture, architectural invariants, and conformance test pattern.
-*Audience: architects and security researchers.*
+📄 **[WHITEPAPER](docs/WHITEPAPER.md)** — Canonical architecture document.
+Ontological security, AI Aikido, the World Manifest compiler, design-time human-in-the-loop.
+*Start here for the full thesis.*
 
-📋 **[12-FACTOR-AGENT.md](12-FACTOR-AGENT.md)**
-Twelve architectural principles for building secure agentic systems. An evaluation standard for implementations.
-*Audience: builders of agentic applications.*
+📘 **[CONCEPT](CONCEPT.md)** — Five-layer architecture and architectural invariants.
+*For architects and security researchers.*
 
-🔬 **[examples/](examples/)**
-Runnable demonstrations. Start with `examples/basic/`.
+📐 **[12-FACTOR-AGENT](12-FACTOR-AGENT.md)** — Twelve principles for building secure agentic systems.
+*For builders of agentic applications.*
+
+📖 **[GLOSSARY](docs/GLOSSARY.md)** — Core terms: Semantic Event, Intent Proposal, Taint, Provenance, World Manifest, AI Aikido.
+
+See also: [docs/](docs/) for technical spec, case studies, hello-world tutorial, and comparisons to existing solutions.
 
 ---
 
-**Status**
+## Status
 
-Architectural draft. Not a product. Not a framework. Not an SDK.
+Architectural proof of concept. This repository defines a model — not a product, framework, or SDK.
 
-This repository defines a model.
+Contributions welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
