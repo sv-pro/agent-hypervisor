@@ -74,7 +74,7 @@ Within the virtualized world, the hypervisor enforces laws analogous to physical
 
 ## 4. The Five-Layer Architecture
 
-```
+```text
 ┌─────────────────────────────────┐
 │         External World          │  ← raw, untrusted, uncontrolled
 └────────────────┬────────────────┘
@@ -126,7 +126,56 @@ Within the virtualized world, the hypervisor enforces laws analogous to physical
 
 ---
 
-## 5. What This Is Not
+## 5. Honest Weakness: The Semantic Gap
+
+The hypervisor virtualizes the agent's world at the semantic layer. This is also its fundamental limitation.
+
+**The semantic gap problem.** The hypervisor must parse, classify, and sanitize inputs that were written in natural language — by humans, by other agents, or by adversaries. Determining that a string is an injected instruction rather than legitimate data requires understanding meaning. That understanding is itself probabilistic.
+
+The hypervisor resolves this with a structural constraint: all classification happens at the boundary (Layer 1), deterministically, before the agent sees anything. A stricter policy admits fewer inputs and reduces the attack surface. A permissive policy admits more inputs and widens it. The semantic gap is real — but it is bounded, explicit, and tunable.
+
+**Intelligence at the boundary.** The input classifier at Layer 1 may itself use an LLM or heuristic model. This is the one point where probabilistic reasoning enters the architecture. The design deliberately isolates this to one layer, so that a failure at Layer 1 does not compromise the determinism of Layers 2–5.
+
+**Bounded claim, not perfect security.** Agent Hypervisor does not eliminate all attack surface. It makes the attack surface explicit, measurable, and architecturally contained:
+
+- The only way to inject a malicious instruction is through Layer 1.
+- The only way to exfiltrate tainted data is through Layer 5 with an explicit sanitization bypass.
+- Every violation is auditable — the attack surface has a shape.
+
+This is different from probabilistic defenses, where the attack surface is unbounded and failure modes are unknown in advance.
+
+---
+
+## 6. Status and Open Questions
+
+### What is demonstrated in the proof-of-concept
+
+The PoC demonstrates the following architectural properties in code:
+
+- **Prompt injection containment** — injected instructions in external input are stripped at Layer 1 and do not reach the agent.
+- **Taint propagation** — data from untrusted sources carries a taint label that prevents it from reaching Layer 5.
+- **Provenance tracking** — every object in the agent's world has a source record.
+- **Deterministic intent evaluation** — Intent Proposals are evaluated against a rule-based policy with no LLM in the critical path.
+
+These properties are unit-testable without mocking the agent. The conformance test pattern in Section 7 is runnable.
+
+### What remains a research and engineering claim
+
+- **Completeness of taint propagation** at scale — the PoC covers a bounded set of data flow patterns. Real-world agent memory is more complex.
+- **Semantic gap at the input boundary** — the Layer 1 classifier is heuristic-based in the PoC. A production-grade classifier requires adversarial hardening.
+- **World Manifest Compiler** — the design-time tool that generates the deterministic policy from a high-level manifest is specified but not fully implemented.
+- **Reversibility model** — the PoC enforces hard blocks on flagged actions but does not yet implement staged execution with rollback.
+- **MCP virtualization** — virtualizing MCP tool calls as Intent Proposals is architecturally specified; integration with real MCP servers is work in progress.
+
+### Open questions
+
+- Can the semantic gap at Layer 1 be made small enough that residual risk is acceptable for production use cases?
+- What is the right abstraction for expressing World Manifests — a DSL, a schema, a typed configuration?
+- How does the architecture compose when multiple hypervisor instances interact (agent-to-agent scenarios)?
+
+---
+
+## 7. What This Is Not
 
 **Not an orchestrator.** An orchestrator manages agent workflows. Agent Hypervisor manages the reality the agent perceives. These are different abstraction levels.
 
@@ -142,7 +191,7 @@ Within the virtualized world, the hypervisor enforces laws analogous to physical
 
 ---
 
-## 6. Architectural Invariants
+## 8. Architectural Invariants
 
 A system conforms to the Agent Hypervisor model if and only if all of the following invariants hold:
 
@@ -168,7 +217,8 @@ Actions classified as irreversible by the World Policy cannot reach Layer 5 with
 Resource budgets (token count, action count, scope, time) are enforced at Layer 4. Budget exhaustion results in hard termination, not soft degradation.
 
 **Conformance test pattern:**
-```
+
+```text
 untrusted_input → semantic_event → agent_intent → policy_eval → denied
 tainted_object  → agent_intent  → policy_eval  → export_blocked
 trusted_input   → semantic_event → agent_intent → policy_eval → allowed
@@ -178,7 +228,7 @@ If these three cases are unit-testable without mocking the agent, the system is 
 
 ---
 
-## 7. Relationship to 12-Factor Agent
+## 9. Relationship to 12-Factor Agent
 
 Agent Hypervisor is an architectural mechanism.
 12-Factor Agent is an evaluation standard.
