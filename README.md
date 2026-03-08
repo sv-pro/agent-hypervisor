@@ -20,7 +20,7 @@ This is the move from **permission-based security** to **ontological security**.
 
 ## How It Works
 
-```
+```text
 ┌──────────────────────────────────────────┐
 │              Raw Reality                 │
 │   (unstructured input, external APIs,    │
@@ -34,7 +34,7 @@ This is the move from **permission-based security** to **ontological security**.
     │    Raw input → structured,      │
     │    attributed, taint-tracked    │
     │                                 │
-    │  ● Deterministic Policy         │
+    │  ● World Policy                 │
     │    Physics laws — no LLM on     │
     │    the critical security path   │
     │                                 │
@@ -59,6 +59,8 @@ The hypervisor **virtualizes the agent's perception and actions** — not just i
 ---
 
 ## What Already Works
+
+*Demonstrated in the proof-of-concept.*
 
 | Capability                        | How                                                                                                                                                                                          |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
