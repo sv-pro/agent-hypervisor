@@ -1,210 +1,170 @@
 # CONCEPT.md — Agent Hypervisor
 
-*Architectural specification. Draft v0.1 — February 2026.*
+*Overview document. v2 — March 2026.*
+*Shortest serious explainer. For full details see [WHITEPAPER](docs/WHITEPAPER.md).*
 
 ---
 
-## 0. Definition
+## The Problem
 
-Agent Hypervisor is a deterministic boundary layer that virtualizes the semantic reality of an AI agent.
+Modern AI agents operate in raw reality. An agent reading your email receives the same unstructured text stream regardless of whether it comes from your colleague or from an attacker's prompt injection. An agent executing a tool invokes it with immediate, often irreversible effect. An agent writing to memory overwrites previous state with no attribution.
 
-The agent does not interact with the world. The agent interacts with a constructed representation of the world — one where the laws of physics are defined by the hypervisor, not by the host environment.
+These are not edge cases. They are the default architecture of every mainstream agent framework today. The result: prompt injection, memory poisoning, data exfiltration, and uncontrolled tool execution are **architectural consequences**, not bugs.
 
----
-
-## 1. The Architectural Failure
-
-Modern agentic systems are unsafe by construction. Not because the models are misaligned. Not because the prompts are wrong. Because agents operate in raw reality.
-
-Raw reality means:
-
-- **Raw input.** The agent receives unmediated text from emails, documents, web pages, and tool responses. There is no distinction between data and instruction at the boundary.
-- **Shared mutable memory.** The agent reads from and writes to memory without provenance tracking. Any write can corrupt future reasoning.
-- **Direct tool execution.** The agent invokes tools with immediate effect. There is no proposal, no validation, no interception layer.
-- **Irreversible consequences.** External actions — sent emails, deleted files, triggered APIs — cannot be undone. The agent has no concept of reversibility.
-
-Given this architecture, security failures are not bugs. They are architectural consequences. The system was designed to produce them.
-
-We are surprised by gravity.
+Every existing mitigation operates at the same level as the problem: LLM-based classifiers, probabilistic guardrails, output filters. They are bypassable under sufficient pressure because they fight the model with another model.
 
 ---
 
-## 2. Ontological Framing
+## The Classical Hypervisor Analogy
 
-Traditional security asks: *Can agent X perform action Y?*
+In the 1960s, computing faced a similar problem. Multiple programs ran on the same hardware with no isolation. A bug in one program could corrupt another. The solution was not better programs — it was a new architectural layer: the hypervisor (later, the OS kernel with virtual memory).
 
-This is a behavioral question. It assumes the agent exists in a world where action Y is possible, and asks whether permission is granted. The answer is always probabilistic — a policy check, a classifier output, a guardrail response. Bypassable under sufficient pressure.
+The hypervisor didn't make programs safer. It made the *world* each program inhabited safer. Each process got its own virtual address space. A pointer in Process A could not reference memory in Process B — not because of a permission check, but because that memory *did not exist* in Process A's universe.
 
-Agent Hypervisor asks a different question: *Does action Y exist in agent X's universe?*
+Agent Hypervisor applies the same principle one layer up: not at the compute level, but at the **semantic level** — the level of meaning, intent, and consequence.
 
-This is an ontological question. If the action does not exist in the agent's constructed world, the agent cannot formulate the intent. There is nothing to permit or deny. The attack surface does not exist.
+| Classical Hypervisor | Agent Hypervisor |
+|---------------------|-----------------|
+| Virtualizes compute (CPU, memory, I/O) | Virtualizes semantics (perception, intent, tools) |
+| Process sees virtual address space | Agent sees Semantic Events, not raw input |
+| Illegal memory access → hardware fault | Non-existent tool → intent rejected by construction |
+| Resource limits via CPU scheduling | Resource limits via budget invariants |
+| Isolation enforced by hardware + kernel | Isolation enforced by deterministic policy layer |
 
-This is the difference between behavioral restriction and ontological construction.
+---
+
+## Semantic-Level Isolation
+
+The core formula: **we don't make the agent safe — we make the agent's world safe.**
+
+Traditional security asks: *Can agent X perform action Y?* This is a behavioral question. It assumes the agent exists in a world where Y is possible and asks whether permission should be granted. The answer is probabilistic and bypassable.
+
+Agent Hypervisor asks: *Does action Y exist in agent X's universe?* This is an ontological question. If the action doesn't exist in the agent's constructed world, the agent cannot form the intent. There is nothing to permit or deny.
 
 Behavioral restriction: the world is dangerous, the agent is constrained.
 Ontological construction: the world is safe, the agent is free.
 
----
-
-## 3. Virtualizing Semantic Reality
-
-Virtualization here does not mean compute isolation, network sandboxing, or container boundaries. Those operate at the infrastructure layer. Agent Hypervisor operates at the semantic layer — the layer of meaning, intent, and consequence.
-
 Four dimensions are virtualized:
 
-**Perception.** The agent never receives raw input. Every external signal is transformed into a Semantic Event — a structured object with source, trust level, provenance, and sanitized payload. There is no raw text. There is no unattributed data.
-
-**Intent.** The agent cannot execute actions directly. The agent can only produce Intent Proposals — structured declarations of what the agent wants to do. An Intent Proposal is not an action. It is a request to the hypervisor.
-
-**Execution.** The hypervisor evaluates Intent Proposals against the World Policy — a deterministic function with no LLM in the critical path. The policy returns: allow, deny, require approval, or sandbox. The same input always produces the same output.
-
-**Consequence.** Irreversible external effects require explicit gates. The hypervisor maintains a reversibility model: actions are classified by their consequence profile before execution is permitted.
-
-### Taint, Provenance, and Budgets as Physical Laws
-
-Within the virtualized world, the hypervisor enforces laws analogous to physical laws — not policies that can be bypassed, but invariants that cannot be violated by construction.
-
-**Taint propagation.** Data originating from untrusted sources is marked tainted at the boundary. Taint propagates through operations automatically. A tainted object cannot cross the external boundary — not because a policy denies it, but because the type system makes it impossible.
-
-**Provenance tracking.** Every object in the agent's world carries its origin. Memory writes are attributed. Tool outputs are tagged. There is no anonymous data. Provenance is part of the object's type, not an optional annotation.
-
-**Budget constraints.** The hypervisor enforces resource budgets: token consumption, action count, scope boundaries, time windows. When a budget is exhausted, execution stops. Budgets are not advisory — they are hard limits enforced at the boundary.
+- **Perception.** Raw input is transformed into Semantic Events — structured objects with source, trust level, and taint markers. The agent never sees raw text.
+- **Intent.** The agent cannot execute actions. It can only emit Intent Proposals — structured declarations that the hypervisor evaluates.
+- **Execution.** A deterministic policy layer (no LLM on the critical path) evaluates every Intent Proposal. Same input → same decision. Always.
+- **Consequence.** Irreversible effects require explicit gates. Actions are classified by consequence profile before execution.
 
 ---
 
-## 4. The Five-Layer Architecture
+## Architecture Thesis
+
+The architecture is organized in five layers:
 
 ```
-┌─────────────────────────────────┐
-│         External World          │  ← raw, untrusted, uncontrolled
-└────────────────┬────────────────┘
-                 │
-┌────────────────▼────────────────┐
-│     Layer 1: Input Boundary     │  ← all external signals enter here
-│   Semantic Event construction   │
-│   Trust classification          │
-│   Taint assignment              │
-│   Provenance initialization     │
-└────────────────┬────────────────┘
-                 │
-┌────────────────▼────────────────┐
-│   Layer 2: Universe Definition  │  ← what exists in agent's world
-│   Object schema registry        │
-│   Capability set definition     │
-│   World Physics (laws)          │
-└────────────────┬────────────────┘
-                 │
-┌────────────────▼────────────────┐
-│     Layer 3: Agent Interface    │  ← agent's perceived reality
-│   Semantic Events               │
-│   Virtualized memory            │
-│   Available intent types        │
-└────────────────┬────────────────┘
-                 │  (Intent Proposals flow upward)
-┌────────────────▼────────────────┐
-│   Layer 4: Deterministic Policy │  ← no LLM in this layer
-│   World Policy evaluation       │
-│   Reversibility classification  │
-│   Budget enforcement            │
-│   Approval gate triggers        │
-└────────────────┬────────────────┘
-                 │
-┌────────────────▼────────────────┐
-│   Layer 5: Execution Boundary   │  ← only validated intents reach here
-│   Tool invocation               │
-│   External API calls            │
-│   Audit log (immutable)         │
-└─────────────────────────────────┘
+  External World (raw, untrusted)
+        │
+  ┌─────▼──────────────────────────┐
+  │  1. Input Boundary             │  → Semantic Event construction, taint assignment
+  ├────────────────────────────────┤
+  │  2. Universe Definition        │  → what tools, objects, capabilities exist
+  ├────────────────────────────────┤
+  │  3. Agent Interface            │  → agent's perceived reality (events only)
+  ├────────────────────────────────┤
+  │  4. Deterministic Policy       │  → no LLM; same input → same output
+  ├────────────────────────────────┤
+  │  5. Execution Boundary         │  → tool invocation, audit log
+  └────────────────────────────────┘
 ```
 
-**Runtime boundary semantics:**
+The agent lives in Layer 3. It cannot see Layers 1, 4, or 5. Layers 1 and 5 are the only contact points with the outside world. Layer 4 is fully deterministic and unit-testable.
 
-- Layers 1 and 5 are the only points of contact with the external world.
-- Layer 4 is fully deterministic. No probabilistic components.
-- The agent operates exclusively within Layer 3. It has no visibility into Layers 1, 4, or 5.
-- Taint and provenance metadata flow through all layers but are never exposed to the agent.
+Seven architectural invariants define conformance:
 
----
+1. **Input** — no raw signal reaches the agent.
+2. **Provenance** — every object carries its origin.
+3. **Taint** — untrusted data is marked and tracked through all operations.
+4. **Determinism** — the policy layer has no probabilistic components.
+5. **Separation** — the agent only receives events and emits proposals.
+6. **Reversibility** — irreversible actions require explicit approval.
+7. **Budget** — resource limits are hard-enforced, not advisory.
 
-## 5. What This Is Not
-
-**Not an orchestrator.** An orchestrator manages agent workflows. Agent Hypervisor manages the reality the agent perceives. These are different abstraction levels.
-
-**Not a guardrail.** Guardrails intercept agent outputs and apply probabilistic checks. Agent Hypervisor intercepts agent inputs and constructs a different world. The intervention point is different. The mechanism is different.
-
-**Not a classifier.** Classifiers detect malicious content after it enters the system. The hypervisor prevents malicious content from existing in the agent's world.
-
-**Not an LLM-based safety layer.** Safety layers inside the model are probabilistic and bypassable. The hypervisor operates outside the model, deterministically, at the environment layer.
-
-**Not a policy engine wrapper.** Policy engines answer "can agent X do Y?" The hypervisor answers "does Y exist?" Different question. Different architecture.
-
-**Not an agent.** The hypervisor does not reason, plan, or infer. It is a deterministic function: input → decision. It has no goals.
+For the full specification of each invariant and the conformance test pattern, see [TECHNICAL_SPEC](docs/TECHNICAL_SPEC.md).
 
 ---
 
-## 6. Architectural Invariants
+## Current PoC Status
 
-A system conforms to the Agent Hypervisor model if and only if all of the following invariants hold:
+The proof-of-concept (~200 lines of Python, PyYAML only) demonstrates a subset of the architecture.
 
-**I-1. Input Invariant.**
-No external signal reaches the agent without passing through the Input Boundary layer. Raw text, raw tool output, and raw memory reads do not exist in the agent's interface.
+**Proven and unit-tested:**
 
-**I-2. Provenance Invariant.**
-Every object in the agent's world has a provenance record initialized at Layer 1 and maintained through all transformations. Provenance cannot be removed or forged by the agent.
+- ✅ Deterministic policy evaluation — no LLM on the critical path.
+- ✅ Tool whitelisting as ontological boundary — unknown tools "don't exist," not "are forbidden."
+- ✅ Forbidden pattern detection — secondary safety net for dangerous argument strings.
+- ✅ Cumulative state limits — budget enforcement across a session (e.g., max file reads).
+- ✅ Unit-testable safety properties — every physics law is a deterministic test case.
 
-**I-3. Taint Invariant.**
-Any object derived from an untrusted source carries a taint marker. Taint propagates through all operations. A tainted object cannot reach Layer 5 without explicit sanitization at Layer 4.
+**Demonstrated in standalone examples (not yet integrated into core):**
 
-**I-4. Determinism Invariant.**
-Layer 4 (Deterministic Policy) contains no probabilistic components. Given identical inputs, it always produces identical outputs. It is unit-testable without mocking.
+- 🔶 Input trust classification and tagging.
+- 🔶 Memory provenance tracking.
+- 🔶 Taint propagation and boundary enforcement.
+- 🔶 Segregated memory zones by trust level.
+- 🔶 Immutable audit logging.
 
-**I-5. Separation Invariant.**
-The agent has no direct access to Layers 1, 4, or 5. The agent can only receive Semantic Events (from Layer 3) and emit Intent Proposals (to Layer 4). All other interactions are mediated by the hypervisor.
+**Not yet implemented:**
 
-**I-6. Reversibility Invariant.**
-Actions classified as irreversible by the World Policy cannot reach Layer 5 without explicit approval. The classification is performed at Layer 4, not inferred by the agent.
-
-**I-7. Budget Invariant.**
-Resource budgets (token count, action count, scope, time) are enforced at Layer 4. Budget exhaustion results in hard termination, not soft degradation.
-
-**Conformance test pattern:**
-```
-untrusted_input → semantic_event → agent_intent → policy_eval → denied
-tainted_object  → agent_intent  → policy_eval  → export_blocked
-trusted_input   → semantic_event → agent_intent → policy_eval → allowed
-```
-
-If these three cases are unit-testable without mocking the agent, the system is conformant.
+- ⬜ Full Semantic Event construction from raw input.
+- ⬜ Provenance chain across all five layers.
+- ⬜ Reversibility model and approval gates.
+- ⬜ Integration with real agent frameworks (LangChain, OpenAI, etc.).
+- ⬜ Multi-agent universe with shared policy.
 
 ---
 
-## 7. Relationship to 12-Factor Agent
+## Honest Weaknesses
 
-Agent Hypervisor is an architectural mechanism.
-12-Factor Agent is an evaluation standard.
+Three fundamental limitations must be stated clearly.
 
-The 12 factors describe properties a conformant agentic system must exhibit. Agent Hypervisor describes one way to construct a system that exhibits those properties.
+### 1. The Semantic Gap
 
-The relationship:
+Classical hypervisors enforce isolation at a well-defined hardware boundary: memory addresses, CPU instructions, I/O ports. These boundaries are binary and verifiable.
 
-| 12-Factor Agent                      | Agent Hypervisor                      |
-| ------------------------------------ | ------------------------------------- |
-| Virtualized Reality (Factor 1)       | Layer 1 + Layer 3                     |
-| Structured Input (Factor 2)          | Semantic Event construction           |
-| Provenance as Type (Factor 3)        | Provenance Invariant (I-2)            |
-| Taint by Default (Factor 4)          | Taint Invariant (I-3)                 |
-| Intent, Not Execution (Factor 5)     | Intent Proposal layer                 |
-| Deterministic Policy (Factor 6)      | Layer 4 + Determinism Invariant (I-4) |
-| Minimal Universe (Factor 7)          | Universe Definition (Layer 2)         |
-| Segmented Memory (Factor 8)          | Provenance + trust-zone model         |
-| Reversibility by Default (Factor 9)  | Reversibility Invariant (I-6)         |
-| Bounded Autonomy (Factor 10)         | Separation Invariant (I-5)            |
-| Testable Physics (Factor 11)         | Conformance test pattern              |
-| Containment Independence (Factor 12) | Layer independence model              |
+Agent Hypervisor operates at the semantic layer, where boundaries are inherently fuzzier. "Is this tool invocation safe?" is a harder question than "is this memory address valid?" because the meaning of an action depends on context that the hypervisor may not fully capture.
 
-A system can conform to the 12-Factor standard without using Agent Hypervisor as its implementation mechanism. Agent Hypervisor is a reference architecture, not the only valid one.
+The semantic gap means: **there will always be some class of attacks that require understanding meaning to detect, and a deterministic layer cannot understand meaning.** The architecture reduces the attack surface but does not eliminate it.
+
+### 2. Intelligence at the Boundary
+
+The Input Boundary (Layer 1) must transform raw input into structured Semantic Events. This transformation requires classifying trust, assigning taint, and extracting structure from unstructured sources — a non-trivial task.
+
+Some intelligence is needed at this boundary. If that intelligence is an LLM, we re-introduce the very probabilistic component we are trying to avoid. If it is rule-based, it may be too rigid for real-world input diversity.
+
+**The boundary between deterministic safety and necessary intelligence is not yet cleanly resolved.**
+
+### 3. Bounded Measurable Claim, Not Perfect Security
+
+Agent Hypervisor does not claim to make agents perfectly secure. It claims to make a defined set of safety properties *deterministically enforceable and measurably testable*.
+
+The correct claim is: **for every physics law defined in the World Policy, conformance is binary, testable, and reproducible.** This is a strictly weaker statement than "the agent is safe," but a strictly stronger statement than "we hope the guardrail catches it."
+
+We trade the illusion of complete safety for a smaller set of properties with actual guarantees.
 
 ---
 
-*Proof-of-concept. Architectural draft. Not a product specification.*
+## Open Questions
+
+1. **Where does the semantic boundary belong?** How much intelligence can exist at Layer 1 before it becomes a probabilistic guardrail? Can we define a formal interface between "deterministic core" and "intelligent adapter"?
+
+2. **Can taint propagation scale?** In a real agent with dozens of tools and complex data flows, does taint tracking remain practical without unacceptable performance or usability costs?
+
+3. **Multi-agent composition.** When multiple agents share a universe, how do their World Policies compose? Can we define compositional safety properties?
+
+4. **Real-world integration.** How does the hypervisor integrate with existing agent frameworks without requiring complete rewrites? What is the minimum viable boundary?
+
+5. **Measurable security metrics.** Can we define a quantitative metric for "how much of the attack surface is covered by deterministic physics" vs. left to probabilistic components?
+
+6. **Reversibility in practice.** External effects (sent emails, API calls, database writes) are often irreversible. How far can the reversibility model extend in real deployments?
+
+---
+
+*Proof-of-concept. Research claim with working demonstrations, not a product specification.*
+*For full details: [WHITEPAPER](docs/WHITEPAPER.md) · [TECHNICAL SPEC](docs/TECHNICAL_SPEC.md) · [12-FACTOR AGENT](12-FACTOR-AGENT.md)*
 *https://github.com/sv-pro/agent-hypervisor*
