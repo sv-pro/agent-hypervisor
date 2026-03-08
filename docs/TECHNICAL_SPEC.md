@@ -69,14 +69,14 @@ Threat detection happens at virtualization boundary, not at agent execution.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 5: Reality Interface                                   │
+│ Layer 1: Reality Interface                                   │
 │ • External APIs, filesystems, networks                       │
 │ • Uncontrolled, untrusted, irreversible                      │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 4: Virtualization Boundary                             │
+│ Layer 2: Virtualization Boundary                             │
 │ • Input sanitization & classification                        │
 │ • Taint detection                                            │
 │ • Threat surface reduction                                   │
@@ -92,7 +92,7 @@ Threat detection happens at virtualization boundary, not at agent execution.
                          │
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 2: Intent Processing                                   │
+│ Layer 4: Intent Processing                                   │
 │ • Receive agent proposals                                    │
 │ • Apply world physics                                        │
 │ • Materialize consequences                                   │
@@ -100,7 +100,7 @@ Threat detection happens at virtualization boundary, not at agent execution.
                          │
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: Agent Interface                                     │
+│ Layer 5: Agent Interface                                     │
 │ • Perceive semantic events                                   │
 │ • Reason in virtualized world                                │
 │ • Propose intents                                            │
@@ -109,15 +109,15 @@ Threat detection happens at virtualization boundary, not at agent execution.
 
 ### Layer Responsibilities
 
-**Layer 5 (Reality)**: Anything goes. Hypervisor has no control here.
+**Layer 1 (Reality)**: Anything goes. Hypervisor has no control here.
 
-**Layer 4 (Boundary)**: The security frontier. Transform dangerous reality into safe abstractions.
+**Layer 2 (Boundary)**: The security frontier. Transform dangerous reality into safe abstractions.
 
 **Layer 3 (Universe)**: The ontology. Defines what exists and what's possible.
 
-**Layer 2 (Intent)**: The physics engine. Applies deterministic laws to proposals.
+**Layer 4 (Intent)**: The physics engine. Applies deterministic laws to proposals.
 
-**Layer 1 (Agent)**: Pure reasoning. No direct reality access.
+**Layer 5 (Agent)**: Pure reasoning. No direct reality access.
 
 ---
 

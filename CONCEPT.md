@@ -61,19 +61,19 @@ The architecture is organized in five layers:
   External World (raw, untrusted)
         │
   ┌─────▼──────────────────────────┐
-  │  1. Input Boundary             │  → Semantic Event construction, taint assignment
+  │  1. Reality Interface          │  → uncontrolled external world
   ├────────────────────────────────┤
-  │  2. Universe Definition        │  → what tools, objects, capabilities exist
+  │  2. Virtualization Boundary    │  → Semantic Event construction, taint assignment
   ├────────────────────────────────┤
-  │  3. Agent Interface            │  → agent's perceived reality (events only)
+  │  3. Universe Definition        │  → what tools, objects, capabilities exist
   ├────────────────────────────────┤
-  │  4. Deterministic Policy       │  → no LLM; same input → same output
+  │  4. Intent Processing          │  → deterministic decision layer; no LLM
   ├────────────────────────────────┤
-  │  5. Execution Boundary         │  → tool invocation, audit log
+  │  5. Agent Interface            │  → agent's perceived reality (events only)
   └────────────────────────────────┘
 ```
 
-The agent lives in Layer 3. It cannot see Layers 1, 4, or 5. Layers 1 and 5 are the only contact points with the outside world. Layer 4 is fully deterministic and unit-testable.
+The agent lives in Layer 5. It cannot see Layers 1, 2, or 4. Layer 2 is the security perimeter — the only contact point with the outside world. Layer 4 is fully deterministic and unit-testable.
 
 Seven architectural invariants define conformance:
 
@@ -133,7 +133,7 @@ The semantic gap means: **there will always be some class of attacks that requir
 
 ### 2. Intelligence at the Boundary
 
-The Input Boundary (Layer 1) must transform raw input into structured Semantic Events. This transformation requires classifying trust, assigning taint, and extracting structure from unstructured sources — a non-trivial task.
+The Virtualization Boundary (Layer 2) must transform raw input into structured Semantic Events. This transformation requires classifying trust, assigning taint, and extracting structure from unstructured sources — a non-trivial task.
 
 Some intelligence is needed at this boundary. If that intelligence is an LLM, we re-introduce the very probabilistic component we are trying to avoid. If it is rule-based, it may be too rigid for real-world input diversity.
 
@@ -151,7 +151,7 @@ We trade the illusion of complete safety for a smaller set of properties with ac
 
 ## Open Questions
 
-1. **Where does the semantic boundary belong?** How much intelligence can exist at Layer 1 before it becomes a probabilistic guardrail? Can we define a formal interface between "deterministic core" and "intelligent adapter"?
+1. **Where does the semantic boundary belong?** How much intelligence can exist at Layer 2 before it becomes a probabilistic guardrail? Can we define a formal interface between "deterministic core" and "intelligent adapter"?
 
 2. **Can taint propagation scale?** In a real agent with dozens of tools and complex data flows, does taint tracking remain practical without unacceptable performance or usability costs?
 

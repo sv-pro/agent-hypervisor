@@ -137,7 +137,7 @@ The key word is "optional". Developers must actively enable security features. N
 
 The most architecturally interesting of the current generation. Introduces policy as a first-class concept. Structured safety approach. The YAML policy language is a step toward deterministic world definition. Still probabilistic in enforcement, still complex to configure correctly. But it establishes the right mental model: safety is a policy, not a prompt.
 
-*Migration path:* NeMo policy language → World Policy (Layer 4). Conversation flow control → Intent mediation.
+*Migration path:* NeMo policy language → World Policy. Conversation flow control → Intent mediation.
 
 ---
 
@@ -179,7 +179,7 @@ No provenance tracking. Data does not carry its origin as a type. Taint does not
 
 No semantic virtualization. The agent operates on sanitized content, but that content is still raw text from the agent's perspective — not typed Semantic Events with trust levels and capability constraints.
 
-*Migration path:* SafeOutputs → Intent Proposal layer (already structurally equivalent). LLM threat detection → Deterministic physics laws (TaintContainmentLaw replaces the probabilistic gate). Content sanitization pipeline → Virtualization Boundary (Layer 4). The architecture is one abstraction shift away from the full model.
+*Migration path:* SafeOutputs → Intent Proposal layer (already structurally equivalent). LLM threat detection → Deterministic physics laws (TaintContainmentLaw replaces the probabilistic gate). Content sanitization pipeline → Virtualization Boundary (Layer 2). The architecture is one abstraction shift away from the full model.
 
 *Strategic note:* GH-AW proves the market for architectural security at scale. GitHub independently validated the SafeOutputs/permission-separation approach. The remaining gap — probabilistic threat detection at the write gate — is exactly the gap Agent Hypervisor addresses.
 

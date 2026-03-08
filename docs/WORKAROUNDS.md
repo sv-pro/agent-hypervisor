@@ -172,7 +172,7 @@ Segregated memory limits the blast radius: untrusted data can only write to its 
 memory = SegregatedMemory()
 memory.write("system_config", value="...", trust_zone="TRUSTED")   # OK
 memory.write("user_note",     value="...", trust_zone="UNTRUSTED") # OK
-memory.write("system_config", value="...", trust_zone="UNTRUSTED") # BLOCKED
+memory.write("system_config", value="...", trust_zone="UNTRUSTED") # denied
 ```
 
 ### How to implement
@@ -277,20 +277,20 @@ the virtualization boundary. Every Semantic Event and Intent decision is recorde
 Maximum protection stack (approximately 75–80% against basic, non-adaptive attacks):
 
 ```python
-# Layer 1: Classify input at ingestion
+# Step 1: Classify input at ingestion
 classified = input_classifier.classify(raw_input, source="external_email")
 
-# Layer 2: Tag with taint
+# Step 2: Tag with taint
 tainted_data = taint_tracker.tag(classified["content"], taint=classified["trust_level"])
 
-# Layer 3: Write to segregated memory with provenance
+# Step 3: Write to segregated memory with provenance
 memory.write("context", tainted_data, trust_zone=classified["trust_level"],
              provenance=classified["source"])
 
-# Layer 4: Check boundary before any external action
+# Step 4: Check boundary before any external action
 taint_tracker.check_boundary(output_data)
 
-# Layer 5: Audit log everything
+# Step 5: Audit log everything
 audit.log(action="process_email", source=classified["source"],
           trust_level=classified["trust_level"])
 ```

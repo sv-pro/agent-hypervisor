@@ -119,7 +119,8 @@ Layer 5: Agent Interface          — agent's perceived reality
 The agent never receives raw input. It receives structured events:
 
 - `source` — email, web, file, MCP, user
-- `trust_level` — trusted / untrusted / tainted
+- `trust_level` — TRUSTED / UNTRUSTED / INTERNAL
+- `taint` — propagated sensitivity classification
 - `capabilities` — what is permitted in this context
 - `sanitized_payload` — stripped of hidden instructions
 
@@ -545,6 +546,23 @@ The MVP proves three things:
 2. **Deterministic** — identical inputs produce identical outputs across runs
 3. **Testable** — security properties are verified by automated tests, not hoped for
 
+**20.6 Current Implementation Status**
+
+The proof-of-concept (~200 lines of Python, PyYAML only) demonstrates a subset of the MVP specification. The mapping between MVP elements and current implementation:
+
+| MVP Element             | Status | Implementation                                                                 |
+| ----------------------- | ------ | ------------------------------------------------------------------------------ |
+| World Manifest format   | Partial | `config/policy.yaml` — covers allowed tools, forbidden patterns, state limits |
+| Compiler                | Not yet | Manifest-to-artifact compilation is not yet automated                         |
+| Runtime engine          | Proven  | `src/hypervisor.py` — deterministic evaluation, three physics layers          |
+| Test suite              | Proven  | `tests/test_policy.py` — invariant enforcement for all three physics layers   |
+| Determinism             | Proven  | Same intent + policy + state → same decision, always                          |
+| Ontological boundary    | Proven  | Unknown tools "do not exist" rather than "are forbidden"                      |
+| Taint containment       | Demo    | Demonstrated in standalone examples, not yet integrated into core             |
+| Provenance tracking     | Demo    | Demonstrated in standalone examples, not yet integrated into core             |
+
+For the full PoC status breakdown, see [CONCEPT.md](../CONCEPT.md#current-poc-status). For the interactive demo, see the `playground/` directory.
+
 ---
 
 ## Part VIII — Honest Constraints
@@ -602,9 +620,21 @@ The honest framing:
 
 ---
 
-## Appendix A — Key Terms
+## Appendix A — Key Terms and Canonical Terminology
 
 *For all definitions and concepts concerning Agent Hypervisor, please refer to the core [Glossary](GLOSSARY.md).*
+
+**Terminological conventions used throughout this document:**
+
+| Term | Meaning | Not to be confused with |
+| ---- | ------- | ---------------------- |
+| World Manifest | Design-time artifact: formal definition of an agent's universe (YAML/DSL) | World Policy (the runtime enforcement compiled from the manifest) |
+| World Policy | Runtime artifact: deterministic physics laws compiled from the manifest | World Manifest (the source definition) |
+| Trust level | Property of a source channel: TRUSTED / UNTRUSTED / INTERNAL | Taint (a separate, propagated property of data) |
+| Taint | Propagated sensitivity label on data, spreads through transformations | Trust level (a static property of the source) |
+| Intent Proposal | Structured request from agent to hypervisor | Direct execution (agents never execute) |
+| Physics Law | Deterministic rule enforced by the hypervisor at runtime | Policy rule (implies permission; physics implies construction) |
+| Ontological Boundary | Security through non-existence of actions | Permission boundary (security through prohibition) |
 
 ## Appendix B — Key References
 

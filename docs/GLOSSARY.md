@@ -60,7 +60,7 @@ Analogous to a classical OS hypervisor, which virtualizes CPU and RAM. The Agent
 
 ## Design-Time HITL
 
-Human-in-the-loop model where human judgment is amortized through design-phase review rather than runtime intervention.
+Human-in-the-loop model where human judgment is amortized through design-phase review rather than runtime intervention. Cost is O(log n) per design iteration covering n runtime decisions, compared to O(n) for traditional runtime HITL. Three modes: design-time (scales), runtime exception (escape hatch), and iteration-time (feedback loop).
 
 ---
 
@@ -150,13 +150,19 @@ Mutable state tracked by the Hypervisor across a session — for example, how ma
 
 ## World Manifest
 
-Formal definition of what exists in an agent's universe — actions, trust model, capabilities, taint rules, escalation conditions.
+Formal design-time artifact defining what exists in an agent's universe — actions, trust model, capabilities, taint rules, escalation conditions. Written as YAML/DSL, reviewed by humans, compiled into deterministic runtime artifacts by the World Manifest Compiler. Not to be confused with World Policy (the runtime enforcement compiled from the manifest).
 
 ---
 
 ## World Manifest Compiler
 
-The compilation phase that transforms a manifest into deterministic runtime artifacts — policy tables, schemas, taint matrices.
+The compilation phase that transforms a World Manifest into deterministic runtime artifacts — policy tables, schemas, taint matrices. No LLM survives this phase. All outputs are unit-testable.
+
+---
+
+## World Policy
+
+The set of deterministic runtime rules — "physics laws" — compiled from a World Manifest and enforced by the Hypervisor on every intent proposal. The same intent + policy + world state always produces the same decision. Not to be confused with the World Manifest (the design-time source definition).
 
 ---
 
