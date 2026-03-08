@@ -90,8 +90,8 @@ The demo runs seven scenarios through the hypervisor, showing three layers of ph
 Ontological security, AI Aikido, the World Manifest compiler, design-time human-in-the-loop.
 *Start here for the full thesis.*
 
-📘 **[CONCEPT](CONCEPT.md)** — Five-layer architecture and architectural invariants.
-*For architects and security researchers.*
+📘 **[CONCEPT](CONCEPT.md)** — Short overview: problem, classical hypervisor analogy, what's proven, what's open.
+*Shortest serious explainer — start here if you have 10 minutes.*
 
 📐 **[12-FACTOR-AGENT](12-FACTOR-AGENT.md)** — Twelve principles for building secure agentic systems.
 *For builders of agentic applications.*
