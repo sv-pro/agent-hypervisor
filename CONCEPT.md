@@ -157,7 +157,7 @@ The PoC demonstrates the following architectural properties in code:
 - **Provenance tracking** — every object in the agent's world has a source record.
 - **Deterministic intent evaluation** — Intent Proposals are evaluated against a rule-based policy with no LLM in the critical path.
 
-These properties are unit-testable without mocking the agent. The conformance test pattern in Section 7 is runnable.
+These properties are unit-testable without mocking the agent. The conformance test pattern in Section 8 is runnable.
 
 ### What remains a research and engineering claim
 
