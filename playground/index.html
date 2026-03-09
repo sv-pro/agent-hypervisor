@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Hypervisor Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div>
+      <h1>Agent Hypervisor</h1>
+      <p>Type any input. Watch taint flow through the pipeline. See where attacks lose effect.</p>
+    </div>
+    <span class="badge">PLAYGROUND</span>
+  </header>
+
+  <main>
+    <!-- ── Left: controls ── -->
+    <aside class="controls">
+
+      <div>
+        <h2>Presets</h2>
+        <div class="presets" id="presets"></div>
+      </div>
+
+      <div class="field">
+        <label>Raw input</label>
+        <textarea id="input-text" placeholder="Type anything the agent might receive…"></textarea>
+      </div>
+
+      <div class="field">
+        <label>Channel (source trust)</label>
+        <div class="channel-pills">
+          <button class="pill" data-channel="user">user</button>
+          <button class="pill" data-channel="email">email</button>
+          <button class="pill" data-channel="web">web</button>
+          <button class="pill" data-channel="file">file</button>
+          <button class="pill" data-channel="mcp">mcp</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Manifest (world)</label>
+        <select id="manifest-select">
+          <option value="email-safe-assistant">email-safe-assistant</option>
+          <option value="mcp-gateway-demo">mcp-gateway-demo</option>
+          <option value="browser-agent-demo">browser-agent-demo</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Tool (intended action)</label>
+        <select id="tool-select"></select>
+      </div>
+
+      <div class="field">
+        <label>Args (JSON)</label>
+        <textarea id="args-input" placeholder='{"to": ["evil@example.com"]}'></textarea>
+      </div>
+
+      <button class="run-btn" id="run-btn">Evaluate ↵</button>
+
+    </aside>
+
+    <!-- ── Right: visualization ── -->
+    <section class="viz">
+      <div id="viz-content" style="display:flex;flex-direction:column;gap:24px;flex:1"></div>
+    </section>
+  </main>
+
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
