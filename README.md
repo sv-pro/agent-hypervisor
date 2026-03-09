@@ -98,6 +98,8 @@ Ontological security, AI Aikido, the World Manifest compiler, design-time human-
 📐 **[12-FACTOR-AGENT](12-FACTOR-AGENT.md)** — Twelve principles for building secure agentic systems.
 *For builders of agentic applications.*
 
+🗺️ **[ROADMAP](ROADMAP.md)** — Design→Compile→Deploy→Learn→Redesign cycle. Three stages: PoC, executable proof, beta product.
+
 ❓ **[FAQ](FAQ.md)** — "Is this a guardrail?" "Is this a sandbox?" Semantic gap in practice. Why HITL at design-time.
 
 🔒 **[THREAT MODEL](THREAT_MODEL.md)** — Trust channels, in-scope threats, virtualization boundary, and explicit constraints.

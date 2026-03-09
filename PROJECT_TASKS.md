@@ -178,7 +178,7 @@ Issue template:
 
 ---
 
-### [ ] ROADMAP.md — #8 (OPEN)
+### [x] ROADMAP.md — #8 (CLOSED)
 
 **Labels:** docs, architecture
 
