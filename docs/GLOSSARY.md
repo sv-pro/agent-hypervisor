@@ -40,6 +40,14 @@ A set of rules — "physics laws" — that the Hypervisor enforces on every inte
 
 ---
 
+## Capability Matrix
+
+A table defined in the World Manifest that maps trust levels to permitted action types. For each trust level (`TRUSTED`, `SEMI_TRUSTED`, `UNTRUSTED`), the capability matrix specifies which categories of actions are available (e.g., `read`, `internal_write`, `external_side_effects`). The matrix is evaluated at Layer 4 (World Policy) on every Intent Proposal.
+
+Example: a `SEMI_TRUSTED` input can produce intents for `read` and `internal_write`, but not `external_side_effects`. An `UNTRUSTED` input can produce intents for `read` only.
+
+---
+
 ## Compiled Physics
 
 The deterministic runtime artifacts produced by the World Manifest Compiler — the "laws of nature" governing the agent's world.
@@ -61,6 +69,14 @@ Analogous to a classical OS hypervisor, which virtualizes CPU and RAM. The Agent
 ## Design-Time HITL
 
 Human-in-the-loop model where human judgment is amortized through design-phase review rather than runtime intervention.
+
+---
+
+## Escalation Condition
+
+A rule defined in the World Manifest that triggers a `require_approval` decision instead of an automatic `allow` or `deny`. Escalation conditions specify when a human must explicitly approve an Intent Proposal before execution proceeds — typically for irreversible actions, high-consequence operations, or actions on sensitive targets.
+
+Escalation conditions are evaluated at Layer 4 (World Policy) as part of the deterministic policy evaluation. They are defined at design-time in the manifest; the runtime does not invent new escalation triggers.
 
 ---
 
@@ -126,7 +142,17 @@ The agent perceives only Semantic Events — never raw reality.
 
 ## Taint
 
-A label attached to data that propagates through data flows and prevents the data from crossing specified boundaries. Tainted data (e.g., from an untrusted email) cannot be sent to external destinations, even through whitelisted tools. Taint is enforced as a physics law, not a permission check.
+A label attached to data indicating it originated from an untrusted source. Tainted data cannot cross specified boundaries (e.g., the Execution Boundary at Layer 5) without an explicit sanitization gate defined in the World Manifest. Taint is enforced as a physics law, not a permission check.
+
+---
+
+## Taint Propagation
+
+The automatic forwarding of taint labels through data transformations. If a tainted object is read, concatenated, summarized, or otherwise processed, the derived object inherits the taint. Taint propagation is defined by taint rules in the World Manifest and compiled into a state machine at design-time.
+
+Example: an email body arrives tainted → the agent summarizes it → the summary is also tainted → a `send_email` intent using the summary is blocked at Layer 4 (Taint Containment Law).
+
+The purpose of propagation is to close the gap where an attacker's data moves through intermediate steps before reaching a privileged action.
 
 ---
 
@@ -142,6 +168,14 @@ The point at which raw reality inputs are transformed into Semantic Events. Inje
 
 ---
 
+## Virtualized Device
+
+An abstraction of an external resource (tool, API, file system, network endpoint) that the agent interacts with through the hypervisor rather than directly. The agent perceives a virtualized device as an available capability in its universe; the hypervisor translates approved intents into actual invocations on the underlying resource.
+
+Virtualized devices are the agent-facing representation of real tools. They enforce the same ontological boundary as the rest of the architecture: a tool not defined as a virtualized device in the World Manifest does not exist in the agent's universe.
+
+---
+
 ## World State
 
 Mutable state tracked by the Hypervisor across a session — for example, how many files have been opened. Physics laws can reference world state to enforce cumulative limits.
@@ -150,7 +184,17 @@ Mutable state tracked by the Hypervisor across a session — for example, how ma
 
 ## World Manifest
 
-Formal definition of what exists in an agent's universe — actions, trust model, capabilities, taint rules, escalation conditions.
+A YAML document authored at design-time (with human review) that formally defines what exists in an agent's universe. The manifest is the single source of truth for the World Policy. It specifies:
+
+- **Action ontology** — which tools and action types exist in this world
+- **Trust model** — which input channels exist and their default trust levels
+- **Capability matrix** — which capabilities are available at each trust level
+- **Taint rules** — how taint propagates through specific transformations
+- **Escalation conditions** — when to require human approval before execution
+- **Provenance schema** — how data origin is tracked through the system
+- **Budget limits** — session-level resource constraints (action counts, token budgets, etc.)
+
+The manifest is compiled by the World Manifest Compiler into deterministic runtime artifacts. The LLM is used at design-time to help author the manifest; no LLM is involved at runtime.
 
 ---
 
@@ -160,4 +204,4 @@ The compilation phase that transforms a manifest into deterministic runtime arti
 
 ---
 
-*See [WHITEPAPER.md](WHITEPAPER.md) for the foundational definitions and [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) for the full technical specification.*
+*See [WHITEPAPER.md](WHITEPAPER.md) for the foundational definitions and [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification.*

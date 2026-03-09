@@ -154,7 +154,7 @@ Issue template:
 
 ---
 
-### [ ] GLOSSARY.md — #7 (OPEN)
+### [x] GLOSSARY.md — #7 (CLOSED)
 
 **Labels:** docs
 
