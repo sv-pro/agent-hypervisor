@@ -100,6 +100,9 @@ Ontological security, AI Aikido, the World Manifest compiler, design-time human-
 
 🔒 **[THREAT MODEL](THREAT_MODEL.md)** — Trust channels, in-scope threats, virtualization boundary, and explicit constraints.
 
+🏗️ **[ARCHITECTURE](docs/ARCHITECTURE.md)** — Runtime path, compile path, module map, and conformance test pattern.
+*For implementers.*
+
 📖 **[GLOSSARY](docs/GLOSSARY.md)** — Core terms: Semantic Event, Intent Proposal, Taint, Provenance, World Manifest, AI Aikido.
 
 See also: [docs/](docs/) for technical spec, case studies, hello-world tutorial, and comparisons to existing solutions.
