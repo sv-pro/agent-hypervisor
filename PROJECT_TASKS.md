@@ -134,7 +134,7 @@ Issue template:
 
 ---
 
-### [ ] FAQ.md — #6 (OPEN)
+### [x] FAQ.md — #6 (CLOSED)
 
 **Labels:** docs
 
