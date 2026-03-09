@@ -57,20 +57,47 @@ Four dimensions are virtualized:
 
 The architecture is organized in five layers:
 
-```
-  External World (raw, untrusted)
-        │
-  ┌─────▼──────────────────────────┐
-  │  1. Input Boundary             │  → Semantic Event construction, taint assignment
-  ├────────────────────────────────┤
-  │  2. Universe Definition        │  → what tools, objects, capabilities exist
-  ├────────────────────────────────┤
-  │  3. Agent Interface            │  → agent's perceived reality (events only)
-  ├────────────────────────────────┤
-  │  4. Deterministic Policy       │  → no LLM; same input → same output
-  ├────────────────────────────────┤
-  │  5. Execution Boundary         │  → tool invocation, audit log
-  └────────────────────────────────┘
+```text
+┌─────────────────────────────────┐
+│         External World          │  ← raw, untrusted, uncontrolled
+└────────────────┬────────────────┘
+                 │
+┌────────────────▼────────────────┐
+│     Layer 1: Input Boundary     │  ← all external signals enter here
+│   Semantic Event construction   │
+│   Trust classification          │
+│   Taint assignment              │
+│   Provenance initialization     │
+└────────────────┬────────────────┘
+                 │
+┌────────────────▼────────────────┐
+│   Layer 2: Universe Definition  │  ← what exists in agent's world
+│   Object schema registry        │
+│   Capability set definition     │
+│   World Physics (laws)          │
+└────────────────┬────────────────┘
+                 │
+┌────────────────▼────────────────┐
+│     Layer 3: Agent Interface    │  ← agent's perceived reality
+│   Semantic Events               │
+│   Virtualized memory            │
+│   Available intent types        │
+└────────────────┬────────────────┘
+                 │  (Intent Proposals flow upward)
+┌────────────────▼────────────────┐
+│   Layer 4: World Policy         │  ← no LLM in this layer
+│   World Policy evaluation       │
+│   Reversibility classification  │
+│   Budget enforcement            │
+│   Approval gate triggers        │
+└────────────────┬────────────────┘
+                 │
+┌────────────────▼────────────────┐
+│   Layer 5: Execution Boundary   │  ← only validated intents reach here
+│   Tool invocation               │
+│   External API calls            │
+│   Audit log (immutable)         │
+└─────────────────────────────────┘
 ```
 
 The agent lives in Layer 3. It cannot see Layers 1, 4, or 5. Layers 1 and 5 are the only contact points with the outside world. Layer 4 is fully deterministic and unit-testable.
@@ -85,7 +112,7 @@ Seven architectural invariants define conformance:
 6. **Reversibility** — irreversible actions require explicit approval.
 7. **Budget** — resource limits are hard-enforced, not advisory.
 
-For the full specification of each invariant and the conformance test pattern, see [TECHNICAL_SPEC](docs/TECHNICAL_SPEC.md).
+For the full specification of each invariant and the conformance test pattern, see [CONCEPT.md §8](#8-architectural-invariants) below.
 
 ---
 
@@ -114,7 +141,8 @@ The proof-of-concept (~200 lines of Python, PyYAML only) demonstrates a subset o
 - ⬜ Full Semantic Event construction from raw input.
 - ⬜ Provenance chain across all five layers.
 - ⬜ Reversibility model and approval gates.
-- ⬜ Integration with real agent frameworks (LangChain, OpenAI, etc.).
+- ⬜ World Manifest Compiler (design-time → deterministic artifacts).
+- ⬜ MCP proxy gateway integration.
 - ⬜ Multi-agent universe with shared policy.
 
 ---
@@ -131,19 +159,19 @@ Agent Hypervisor operates at the semantic layer, where boundaries are inherently
 
 The semantic gap means: **there will always be some class of attacks that require understanding meaning to detect, and a deterministic layer cannot understand meaning.** The architecture reduces the attack surface but does not eliminate it.
 
+The hypervisor resolves this with a structural constraint: all classification happens at the boundary (Layer 1), before the agent sees anything. A stricter policy admits fewer inputs and reduces the attack surface. A permissive policy admits more. The semantic gap is real — but it is bounded, explicit, and tunable.
+
 ### 2. Intelligence at the Boundary
 
-The Input Boundary (Layer 1) must transform raw input into structured Semantic Events. This transformation requires classifying trust, assigning taint, and extracting structure from unstructured sources — a non-trivial task.
+The Input Boundary (Layer 1) must transform raw input into structured Semantic Events. This requires classifying trust, assigning taint, and extracting structure from unstructured sources. Some intelligence is needed here. If that intelligence is an LLM, we re-introduce probabilistic components. If it is purely rule-based, it may be too rigid for real-world input diversity.
 
-Some intelligence is needed at this boundary. If that intelligence is an LLM, we re-introduce the very probabilistic component we are trying to avoid. If it is rule-based, it may be too rigid for real-world input diversity.
-
-**The boundary between deterministic safety and necessary intelligence is not yet cleanly resolved.**
+The design deliberately isolates this to one layer, so that a failure at Layer 1 does not compromise the determinism of Layers 2–5. **The boundary between deterministic safety and necessary intelligence is not yet cleanly resolved.**
 
 ### 3. Bounded Measurable Claim, Not Perfect Security
 
 Agent Hypervisor does not claim to make agents perfectly secure. It claims to make a defined set of safety properties *deterministically enforceable and measurably testable*.
 
-The correct claim is: **for every physics law defined in the World Policy, conformance is binary, testable, and reproducible.** This is a strictly weaker statement than "the agent is safe," but a strictly stronger statement than "we hope the guardrail catches it."
+The correct claim: **for every physics law defined in the World Policy, conformance is binary, testable, and reproducible.** This is a strictly weaker statement than "the agent is safe," but a strictly stronger statement than "we hope the guardrail catches it."
 
 We trade the illusion of complete safety for a smaller set of properties with actual guarantees.
 
@@ -165,6 +193,69 @@ We trade the illusion of complete safety for a smaller set of properties with ac
 
 ---
 
+## 8. Architectural Invariants
+
+A system conforms to the Agent Hypervisor model if and only if all of the following invariants hold:
+
+**I-1. Input Invariant.**
+No external signal reaches the agent without passing through the Input Boundary layer. Raw text, raw tool output, and raw memory reads do not exist in the agent's interface.
+
+**I-2. Provenance Invariant.**
+Every object in the agent's world has a provenance record initialized at Layer 1 and maintained through all transformations. Provenance cannot be removed or forged by the agent.
+
+**I-3. Taint Invariant.**
+Any object derived from an untrusted source carries a taint marker. Taint propagates through all operations. A tainted object cannot reach Layer 5 without explicit sanitization at Layer 4.
+
+**I-4. Determinism Invariant.**
+Layer 4 (World Policy) contains no probabilistic components. Given identical inputs, it always produces identical outputs. It is unit-testable without mocking.
+
+**I-5. Separation Invariant.**
+The agent has no direct access to Layers 1, 4, or 5. The agent can only receive Semantic Events (from Layer 3) and emit Intent Proposals (to Layer 4). All other interactions are mediated by the hypervisor.
+
+**I-6. Reversibility Invariant.**
+Actions classified as irreversible by the World Policy cannot reach Layer 5 without explicit approval. The classification is performed at Layer 4, not inferred by the agent.
+
+**I-7. Budget Invariant.**
+Resource budgets (token count, action count, scope, time) are enforced at Layer 4. Budget exhaustion results in hard termination, not soft degradation.
+
+**Conformance test pattern:**
+
+```text
+untrusted_input → semantic_event → agent_intent → policy_eval → denied
+tainted_object  → agent_intent  → policy_eval  → export_blocked
+trusted_input   → semantic_event → agent_intent → policy_eval → allowed
+```
+
+If these three cases are unit-testable without mocking the agent, the system is conformant.
+
+---
+
+## 9. Relationship to 12-Factor Agent
+
+Agent Hypervisor is an architectural mechanism.
+12-Factor Agent is an evaluation standard.
+
+The 12 factors describe properties a conformant agentic system must exhibit. Agent Hypervisor describes one way to construct a system that exhibits those properties.
+
+| 12-Factor Agent                      | Agent Hypervisor                      |
+| ------------------------------------ | ------------------------------------- |
+| Virtualized Reality (Factor 1)       | Layer 1 + Layer 3                     |
+| Structured Input (Factor 2)          | Semantic Event construction           |
+| Provenance as Type (Factor 3)        | Provenance Invariant (I-2)            |
+| Taint by Default (Factor 4)          | Taint Invariant (I-3)                 |
+| Intent, Not Execution (Factor 5)     | Intent Proposal layer                 |
+| Deterministic Policy (Factor 6)      | Layer 4 + Determinism Invariant (I-4) |
+| Minimal Universe (Factor 7)          | Universe Definition (Layer 2)         |
+| Segmented Memory (Factor 8)          | Provenance + trust-zone model         |
+| Reversibility by Default (Factor 9)  | Reversibility Invariant (I-6)         |
+| Bounded Autonomy (Factor 10)         | Separation Invariant (I-5)            |
+| Testable Physics (Factor 11)         | Conformance test pattern              |
+| Containment Independence (Factor 12) | Layer independence model              |
+
+A system can conform to the 12-Factor standard without using Agent Hypervisor as its implementation mechanism. Agent Hypervisor is a reference architecture, not the only valid one.
+
+---
+
 *Proof-of-concept. Research claim with working demonstrations, not a product specification.*
-*For full details: [WHITEPAPER](docs/WHITEPAPER.md) · [TECHNICAL SPEC](docs/TECHNICAL_SPEC.md) · [12-FACTOR AGENT](12-FACTOR-AGENT.md)*
-*https://github.com/sv-pro/agent-hypervisor*
+*For full details: [WHITEPAPER](docs/WHITEPAPER.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) · [12-FACTOR AGENT](12-FACTOR-AGENT.md)*
+*[github.com/sv-pro/agent-hypervisor](https://github.com/sv-pro/agent-hypervisor)*

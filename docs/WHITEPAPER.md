@@ -92,7 +92,7 @@ Comparable to: Infrastructure-as-Code compilers, type systems, capability-based 
 
 ### 4. Runtime Architecture
 
-```
+```text
 [ Raw Reality ]
        ↓
 [ Agent Hypervisor — Virtualization Boundary ]
@@ -104,12 +104,12 @@ The hypervisor intercepts all perception, intercepts all actions, and defines th
 
 #### 4.1 Five-Layer Model
 
-```
-Layer 1: Reality Interface        — uncontrolled external world
-Layer 2: Virtualization Boundary  — security perimeter (the critical seam)
-Layer 3: Universe Definition      — what exists in the agent's world
-Layer 4: Intent Processing        — deterministic decision layer
-Layer 5: Agent Interface          — agent's perceived reality
+```text
+Layer 1: Input Boundary      — all external signals enter here; Semantic Event construction, trust classification, taint assignment
+Layer 2: Universe Definition — what exists in the agent's world; object schema registry, capability set, World Physics
+Layer 3: Agent Interface     — agent's perceived reality; Semantic Events, virtualized memory, available intent types
+Layer 4: World Policy        — deterministic decision layer; no LLM; policy evaluation, reversibility classification, budget enforcement
+Layer 5: Execution Boundary  — only validated intents reach here; tool invocation, external API calls, immutable audit log
 ```
 
 #### 4.2 Core Mechanisms
@@ -135,7 +135,7 @@ This is a proposal, not an execution.
 
 **Deterministic World Policy (Physics)**
 
-The hypervisor's policy engine is:
+The Deterministic World Policy is:
 
 - Deterministic — same input, same decision, always
 - Reproducible — fully auditable
@@ -169,7 +169,7 @@ Adding a tool does not change the agent, does not complicate the architecture, d
 
 If you can write a unit test:
 
-```
+```text
 untrusted input → propose external action → denied
 tainted data    → attempt export          → impossible
 trusted intent  → execution               → allowed
@@ -217,7 +217,7 @@ This honesty is not a weakness. It is the foundation for everything that follows
 
 ### 8. The Resolution
 
-The weakness identified above has an elegant resolution if we separate **when** intelligence operates from **where** it enforces.
+The paradox stated in Section 6 has an elegant resolution if we separate **when** intelligence operates from **where** it enforces.
 
 **AI Aikido** is the principle of using LLM capabilities to generate deterministic artifacts rather than to provide runtime decisions. The stochastic system builds the deterministic system. Intelligence works at **design-time**; only its products operate at **runtime**.
 
@@ -276,7 +276,7 @@ Agent Hypervisor is not primarily a runtime policy engine. It is a **design-time
 
 The compilation pipeline:
 
-```
+```text
 Human intent + LLM semantic modeling
               ↓
      World Manifest (reviewed & committed)
@@ -329,7 +329,7 @@ At runtime, the compiled artifacts execute without stochasticity:
 4. Taint propagation matrix computes contamination status
 5. Capability lookup determines available actions
 6. Agent proposes an intent (structured JSON only)
-7. Deterministic policy engine evaluates: `allow` | `deny` | `require_approval` | `simulate`
+7. Deterministic World Policy evaluates: `allow` | `deny` | `require_approval` | `simulate`
 8. Decision is logged with full provenance for audit
 
 All decisions are reproducible. Same manifest + same input = same decision, always.
@@ -382,7 +382,7 @@ Traditional human-in-the-loop spends human attention **linearly** — each decis
 
 Agent Hypervisor with AI Aikido spends human attention **logarithmically** — each design-time iteration covers exponentially more runtime cases.
 
-```
+```text
 Traditional HITL:    Cost = O(n)      per runtime decision
 Design-Time HITL:    Cost = O(log n)  per design iteration covering n decisions
 ```
@@ -393,7 +393,7 @@ This is precisely the model that made classical hypervisors viable: VMware engin
 
 ### 18. The Four-Phase Cycle
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                                                                  │
 │  ┌──────────┐   ┌──────────┐   ┌─────────┐   ┌──────────────┐  │
@@ -457,7 +457,7 @@ AI Aikido is the bridge: LLM Core generates artifacts that the L∞ Layer compil
 
 ### 20. MVP Specification
 
-The architecture must be proven executable, not metaphorical. The minimal viable proof consists of:
+The architecture must be proven executable, not metaphorical. A runnable proof-of-concept is available in [`examples/`](../examples/). The minimal viable proof consists of:
 
 **20.1 World Manifest Format**
 
@@ -527,9 +527,9 @@ A deterministic engine that:
 
 **20.4 Test Suite**
 
-Unit tests proving invariant enforcement:
+Unit tests proving invariant enforcement (see [`examples/basic/01_simple_demo.py`](../examples/basic/01_simple_demo.py) for a runnable demonstration):
 
-```
+```text
 TEST: untrusted input → external action → DENIED (TaintContainmentLaw)
 TEST: tainted data → export attempt → IMPOSSIBLE (physics)
 TEST: trusted user intent → allowed action → ALLOWED

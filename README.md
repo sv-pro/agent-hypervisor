@@ -20,7 +20,7 @@ This is the move from **permission-based security** to **ontological security**.
 
 ## How It Works
 
-```
+```text
 ┌──────────────────────────────────────────┐
 │              Raw Reality                 │
 │   (unstructured input, external APIs,    │
@@ -34,7 +34,7 @@ This is the move from **permission-based security** to **ontological security**.
     │    Raw input → structured,      │
     │    attributed, taint-tracked    │
     │                                 │
-    │  ● Deterministic Policy         │
+    │  ● World Policy                 │
     │    Physics laws — no LLM on     │
     │    the critical security path   │
     │                                 │
@@ -60,11 +60,13 @@ The hypervisor **virtualizes the agent's perception and actions** — not just i
 
 ## What Already Works
 
-| Capability | How |
-|---|---|
-| **Prompt injection containment** | External input arrives as taint-tracked Semantic Events. Injected instructions cannot cross trust boundaries — taint propagates automatically and is enforced as a physics law. |
-| **Taint containment** | Data from untrusted sources carries a taint label through every transformation. Tainted data cannot reach privileged actions without explicit sanitization. |
-| **Provenance tracking** | Every piece of data carries its origin and handling history as part of its type. Provenance is not metadata — it is an architectural invariant. |
+*Demonstrated in the proof-of-concept.*
+
+| Capability                        | How                                                                                                                                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prompt injection containment**  | External input arrives as taint-tracked Semantic Events. Injected instructions cannot cross trust boundaries — taint propagates automatically and is enforced as a physics law.              |
+| **Taint containment**             | Data from untrusted sources carries a taint label through every transformation. Tainted data cannot reach privileged actions without explicit sanitization.                                  |
+| **Provenance tracking**           | Every piece of data carries its origin and handling history as part of its type. Provenance is not metadata — it is an architectural invariant.                                              |
 | **Deterministic intent handling** | Agent proposes Intent Proposals; the hypervisor evaluates them against a deterministic policy (tool whitelist, forbidden patterns, state limits). No LLM sits on the critical decision path. |
 
 See [examples/](examples/) for runnable demonstrations.
@@ -95,6 +97,11 @@ Ontological security, AI Aikido, the World Manifest compiler, design-time human-
 
 📐 **[12-FACTOR-AGENT](12-FACTOR-AGENT.md)** — Twelve principles for building secure agentic systems.
 *For builders of agentic applications.*
+
+🔒 **[THREAT MODEL](THREAT_MODEL.md)** — Trust channels, in-scope threats, virtualization boundary, and explicit constraints.
+
+🏗️ **[ARCHITECTURE](docs/ARCHITECTURE.md)** — Runtime path, compile path, module map, and conformance test pattern.
+*For implementers.*
 
 📖 **[GLOSSARY](docs/GLOSSARY.md)** — Core terms: Semantic Event, Intent Proposal, Taint, Provenance, World Manifest, AI Aikido.
 
