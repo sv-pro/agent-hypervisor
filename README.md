@@ -98,6 +98,8 @@ Ontological security, AI Aikido, the World Manifest compiler, design-time human-
 📐 **[12-FACTOR-AGENT](12-FACTOR-AGENT.md)** — Twelve principles for building secure agentic systems.
 *For builders of agentic applications.*
 
+🔒 **[THREAT MODEL](THREAT_MODEL.md)** — Trust channels, in-scope threats, virtualization boundary, and explicit constraints.
+
 📖 **[GLOSSARY](docs/GLOSSARY.md)** — Core terms: Semantic Event, Intent Proposal, Taint, Provenance, World Manifest, AI Aikido.
 
 See also: [docs/](docs/) for technical spec, case studies, hello-world tutorial, and comparisons to existing solutions.
