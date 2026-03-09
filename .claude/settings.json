@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls *.toml *.cfg *.ini requirements*.txt)",
+      "Bash(git add Dockerfile docker-compose.yml docs/QUICKSTART.md docs/PROOF_PACKAGE.md VERIFICATION_PLAN.md PROJECT_TASKS.md)"
+    ]
+  }
+}
