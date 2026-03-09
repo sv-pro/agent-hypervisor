@@ -8,7 +8,8 @@ identical artifacts (determinism invariant).
 Artifacts emitted:
   policy_table.json        — tool whitelist, forbidden patterns, budget limits
   capability_matrix.json   — trust_level → permitted side_effect categories
-  taint_rules.json         — ordered taint propagation rules
+  taint_rules.json         — ordered taint propagation rules (human-readable)
+  taint_state_machine.json — compiled taint state machine for O(1) runtime lookup
   escalation_table.json    — trigger conditions → decisions
   provenance_schema.json   — required/optional provenance fields + learning gate
   action_schemas.json      — per-action input schemas and metadata
@@ -21,6 +22,8 @@ import json
 import hashlib
 from pathlib import Path
 from typing import Any
+
+from compiler.taint_compiler import compile_from_manifest
 
 
 def emit(manifest: dict, output_dir: Path) -> dict[str, Path]:
@@ -37,6 +40,7 @@ def emit(manifest: dict, output_dir: Path) -> dict[str, Path]:
         "policy_table.json": _build_policy_table(manifest),
         "capability_matrix.json": _build_capability_matrix(manifest),
         "taint_rules.json": _build_taint_rules(manifest),
+        "taint_state_machine.json": compile_from_manifest(manifest),
         "escalation_table.json": _build_escalation_table(manifest),
         "provenance_schema.json": _build_provenance_schema(manifest),
         "action_schemas.json": _build_action_schemas(manifest),

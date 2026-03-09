@@ -256,7 +256,7 @@ Issue template:
 
 ---
 
-### [ ] Taint rule compiler — #12 (OPEN)
+### [x] Taint rule compiler — #12 (CLOSED)
 
 **Labels:** compiler, runtime
 

@@ -108,6 +108,7 @@ EXPECTED_ARTIFACTS = {
     "policy_table.json",
     "capability_matrix.json",
     "taint_rules.json",
+    "taint_state_machine.json",
     "escalation_table.json",
     "provenance_schema.json",
     "action_schemas.json",

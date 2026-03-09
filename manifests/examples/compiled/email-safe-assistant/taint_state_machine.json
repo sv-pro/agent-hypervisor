@@ -1,0 +1,61 @@
+{
+  "conflicts": [],
+  "containment_rules": {
+    "SEMI_TRUSTED": {
+      "execution_input": "human_approval",
+      "memory_entry": "schema_validation",
+      "output": "schema_validation"
+    },
+    "UNTRUSTED": {
+      "execution_input": "BLOCK",
+      "memory_entry": "human_approval",
+      "output": "human_approval"
+    }
+  },
+  "sanitization_index": {
+    "SEMI_TRUSTED": {
+      "log_entry": false,
+      "requires": "schema_validation"
+    },
+    "UNTRUSTED": {
+      "log_entry": true,
+      "requires": "human_approval"
+    }
+  },
+  "taint_order": [
+    "UNTRUSTED",
+    "SEMI_TRUSTED",
+    "TRUSTED"
+  ],
+  "transition_table": {
+    "SEMI_TRUSTED": {
+      "store": {
+        "gate_required": "schema_validation",
+        "spreads_to": "memory_entry",
+        "taint_label": "SEMI_TRUSTED"
+      }
+    },
+    "UNTRUSTED": {
+      "concatenate": {
+        "gate_required": "human_approval",
+        "spreads_to": "output",
+        "taint_label": "UNTRUSTED"
+      },
+      "format": {
+        "gate_required": "human_approval",
+        "spreads_to": "output",
+        "taint_label": "UNTRUSTED"
+      },
+      "store": {
+        "gate_required": "human_approval",
+        "spreads_to": "memory_entry",
+        "taint_label": "UNTRUSTED"
+      },
+      "summarize": {
+        "gate_required": "human_approval",
+        "spreads_to": "output",
+        "taint_label": "UNTRUSTED"
+      }
+    }
+  }
+}
