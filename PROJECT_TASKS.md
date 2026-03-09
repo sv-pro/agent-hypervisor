@@ -477,7 +477,7 @@ Issue template:
 
 ## M4 Proof
 
-### [ ] Interactive demo v1 — #24 (OPEN)
+### [x] Interactive demo v1 — #24 (CLOSED)
 
 **Labels:** demo, high-priority
 
@@ -495,7 +495,7 @@ Issue template:
 
 ---
 
-### [ ] Demo scenario 2 — poisoned tool output — #25 (OPEN)
+### [x] Demo scenario 2 — poisoned tool output — #25 (CLOSED)
 
 **Labels:** demo
 
@@ -512,7 +512,7 @@ Issue template:
 
 ---
 
-### [ ] Benchmark scenario taxonomy — #26 (OPEN)
+### [x] Benchmark scenario taxonomy — #26 (CLOSED)
 
 **Labels:** benchmarks
 
@@ -531,7 +531,7 @@ Issue template:
 
 ---
 
-### [ ] Baseline runner — #28 (OPEN)
+### [x] Baseline runner — #28 (CLOSED)
 
 **Labels:** benchmarks
 
@@ -548,7 +548,7 @@ Issue template:
 
 ---
 
-### [ ] Metrics and report v1 — #29 (OPEN)
+### [x] Metrics and report v1 — #29 (CLOSED)
 
 **Labels:** benchmarks
 
@@ -565,7 +565,7 @@ Issue template:
 
 ---
 
-### [ ] Trace replay and walkthrough — #30 (OPEN)
+### [x] Trace replay and walkthrough — #30 (CLOSED)
 
 **Labels:** demo, benchmarks
 

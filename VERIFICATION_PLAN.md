@@ -201,22 +201,44 @@ For each task:
 ## M4 Proof
 
 ### #24 Interactive demo v1
-- [ ] TODO after implementation.
+- [ ] `python examples/basic/02_hypervisor_demo.py` runs without error.
+- [ ] Scenario A shows email injection stripped at Layer 1, denied at Layer 4 capability check.
+- [ ] Scenario B shows poisoned tool output propagating taint to downstream proposal.
+- [ ] Scenario C shows legitimate TRUSTED workflow: list_inbox→allow, send_email→require_approval.
+- [ ] Every step prints channel, trust_level, taint, sanitized_payload, verdict, and reason chain.
 
 ### #25 Demo: poisoned tool output
-- [ ] TODO after implementation.
+- [ ] Scenario B of the demo demonstrates poisoned tool output (MCP → downstream write).
+- [ ] MCP list_directory output is labeled SEMI_TRUSTED with taint=True.
+- [ ] Downstream mcp_write_file proposal inherits taint from the output event.
+- [ ] Policy engine denies the write at capability check (SEMI_TRUSTED cannot external_write).
+- [ ] Outcome is reproducible across runs (deterministic).
 
 ### #26 Benchmark scenario taxonomy
-- [ ] TODO after implementation.
+- [ ] `benchmarks/scenarios/` has subdirs: `attack/`, `safe/`, `ambiguous/`.
+- [ ] At least 4 attack scenarios: prompt injection, web injection, poisoned tool output, ontology escape.
+- [ ] At least 3 safe scenarios: list_inbox, read_email, mcp_list_directory.
+- [ ] At least 2 ambiguous scenarios: send_email (trusted, irreversible), mcp_run_code.
+- [ ] Each fixture has: `scenario_id`, `class`, `manifest`, `channel`, `intent`, `expected_outcome`.
+- [ ] `benchmarks/scenarios/README.md` documents the format and coverage targets.
+- [ ] `python benchmarks/runner.py` loads all 9 scenarios without error.
 
 ### #28 Baseline runner
-- [ ] TODO after implementation.
+- [ ] `python benchmarks/runner.py` exits 0; hypervisor 9/9 correct.
+- [ ] Runner saves JSONL trace to `benchmarks/traces/run-<timestamp>.jsonl`.
+- [ ] `--mode baseline` / `--mode hypervisor` / `--mode both` all work.
+- [ ] Baseline correctly executes attacks (demonstrates value of boundary).
 
 ### #29 Metrics and report v1
-- [ ] TODO after implementation.
+- [ ] `python benchmarks/metrics.py --output benchmarks/reports/report-v1.md` exits 0.
+- [ ] `benchmarks/reports/report-v1.md` contains all 7 metrics tables.
+- [ ] Attack containment rate = 100%, false deny rate = 0%, task completion = 100%.
+- [ ] Latency overhead reported in milliseconds.
 
 ### #30 Trace replay and walkthrough
-- [ ] TODO after implementation.
+- [ ] `python benchmarks/replay.py` exits 0; reports "PASSED — all outcomes stable".
+- [ ] `python benchmarks/replay.py --walkthrough` prints per-scenario reason chain.
+- [ ] All 9 hypervisor scenarios replay with identical outcome (determinism verified).
 
 ---
 
