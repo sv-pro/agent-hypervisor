@@ -370,7 +370,7 @@ Issue template:
 
 ## M3 Tool Boundary
 
-### [ ] MCP proxy skeleton — #18 (OPEN)
+### [x] MCP proxy skeleton — #18 (CLOSED)
 
 **Labels:** mcp, gateway
 
@@ -388,7 +388,7 @@ Issue template:
 
 ---
 
-### [ ] Tools as virtualized devices — #19 (OPEN)
+### [x] Tools as virtualized devices — #19 (CLOSED)
 
 **Labels:** mcp, architecture
 
@@ -406,7 +406,7 @@ Issue template:
 
 ---
 
-### [ ] Tool descriptor schema — #20 (OPEN)
+### [x] Tool descriptor schema — #20 (CLOSED)
 
 **Labels:** mcp, compiler
 
@@ -424,7 +424,7 @@ Issue template:
 
 ---
 
-### [ ] Capability matrix enforcement — #21 (OPEN)
+### [x] Capability matrix enforcement — #21 (CLOSED)
 
 **Labels:** runtime, mcp
 
@@ -441,7 +441,7 @@ Issue template:
 
 ---
 
-### [ ] Taint-aware egress control — #22 (OPEN)
+### [x] Taint-aware egress control — #22 (CLOSED)
 
 **Labels:** runtime, gateway
 
@@ -458,7 +458,7 @@ Issue template:
 
 ---
 
-### [ ] Provenance for tool outputs — #23 (OPEN)
+### [x] Provenance for tool outputs — #23 (CLOSED)
 
 **Labels:** runtime, mcp
 
