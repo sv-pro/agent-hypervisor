@@ -1,0 +1,35 @@
+version: "3.9"
+
+# Agent Hypervisor — local demo stack
+#
+# Services:
+#   demo       : runs the interactive demo (02_hypervisor_demo.py) and exits
+#   benchmarks : runs the full benchmark suite and emits a metrics report
+#
+# Usage:
+#   docker compose up demo          # run the three-scenario demo
+#   docker compose up benchmarks    # run benchmark + metrics report
+#   docker compose run demo bash    # interactive shell for exploration
+
+services:
+  demo:
+    build: .
+    command: python examples/basic/02_hypervisor_demo.py
+    volumes:
+      - ./manifests:/app/manifests:ro
+      - ./benchmarks:/app/benchmarks
+    environment:
+      - PYTHONPATH=/app/src
+
+  benchmarks:
+    build: .
+    command: >
+      sh -c "python benchmarks/runner.py &&
+             python benchmarks/metrics.py --output benchmarks/reports/report-v1.md &&
+             python benchmarks/replay.py &&
+             cat benchmarks/reports/report-v1.md"
+    volumes:
+      - ./manifests:/app/manifests:ro
+      - ./benchmarks:/app/benchmarks
+    environment:
+      - PYTHONPATH=/app/src

@@ -245,32 +245,52 @@ For each task:
 ## M5 Beta Product
 
 ### #31 Docker local stack
-- [ ] TODO after implementation.
+- [ ] `Dockerfile` builds successfully (`docker build .`).
+- [ ] `docker compose up demo` runs the three-scenario demo without error.
+- [ ] `docker compose up benchmarks` runs runner + metrics + replay and prints report.
+- [ ] `docker-compose.yml` has `demo` and `benchmarks` services.
+- [ ] Manifests and benchmarks directories are mounted as volumes.
 
 ### #32 Web UI
-- [ ] TODO after implementation.
+- [ ] Deferred: no web UI implemented. Docker compose + CLI tools are the primary interface.
+- [ ] `docker compose run demo bash` gives an interactive shell for exploration.
+- [ ] Note: full web UI (tabs: manifests, decisions, traces, provenance) is a future milestone.
 
-### #33 Hello-world tutorial
-- [ ] TODO after implementation.
+### #33 Quickstart and walkthrough
+- [ ] `docs/QUICKSTART.md` exists and covers all 6 steps.
+- [ ] Step 1 (install) works: `pip install -e .` + `ahc build` produces 8 artifacts.
+- [ ] Step 2 (demo) works: `python examples/basic/02_hypervisor_demo.py` shows all 3 scenarios.
+- [ ] Step 3 (change manifest + rebuild) walkthrough is accurate and demonstrates physics change.
+- [ ] Step 4 (benchmark + report) commands all exit 0.
+- [ ] Step 5 (replay) commands exit 0 with "PASSED — all outcomes stable".
+- [ ] Step 6 (Docker) commands work.
+- [ ] Total time from clone to first benchmark result ≤ 10 minutes.
 
-### #34 Positioning and comparisons
-- [ ] TODO after implementation.
+### #34 Content-to-proof packaging
+- [ ] `docs/PROOF_PACKAGE.md` exists.
+- [ ] Every claim in the argument maps to a specific test or artifact.
+- [ ] Claim → artifact table has ≥ 11 rows covering all major invariants.
+- [ ] Executable proof section has copy-pasteable commands that all work.
+- [ ] Document map table covers all major docs.
+- [ ] Non-claims section is explicit about scope limits.
 
 ---
 
-## Cross-cutting checks (run after all M2 done)
+## Cross-cutting checks (run when all milestones are complete)
 
-- [ ] `pytest tests/` — 183+ tests, all pass.
+- [ ] `pytest tests/` — 215+ tests, all pass.
 - [ ] Full pipeline smoke test:
   ```bash
-  ahc build manifests/examples/email-safe-assistant.yaml -q
-  python examples/basic/01_simple_demo.py
+  ahc build manifests/examples/email-safe-assistant.yaml -o /tmp/smoke -q
+  python examples/basic/02_hypervisor_demo.py
+  python benchmarks/runner.py
+  python benchmarks/replay.py
   ```
-- [ ] Terminology consistency: "World Policy" (not "policy engine") used consistently across all docs.
+- [ ] Terminology consistency: "World Policy" / "World Manifest" used consistently.
 - [ ] Layer numbering (L1=Input Boundary, L5=Execution Boundary) consistent in all docs and code comments.
 - [ ] No `TECHNICAL_SPEC.md` references remain (replaced by `ARCHITECTURE.md`).
   ```bash
   grep -r "TECHNICAL_SPEC" . --include="*.md" --include="*.py"
   ```
-- [ ] `src/boundary/`, `src/compiler/`, `src/policy/`, `src/provenance/` all importable.
-- [ ] `PROJECT_TASKS.md` M2 section: all #10–#17 marked `[x]`.
+- [ ] All source packages importable: `src/boundary/`, `src/compiler/`, `src/policy/`, `src/provenance/`, `src/gateway/`.
+- [ ] `PROJECT_TASKS.md`: all issues #1–#34 marked `[x]` (except #27 closed as duplicate).

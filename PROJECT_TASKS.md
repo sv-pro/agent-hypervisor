@@ -584,7 +584,7 @@ Issue template:
 
 ## M5 Beta Product
 
-### [ ] Docker local stack — #31 (OPEN)
+### [x] Docker local stack — #31 (CLOSED)
 
 **Labels:** product, gateway
 
@@ -601,7 +601,7 @@ Issue template:
 
 ---
 
-### [ ] Web UI for manifests, traces and decisions — #32 (OPEN)
+### [x] Web UI for manifests, traces and decisions — #32 (CLOSED)
 
 **Labels:** product, demo
 
@@ -618,7 +618,7 @@ Issue template:
 
 ---
 
-### [ ] Quickstart and walkthrough — #33 (OPEN)
+### [x] Quickstart and walkthrough — #33 (CLOSED)
 
 **Labels:** product, docs
 
@@ -635,7 +635,7 @@ Issue template:
 
 ---
 
-### [ ] Content-to-proof packaging — #34 (OPEN)
+### [x] Content-to-proof packaging — #34 (CLOSED)
 
 **Labels:** product, docs
 
