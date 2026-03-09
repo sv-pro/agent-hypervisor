@@ -1,0 +1,7 @@
+{
+  "author": "sv-pro",
+  "content_hash": "9fd005eb873b613e7ff5eb671cd1881966b3b54839e275c0f5fdf089ebb841cc",
+  "description": "Web browsing agent that reads pages, extracts structured data, and fills and submits forms \u2014 hardened against page-injected instructions.\n",
+  "name": "browser-agent-demo",
+  "version": "1.0.0"
+}

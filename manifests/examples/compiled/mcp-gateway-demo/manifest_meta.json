@@ -1,0 +1,7 @@
+{
+  "author": "sv-pro",
+  "content_hash": "e4f5932ec94db68676b2aacf49709556672b129509ec80b5bad2890566f61cf3",
+  "description": "Agent connected to MCP file system, web fetch, and code runner tools. Demonstrates tool virtualization and taint containment from MCP outputs.\n",
+  "name": "mcp-gateway-demo",
+  "version": "1.0.0"
+}

@@ -1,0 +1,25 @@
+{
+  "allowed_tools": [
+    "mcp_list_directory",
+    "mcp_read_file",
+    "mcp_run_code",
+    "mcp_web_fetch",
+    "mcp_write_file"
+  ],
+  "budgets": {
+    "max_actions_per_session": 100,
+    "max_external_reads": 30,
+    "max_external_writes": 10,
+    "max_session_duration_s": null,
+    "max_tokens": null,
+    "tool_limits": {
+      "mcp_run_code": 10,
+      "mcp_web_fetch": 20
+    }
+  },
+  "forbidden_patterns": [],
+  "irreversible_tools": [
+    "mcp_run_code",
+    "mcp_write_file"
+  ]
+}

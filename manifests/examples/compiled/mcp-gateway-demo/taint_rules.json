@@ -1,0 +1,54 @@
+{
+  "rules": [
+    {
+      "description": "Web-fetched content propagates taint through all derived objects.",
+      "id": "web-content-taint",
+      "propagation": [
+        {
+          "operation": "summarize",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "store",
+          "spreads_to": "memory_entry"
+        },
+        {
+          "operation": "format",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "concatenate",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "code_generation",
+          "spreads_to": "output"
+        }
+      ],
+      "sanitization_gate": {
+        "log_entry": true,
+        "requires": "human_approval"
+      },
+      "source_taint": "UNTRUSTED"
+    },
+    {
+      "description": "MCP tool outputs propagate SEMI_TRUSTED taint on store operations.",
+      "id": "mcp-output-taint",
+      "propagation": [
+        {
+          "operation": "store",
+          "spreads_to": "memory_entry"
+        },
+        {
+          "operation": "concatenate",
+          "spreads_to": "output"
+        }
+      ],
+      "sanitization_gate": {
+        "log_entry": false,
+        "requires": "schema_validation"
+      },
+      "source_taint": "SEMI_TRUSTED"
+    }
+  ]
+}

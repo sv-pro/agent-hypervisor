@@ -1,0 +1,108 @@
+{
+  "actions": {
+    "mcp_list_directory": {
+      "input_schema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "mcp_read_file": {
+      "input_schema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "mcp_run_code": {
+      "input_schema": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "python",
+              "javascript"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "code"
+        ],
+        "type": "object"
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write",
+        "internal_write"
+      ]
+    },
+    "mcp_web_fetch": {
+      "input_schema": {
+        "properties": {
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "output_trust": "UNTRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "mcp_write_file": {
+      "input_schema": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "output_trust": "TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    }
+  }
+}

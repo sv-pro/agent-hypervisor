@@ -236,7 +236,7 @@ Issue template:
 
 ---
 
-### [ ] Compiler CLI — #11 (OPEN)
+### [x] Compiler CLI — #11 (CLOSED)
 
 **Labels:** compiler, high-priority
 

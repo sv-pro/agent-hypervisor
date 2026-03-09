@@ -1,0 +1,104 @@
+{
+  "actions": {
+    "browser_fill_form": {
+      "input_schema": {
+        "properties": {
+          "field_selector": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_selector",
+          "value"
+        ],
+        "type": "object"
+      },
+      "output_trust": "TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read",
+        "internal_write"
+      ]
+    },
+    "browser_get_page_text": {
+      "input_schema": {
+        "properties": {},
+        "type": "object"
+      },
+      "output_trust": "UNTRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "browser_get_structured_data": {
+      "input_schema": {
+        "properties": {
+          "schema_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id"
+        ],
+        "type": "object"
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "browser_navigate": {
+      "input_schema": {
+        "properties": {
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "output_trust": "UNTRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "browser_submit_form": {
+      "input_schema": {
+        "properties": {
+          "form_selector": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "form_selector"
+        ],
+        "type": "object"
+      },
+      "output_trust": "TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    },
+    "browser_take_screenshot": {
+      "input_schema": {
+        "properties": {},
+        "type": "object"
+      },
+      "output_trust": "UNTRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    }
+  }
+}

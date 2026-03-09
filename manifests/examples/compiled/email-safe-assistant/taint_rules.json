@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "description": "Email body content propagates taint through all derived objects.",
+      "id": "email-body-taint",
+      "propagation": [
+        {
+          "operation": "summarize",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "store",
+          "spreads_to": "memory_entry"
+        },
+        {
+          "operation": "format",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "concatenate",
+          "spreads_to": "output"
+        }
+      ],
+      "sanitization_gate": {
+        "log_entry": true,
+        "requires": "human_approval"
+      },
+      "source_taint": "UNTRUSTED"
+    },
+    {
+      "description": "Email metadata (sender, subject) propagates taint on write operations.",
+      "id": "semi-trusted-metadata",
+      "propagation": [
+        {
+          "operation": "store",
+          "spreads_to": "memory_entry"
+        }
+      ],
+      "sanitization_gate": {
+        "log_entry": false,
+        "requires": "schema_validation"
+      },
+      "source_taint": "SEMI_TRUSTED"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "actions": {
+    "draft_reply": {
+      "input_schema": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "email_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_id",
+          "body"
+        ],
+        "type": "object"
+      },
+      "output_trust": "TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "list_inbox": {
+      "input_schema": {
+        "properties": {
+          "max_results": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "read_email": {
+      "input_schema": {
+        "properties": {
+          "email_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_id"
+        ],
+        "type": "object"
+      },
+      "output_trust": "UNTRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "external_read"
+      ]
+    },
+    "send_email": {
+      "input_schema": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "to": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "type": "object"
+      },
+      "output_trust": "TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    }
+  }
+}

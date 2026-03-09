@@ -1,0 +1,54 @@
+{
+  "rules": [
+    {
+      "description": "Raw page text propagates taint to any object derived from it. Prevents page content from influencing form values or submissions.\n",
+      "id": "page-text-taint",
+      "propagation": [
+        {
+          "operation": "summarize",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "extract",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "format",
+          "spreads_to": "output"
+        },
+        {
+          "operation": "store",
+          "spreads_to": "memory_entry"
+        },
+        {
+          "operation": "concatenate",
+          "spreads_to": "output"
+        }
+      ],
+      "sanitization_gate": {
+        "log_entry": true,
+        "requires": "human_approval"
+      },
+      "source_taint": "UNTRUSTED"
+    },
+    {
+      "description": "Schema-validated structured data is SEMI_TRUSTED but still propagates taint on store and concatenate operations.\n",
+      "id": "structured-data-taint",
+      "propagation": [
+        {
+          "operation": "store",
+          "spreads_to": "memory_entry"
+        },
+        {
+          "operation": "concatenate",
+          "spreads_to": "output"
+        }
+      ],
+      "sanitization_gate": {
+        "log_entry": false,
+        "requires": "schema_validation"
+      },
+      "source_taint": "SEMI_TRUSTED"
+    }
+  ]
+}

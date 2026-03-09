@@ -1,0 +1,25 @@
+{
+  "allowed_tools": [
+    "browser_fill_form",
+    "browser_get_page_text",
+    "browser_get_structured_data",
+    "browser_navigate",
+    "browser_submit_form",
+    "browser_take_screenshot"
+  ],
+  "budgets": {
+    "max_actions_per_session": 80,
+    "max_external_reads": 30,
+    "max_external_writes": 5,
+    "max_session_duration_s": null,
+    "max_tokens": null,
+    "tool_limits": {
+      "browser_navigate": 25,
+      "browser_submit_form": 3
+    }
+  },
+  "forbidden_patterns": [],
+  "irreversible_tools": [
+    "browser_submit_form"
+  ]
+}

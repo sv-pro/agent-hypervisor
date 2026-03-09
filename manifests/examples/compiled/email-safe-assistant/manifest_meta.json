@@ -1,0 +1,7 @@
+{
+  "author": "sv-pro",
+  "content_hash": "3ccaacc879e75784a70930bd4271d31533c830dfd2e3ede8fb99760c27e7ab54",
+  "description": "Email assistant that reads and summarises inbox, drafts replies, and sends on approval \u2014 hardened against prompt injection from email content.\n",
+  "name": "email-safe-assistant",
+  "version": "1.0.0"
+}

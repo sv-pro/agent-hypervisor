@@ -1,0 +1,36 @@
+{
+  "by_side_effect": {
+    "external_read": [
+      "SEMI_TRUSTED",
+      "TRUSTED"
+    ],
+    "external_write": [
+      "TRUSTED"
+    ],
+    "internal_read": [
+      "SEMI_TRUSTED",
+      "TRUSTED",
+      "UNTRUSTED"
+    ],
+    "internal_write": [
+      "SEMI_TRUSTED",
+      "TRUSTED"
+    ]
+  },
+  "by_trust_level": {
+    "SEMI_TRUSTED": [
+      "external_read",
+      "internal_read",
+      "internal_write"
+    ],
+    "TRUSTED": [
+      "external_read",
+      "external_write",
+      "internal_read",
+      "internal_write"
+    ],
+    "UNTRUSTED": [
+      "internal_read"
+    ]
+  }
+}

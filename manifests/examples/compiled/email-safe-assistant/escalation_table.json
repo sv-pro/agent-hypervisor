@@ -1,0 +1,27 @@
+{
+  "conditions": [
+    {
+      "decision": "require_approval",
+      "description": "Any send_email intent requires human approval before execution, regardless of trust level. Sending email is irreversible.\n",
+      "id": "send-email-always-escalate",
+      "notify": [
+        {
+          "channel": "ui_prompt"
+        }
+      ],
+      "trigger": {
+        "action_name": "send_email"
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "Any external_write intent derived from tainted data is denied. This prevents prompt injection from causing data exfiltration via email.\n",
+      "id": "block-tainted-egress",
+      "notify": [],
+      "trigger": {
+        "action_name": "send_email",
+        "taint": true
+      }
+    }
+  ]
+}

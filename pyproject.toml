@@ -8,5 +8,8 @@ dependencies = ["pyyaml"]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+ahc = "compiler.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]

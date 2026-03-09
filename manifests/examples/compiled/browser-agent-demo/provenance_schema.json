@@ -1,0 +1,17 @@
+{
+  "learning_gate": {
+    "requires_verified": true
+  },
+  "optional_fields": [
+    "event_id",
+    "session_id",
+    "transformation_chain",
+    "url_origin"
+  ],
+  "required_fields": [
+    "source_channel",
+    "taint",
+    "timestamp",
+    "trust_level"
+  ]
+}

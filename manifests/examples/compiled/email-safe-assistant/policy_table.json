@@ -1,0 +1,22 @@
+{
+  "allowed_tools": [
+    "draft_reply",
+    "list_inbox",
+    "read_email",
+    "send_email"
+  ],
+  "budgets": {
+    "max_actions_per_session": 50,
+    "max_external_reads": 20,
+    "max_external_writes": 5,
+    "max_session_duration_s": null,
+    "max_tokens": null,
+    "tool_limits": {
+      "send_email": 3
+    }
+  },
+  "forbidden_patterns": [],
+  "irreversible_tools": [
+    "send_email"
+  ]
+}

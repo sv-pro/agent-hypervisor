@@ -1,0 +1,40 @@
+{
+  "conditions": [
+    {
+      "decision": "require_approval",
+      "description": "Any mcp_run_code intent requires human approval. Code execution is irreversible and has potentially wide side effects.\n",
+      "id": "code-execution-escalate",
+      "notify": [
+        {
+          "channel": "ui_prompt"
+        }
+      ],
+      "trigger": {
+        "action_name": "mcp_run_code"
+      }
+    },
+    {
+      "decision": "require_approval",
+      "description": "File writes require human approval. Overwriting files is irreversible.\n",
+      "id": "file-write-escalate",
+      "notify": [
+        {
+          "channel": "ui_prompt"
+        }
+      ],
+      "trigger": {
+        "action_name": "mcp_write_file"
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "Deny code execution if the intent was derived from tainted (web/UNTRUSTED) content. Prevents web-injected instructions from running as code.\n",
+      "id": "deny-tainted-code",
+      "notify": [],
+      "trigger": {
+        "action_name": "mcp_run_code",
+        "taint": true
+      }
+    }
+  ]
+}

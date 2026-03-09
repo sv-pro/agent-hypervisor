@@ -1,0 +1,37 @@
+{
+  "conditions": [
+    {
+      "decision": "require_approval",
+      "description": "Any browser_submit_form intent requires explicit human approval. Form submission is irreversible and may have significant external effects.\n",
+      "id": "form-submit-always-escalate",
+      "notify": [
+        {
+          "channel": "ui_prompt"
+        }
+      ],
+      "trigger": {
+        "action_name": "browser_submit_form"
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "Deny browser_fill_form if the value argument is derived from tainted (UNTRUSTED) page content. Prevents injected page text from populating form fields with attacker-chosen values.\n",
+      "id": "deny-tainted-form-values",
+      "notify": [],
+      "trigger": {
+        "action_name": "browser_fill_form",
+        "taint": true
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "Deny browser_submit_form if any form state was populated from tainted content.\n",
+      "id": "deny-tainted-submission",
+      "notify": [],
+      "trigger": {
+        "action_name": "browser_submit_form",
+        "taint": true
+      }
+    }
+  ]
+}
