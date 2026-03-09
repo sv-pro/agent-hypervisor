@@ -1,0 +1,169 @@
+# World Manifest Schema v1
+#
+# This file is the annotated reference schema for all World Manifest sections.
+# Every field is documented inline. Copy this file and fill in your values.
+#
+# A World Manifest is compiled by `ahc build manifest.yaml` into deterministic
+# runtime artifacts. The LLM is used at design-time to help author it;
+# no LLM is involved at runtime.
+#
+# See: docs/ARCHITECTURE.md §3 (Compilation Path)
+#      docs/GLOSSARY.md (World Manifest, Capability Matrix, Taint Propagation, etc.)
+
+# ---------------------------------------------------------------------------
+# 1. METADATA
+# ---------------------------------------------------------------------------
+# Human-readable identity of this manifest. Not used at runtime.
+manifest:
+  name: string                  # Required. Identifier for this world (e.g. "email-safe-assistant")
+  version: string               # Required. Semver string (e.g. "1.0.0")
+  description: string           # Optional. One-line purpose statement.
+  author: string                # Optional. Who maintains this manifest.
+
+
+# ---------------------------------------------------------------------------
+# 2. ACTION ONTOLOGY
+# ---------------------------------------------------------------------------
+# Defines which tools exist in this world. Tools not listed here do not exist —
+# the agent cannot form intent to call them (ontological boundary, not permission).
+#
+# Each entry defines a "virtualized device": the agent-facing representation of
+# a real tool invocation.
+actions:
+  - name: string                # Required. Tool identifier (must match agent's tool call name).
+    description: string         # Required. What this tool does (for humans and LLM at design-time).
+    reversible: bool            # Required. true = action can be undone; false = irreversible.
+    side_effects:               # Required. Classifies what this action can affect.
+      - internal_read           # Reads data within the agent's world.
+      - internal_write          # Modifies state within the agent's world.
+      - external_read           # Reads from outside the agent's world (network, file system).
+      - external_write          # Writes outside the agent's world (email, API, DB write).
+    input_schema:               # Optional. JSON Schema for validating tool call arguments.
+      type: object
+      properties: {}
+      required: []
+    output_trust: string        # Optional. Trust level to assign to this tool's output.
+                                # Values: TRUSTED | SEMI_TRUSTED | UNTRUSTED
+                                # Default: SEMI_TRUSTED
+
+
+# ---------------------------------------------------------------------------
+# 3. TRUST MODEL
+# ---------------------------------------------------------------------------
+# Defines which input channels exist and their default trust levels.
+# Trust is a property of the channel, not the content.
+# Trust levels: TRUSTED | SEMI_TRUSTED | UNTRUSTED
+#
+# TRUSTED    → input treated as coming from a known-safe source (e.g. direct user).
+# SEMI_TRUSTED → input is structured but may contain attacker-influenced data.
+# UNTRUSTED  → input is fully attacker-controlled; all content is tainted at entry.
+trust_channels:
+  - name: string                # Required. Channel identifier (e.g. "user", "email", "web").
+    trust_level: string         # Required. TRUSTED | SEMI_TRUSTED | UNTRUSTED
+    taint_by_default: bool      # Required. true = all content from this channel is tainted on arrival.
+    description: string         # Optional. Notes on when this channel is used.
+
+
+# ---------------------------------------------------------------------------
+# 4. CAPABILITY MATRIX
+# ---------------------------------------------------------------------------
+# Maps trust levels to permitted action categories.
+# The agent can only propose actions that are in its capability set for the
+# current trust context. Actions outside the matrix do not exist at that trust level.
+capability_matrix:
+  TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+    - external_write          # Full capability for trusted input.
+  SEMI_TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read           # No external write for semi-trusted input.
+  UNTRUSTED:
+    - internal_read           # Read only for untrusted input.
+
+
+# ---------------------------------------------------------------------------
+# 5. TAINT RULES
+# ---------------------------------------------------------------------------
+# Defines how taint propagates through data transformations.
+# Compiled into a state machine by the taint rule compiler.
+#
+# Each rule specifies:
+#   - source: the operation or data flow that carries taint
+#   - propagates_to: what downstream objects inherit the taint
+#   - sanitization_gate: (optional) an explicit gate that can clear the taint
+#
+# The Taint Containment Law: a tainted object cannot reach Layer 5 (Execution
+# Boundary) without an explicit sanitization_gate defined here.
+taint_rules:
+  - id: string                  # Required. Unique rule identifier.
+    description: string         # Optional. Human-readable explanation.
+    source_taint: string        # Required. Which taint label triggers this rule.
+                                #   e.g. "UNTRUSTED" | "SEMI_TRUSTED" | any custom label
+    propagation:
+      - operation: string       # The transformation that spreads taint.
+                                #   e.g. "summarize" | "concatenate" | "format" | "store"
+        spreads_to: string      # What inherits the taint (e.g. "output" | "memory_entry").
+    sanitization_gate:          # Optional. How taint can be cleared on this rule.
+      requires: string          # e.g. "human_approval" | "verified_provenance" | "schema_validation"
+      log_entry: bool           # Whether clearing taint must produce an audit log entry.
+
+
+# ---------------------------------------------------------------------------
+# 6. ESCALATION CONDITIONS
+# ---------------------------------------------------------------------------
+# Defines when a `require_approval` decision is triggered at Layer 4.
+# Escalation routes the Intent Proposal to a human before execution proceeds.
+#
+# Without an escalation condition, irreversible actions are either denied
+# (if tainted/untrusted) or auto-approved (if trusted and in capability matrix).
+escalation_conditions:
+  - id: string                  # Required. Unique condition identifier.
+    description: string         # Optional.
+    trigger:                    # Required. Conditions that fire this escalation.
+      action_name: string       # Optional. Specific tool name.
+      reversible: bool          # Optional. Escalate if action.reversible == false.
+      trust_level: string       # Optional. Escalate if trust_level matches.
+      taint: bool               # Optional. Escalate if intent has taint == true.
+    decision: string            # Required. "require_approval" | "deny" | "simulate"
+    notify:                     # Optional. How to surface the approval request.
+      - channel: string         # e.g. "slack" | "email" | "ui_prompt"
+
+
+# ---------------------------------------------------------------------------
+# 7. PROVENANCE SCHEMA
+# ---------------------------------------------------------------------------
+# Defines how data origin is tracked through the system.
+# Every Semantic Event and memory write carries provenance fields.
+# Provenance cannot be removed or forged by the agent (Invariant I-2).
+provenance_schema:
+  required_fields:
+    - source_channel            # Which trust channel the data arrived through.
+    - trust_level               # Trust level at time of entry.
+    - timestamp                 # ISO 8601 timestamp of boundary crossing.
+    - taint                     # bool — whether taint was assigned at entry.
+  optional_fields:
+    - session_id                # Identifier for the agent session.
+    - event_id                  # Unique identifier for the Semantic Event.
+    - transformation_chain      # List of operations applied after boundary crossing.
+  learning_gate:                # Controls what can enter the agent's learning memory.
+    requires_verified: bool     # true = only provenance.verified == true entries enter
+                                #        the learning loop (prevents memory poisoning).
+
+
+# ---------------------------------------------------------------------------
+# 8. BUDGET LIMITS
+# ---------------------------------------------------------------------------
+# Hard session-level resource constraints enforced at Layer 4.
+# Budget exhaustion results in hard termination, not soft degradation.
+budgets:
+  max_actions_per_session: int  # Optional. Total Intent Proposals approved in one session.
+  max_external_reads: int       # Optional. External read operations per session.
+  max_external_writes: int      # Optional. External write operations per session.
+  max_tokens: int               # Optional. Token budget for the agent's LLM calls.
+  max_session_duration_s: int   # Optional. Wall-clock seconds before hard termination.
+  custom:                       # Optional. Tool-specific limits.
+    - tool: string
+      max_calls: int

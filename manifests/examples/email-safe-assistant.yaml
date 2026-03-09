@@ -1,0 +1,192 @@
+# World Manifest: email-safe-assistant
+#
+# Scenario: An AI assistant that reads and summarises emails, drafts replies,
+# and can send replies on the user's behalf — but cannot be manipulated by
+# email content to exfiltrate data or take unauthorized actions.
+#
+# Key security properties demonstrated:
+#   - Prompt injection containment: email bodies are UNTRUSTED and tainted.
+#   - Tainted egress control: tainted content cannot reach send_email.
+#   - Irreversible action escalation: send_email requires human approval.
+#   - Ontological boundary: no shell access, no file system, no web access.
+
+manifest:
+  name: email-safe-assistant
+  version: 1.0.0
+  description: >
+    Email assistant that reads and summarises inbox, drafts replies, and sends
+    on approval — hardened against prompt injection from email content.
+  author: sv-pro
+
+
+# ---------------------------------------------------------------------------
+# Actions (virtualized devices)
+# ---------------------------------------------------------------------------
+actions:
+  - name: read_email
+    description: Fetch and return the body and metadata of an email by ID.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: UNTRUSTED     # Email content is always untrusted regardless of sender.
+    input_schema:
+      type: object
+      properties:
+        email_id: { type: string }
+      required: [email_id]
+
+  - name: list_inbox
+    description: Return a list of email metadata (sender, subject, date) — no bodies.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: SEMI_TRUSTED  # Metadata is less dangerous than body content.
+    input_schema:
+      type: object
+      properties:
+        max_results: { type: integer, default: 10 }
+
+  - name: draft_reply
+    description: Compose a reply to an email and store it as a draft (not sent).
+    reversible: true
+    side_effects:
+      - internal_write
+    output_trust: TRUSTED
+    input_schema:
+      type: object
+      properties:
+        email_id: { type: string }
+        body: { type: string }
+      required: [email_id, body]
+
+  - name: send_email
+    description: Send a composed email to one or more recipients. Irreversible.
+    reversible: false            # Sent emails cannot be recalled.
+    side_effects:
+      - external_write
+    output_trust: TRUSTED
+    input_schema:
+      type: object
+      properties:
+        to: { type: array, items: { type: string } }
+        subject: { type: string }
+        body: { type: string }
+      required: [to, subject, body]
+
+
+# ---------------------------------------------------------------------------
+# Trust channels
+# ---------------------------------------------------------------------------
+trust_channels:
+  - name: user
+    trust_level: TRUSTED
+    taint_by_default: false
+    description: Direct interaction from the authenticated user.
+
+  - name: email
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: >
+      All email content — body, subject, attachments. Fully attacker-controlled.
+      Any instruction embedded in email content is data, not a command.
+
+
+# ---------------------------------------------------------------------------
+# Capability matrix
+# ---------------------------------------------------------------------------
+capability_matrix:
+  TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+    - external_write
+  SEMI_TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+  UNTRUSTED:
+    - internal_read             # Email content can only be read, never trigger writes.
+
+
+# ---------------------------------------------------------------------------
+# Taint rules
+# ---------------------------------------------------------------------------
+taint_rules:
+  - id: email-body-taint
+    description: Email body content propagates taint through all derived objects.
+    source_taint: UNTRUSTED
+    propagation:
+      - operation: summarize
+        spreads_to: output
+      - operation: store
+        spreads_to: memory_entry
+      - operation: format
+        spreads_to: output
+      - operation: concatenate
+        spreads_to: output
+    sanitization_gate:
+      requires: human_approval
+      log_entry: true
+
+  - id: semi-trusted-metadata
+    description: Email metadata (sender, subject) propagates taint on write operations.
+    source_taint: SEMI_TRUSTED
+    propagation:
+      - operation: store
+        spreads_to: memory_entry
+    sanitization_gate:
+      requires: schema_validation
+      log_entry: false
+
+
+# ---------------------------------------------------------------------------
+# Escalation conditions
+# ---------------------------------------------------------------------------
+escalation_conditions:
+  - id: send-email-always-escalate
+    description: >
+      Any send_email intent requires human approval before execution,
+      regardless of trust level. Sending email is irreversible.
+    trigger:
+      action_name: send_email
+    decision: require_approval
+    notify:
+      - channel: ui_prompt
+
+  - id: block-tainted-egress
+    description: >
+      Any external_write intent derived from tainted data is denied.
+      This prevents prompt injection from causing data exfiltration via email.
+    trigger:
+      taint: true
+      action_name: send_email
+    decision: deny
+
+
+# ---------------------------------------------------------------------------
+# Provenance schema
+# ---------------------------------------------------------------------------
+provenance_schema:
+  required_fields:
+    - source_channel
+    - trust_level
+    - timestamp
+    - taint
+  optional_fields:
+    - session_id
+    - event_id
+    - transformation_chain
+  learning_gate:
+    requires_verified: true
+
+
+# ---------------------------------------------------------------------------
+# Budget limits
+# ---------------------------------------------------------------------------
+budgets:
+  max_actions_per_session: 50
+  max_external_reads: 20
+  max_external_writes: 5        # Hard cap on outbound email sends per session.
+  custom:
+    - tool: send_email
+      max_calls: 3              # At most 3 send_email approvals per session.

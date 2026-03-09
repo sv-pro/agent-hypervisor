@@ -214,7 +214,7 @@ Issue template:
 
 ## M2 Core Engine
 
-### [ ] World Manifest schema v1 — #10 (OPEN)
+### [x] World Manifest schema v1 — #10 (CLOSED)
 
 **Labels:** compiler, architecture
 

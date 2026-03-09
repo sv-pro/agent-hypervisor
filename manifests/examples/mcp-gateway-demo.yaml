@@ -1,0 +1,227 @@
+# World Manifest: mcp-gateway-demo
+#
+# Scenario: An agent connected to MCP tools (file system, web fetch, code runner).
+# All tool outputs are treated as SEMI_TRUSTED — they may contain attacker-influenced
+# data even from legitimate servers. A malicious MCP server cannot escalate trust
+# or bypass the taint boundary.
+#
+# Key security properties demonstrated:
+#   - MCP injection containment: tool outputs are SEMI_TRUSTED by default.
+#   - Tool virtualization: only declared MCP tools exist in the agent's universe.
+#   - Code execution escalation: irreversible or dangerous actions require approval.
+#   - Taint propagation through tool output into downstream actions.
+
+manifest:
+  name: mcp-gateway-demo
+  version: 1.0.0
+  description: >
+    Agent connected to MCP file system, web fetch, and code runner tools.
+    Demonstrates tool virtualization and taint containment from MCP outputs.
+  author: sv-pro
+
+
+# ---------------------------------------------------------------------------
+# Actions (virtualized MCP devices)
+# ---------------------------------------------------------------------------
+actions:
+  - name: mcp_read_file
+    description: Read the contents of a file via the MCP file system server.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: SEMI_TRUSTED  # File content may be attacker-influenced.
+    input_schema:
+      type: object
+      properties:
+        path: { type: string }
+      required: [path]
+
+  - name: mcp_write_file
+    description: Write content to a file via the MCP file system server.
+    reversible: false
+    side_effects:
+      - external_write
+    output_trust: TRUSTED
+    input_schema:
+      type: object
+      properties:
+        path: { type: string }
+        content: { type: string }
+      required: [path, content]
+
+  - name: mcp_web_fetch
+    description: Fetch the content of a URL via the MCP web server.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: UNTRUSTED     # Web content is fully attacker-controlled.
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+      required: [url]
+
+  - name: mcp_run_code
+    description: Execute a code snippet in a sandboxed runner via MCP.
+    reversible: false           # Code execution has irreversible side effects.
+    side_effects:
+      - internal_write
+      - external_write
+    output_trust: SEMI_TRUSTED
+    input_schema:
+      type: object
+      properties:
+        language: { type: string, enum: [python, javascript] }
+        code: { type: string }
+      required: [language, code]
+
+  - name: mcp_list_directory
+    description: List files and directories at a given path.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: SEMI_TRUSTED
+    input_schema:
+      type: object
+      properties:
+        path: { type: string }
+      required: [path]
+
+
+# ---------------------------------------------------------------------------
+# Trust channels
+# ---------------------------------------------------------------------------
+trust_channels:
+  - name: user
+    trust_level: TRUSTED
+    taint_by_default: false
+    description: Direct interaction from the authenticated user.
+
+  - name: MCP
+    trust_level: SEMI_TRUSTED
+    taint_by_default: false
+    description: >
+      MCP tool outputs. Structured but may contain attacker-influenced data
+      from a compromised or malicious MCP server. Trust level is SEMI_TRUSTED
+      by default; individual tools may override via output_trust.
+
+  - name: web
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Content fetched from arbitrary URLs via mcp_web_fetch.
+
+
+# ---------------------------------------------------------------------------
+# Capability matrix
+# ---------------------------------------------------------------------------
+capability_matrix:
+  TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+    - external_write
+  SEMI_TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+  UNTRUSTED:
+    - internal_read
+
+
+# ---------------------------------------------------------------------------
+# Taint rules
+# ---------------------------------------------------------------------------
+taint_rules:
+  - id: web-content-taint
+    description: Web-fetched content propagates taint through all derived objects.
+    source_taint: UNTRUSTED
+    propagation:
+      - operation: summarize
+        spreads_to: output
+      - operation: store
+        spreads_to: memory_entry
+      - operation: format
+        spreads_to: output
+      - operation: concatenate
+        spreads_to: output
+      - operation: code_generation
+        spreads_to: output
+    sanitization_gate:
+      requires: human_approval
+      log_entry: true
+
+  - id: mcp-output-taint
+    description: MCP tool outputs propagate SEMI_TRUSTED taint on store operations.
+    source_taint: SEMI_TRUSTED
+    propagation:
+      - operation: store
+        spreads_to: memory_entry
+      - operation: concatenate
+        spreads_to: output
+    sanitization_gate:
+      requires: schema_validation
+      log_entry: false
+
+
+# ---------------------------------------------------------------------------
+# Escalation conditions
+# ---------------------------------------------------------------------------
+escalation_conditions:
+  - id: code-execution-escalate
+    description: >
+      Any mcp_run_code intent requires human approval. Code execution is
+      irreversible and has potentially wide side effects.
+    trigger:
+      action_name: mcp_run_code
+    decision: require_approval
+    notify:
+      - channel: ui_prompt
+
+  - id: file-write-escalate
+    description: >
+      File writes require human approval. Overwriting files is irreversible.
+    trigger:
+      action_name: mcp_write_file
+    decision: require_approval
+    notify:
+      - channel: ui_prompt
+
+  - id: deny-tainted-code
+    description: >
+      Deny code execution if the intent was derived from tainted (web/UNTRUSTED)
+      content. Prevents web-injected instructions from running as code.
+    trigger:
+      action_name: mcp_run_code
+      taint: true
+    decision: deny
+
+
+# ---------------------------------------------------------------------------
+# Provenance schema
+# ---------------------------------------------------------------------------
+provenance_schema:
+  required_fields:
+    - source_channel
+    - trust_level
+    - timestamp
+    - taint
+  optional_fields:
+    - session_id
+    - event_id
+    - transformation_chain
+  learning_gate:
+    requires_verified: true
+
+
+# ---------------------------------------------------------------------------
+# Budget limits
+# ---------------------------------------------------------------------------
+budgets:
+  max_actions_per_session: 100
+  max_external_reads: 30
+  max_external_writes: 10
+  custom:
+    - tool: mcp_run_code
+      max_calls: 10
+    - tool: mcp_web_fetch
+      max_calls: 20

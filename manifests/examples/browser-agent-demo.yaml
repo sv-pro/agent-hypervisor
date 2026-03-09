@@ -1,0 +1,243 @@
+# World Manifest: browser-agent-demo
+#
+# Scenario: An agent that browses the web, fills forms, and can submit them.
+# Web content is UNTRUSTED. Form submissions are irreversible external writes.
+# The agent must not be manipulated by page content to submit unauthorized forms,
+# exfiltrate session cookies, or navigate to attacker-controlled destinations.
+#
+# Key security properties demonstrated:
+#   - Web content is fully UNTRUSTED and tainted at entry.
+#   - Form submission (irreversible) always requires human approval.
+#   - Cookie and credential access is not in this world's ontology.
+#   - Navigation is limited by a URL allowlist (not implemented here, but noted).
+#   - Taint from page content cannot reach form submission payloads.
+
+manifest:
+  name: browser-agent-demo
+  version: 1.0.0
+  description: >
+    Web browsing agent that reads pages, extracts structured data, and fills
+    and submits forms — hardened against page-injected instructions.
+  author: sv-pro
+
+
+# ---------------------------------------------------------------------------
+# Actions (virtualized browser devices)
+# ---------------------------------------------------------------------------
+actions:
+  - name: browser_navigate
+    description: Navigate to a URL and return the page title and metadata.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: UNTRUSTED     # Navigation metadata from attacker-controlled pages.
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+      required: [url]
+
+  - name: browser_get_page_text
+    description: Extract visible text content from the current page.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: UNTRUSTED     # Page text is fully attacker-controlled.
+    input_schema:
+      type: object
+      properties: {}
+
+  - name: browser_get_structured_data
+    description: >
+      Extract structured data from the page using a predefined schema
+      (e.g. product name, price, availability). Returns validated JSON.
+    reversible: true
+    side_effects:
+      - external_read
+    output_trust: SEMI_TRUSTED  # Schema-validated but content still attacker-influenced.
+    input_schema:
+      type: object
+      properties:
+        schema_id: { type: string }   # References a named extraction schema.
+      required: [schema_id]
+
+  - name: browser_fill_form
+    description: >
+      Fill a form field with a given value. Does not submit — only populates
+      the input. Reversible (field can be cleared).
+    reversible: true
+    side_effects:
+      - external_read             # Reads form structure from page.
+      - internal_write            # Stores draft form state internally.
+    output_trust: TRUSTED
+    input_schema:
+      type: object
+      properties:
+        field_selector: { type: string }
+        value: { type: string }
+      required: [field_selector, value]
+
+  - name: browser_submit_form
+    description: Submit the currently filled form. Irreversible external write.
+    reversible: false
+    side_effects:
+      - external_write
+    output_trust: TRUSTED
+    input_schema:
+      type: object
+      properties:
+        form_selector: { type: string }
+      required: [form_selector]
+
+  - name: browser_take_screenshot
+    description: Capture a screenshot of the current page for review.
+    reversible: true
+    side_effects:
+      - internal_write
+    output_trust: UNTRUSTED     # Screenshot content may contain injected visuals.
+    input_schema:
+      type: object
+      properties: {}
+
+
+# ---------------------------------------------------------------------------
+# Trust channels
+# ---------------------------------------------------------------------------
+trust_channels:
+  - name: user
+    trust_level: TRUSTED
+    taint_by_default: false
+    description: Direct interaction from the authenticated user.
+
+  - name: web
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: >
+      All content fetched from web pages — text, structured data, page metadata.
+      Fully attacker-controlled. Includes content that renders as instructions.
+
+  - name: internal
+    trust_level: TRUSTED
+    taint_by_default: false
+    description: Data generated internally by the agent or previously verified.
+
+
+# ---------------------------------------------------------------------------
+# Capability matrix
+# ---------------------------------------------------------------------------
+capability_matrix:
+  TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+    - external_write
+  SEMI_TRUSTED:
+    - internal_read
+    - internal_write
+    - external_read
+  UNTRUSTED:
+    - internal_read             # Web content can only be read, never write externally.
+
+
+# ---------------------------------------------------------------------------
+# Taint rules
+# ---------------------------------------------------------------------------
+taint_rules:
+  - id: page-text-taint
+    description: >
+      Raw page text propagates taint to any object derived from it.
+      Prevents page content from influencing form values or submissions.
+    source_taint: UNTRUSTED
+    propagation:
+      - operation: summarize
+        spreads_to: output
+      - operation: extract
+        spreads_to: output
+      - operation: format
+        spreads_to: output
+      - operation: store
+        spreads_to: memory_entry
+      - operation: concatenate
+        spreads_to: output
+    sanitization_gate:
+      requires: human_approval
+      log_entry: true
+
+  - id: structured-data-taint
+    description: >
+      Schema-validated structured data is SEMI_TRUSTED but still propagates
+      taint on store and concatenate operations.
+    source_taint: SEMI_TRUSTED
+    propagation:
+      - operation: store
+        spreads_to: memory_entry
+      - operation: concatenate
+        spreads_to: output
+    sanitization_gate:
+      requires: schema_validation
+      log_entry: false
+
+
+# ---------------------------------------------------------------------------
+# Escalation conditions
+# ---------------------------------------------------------------------------
+escalation_conditions:
+  - id: form-submit-always-escalate
+    description: >
+      Any browser_submit_form intent requires explicit human approval.
+      Form submission is irreversible and may have significant external effects.
+    trigger:
+      action_name: browser_submit_form
+    decision: require_approval
+    notify:
+      - channel: ui_prompt
+
+  - id: deny-tainted-form-values
+    description: >
+      Deny browser_fill_form if the value argument is derived from tainted
+      (UNTRUSTED) page content. Prevents injected page text from populating
+      form fields with attacker-chosen values.
+    trigger:
+      action_name: browser_fill_form
+      taint: true
+    decision: deny
+
+  - id: deny-tainted-submission
+    description: >
+      Deny browser_submit_form if any form state was populated from tainted content.
+    trigger:
+      action_name: browser_submit_form
+      taint: true
+    decision: deny
+
+
+# ---------------------------------------------------------------------------
+# Provenance schema
+# ---------------------------------------------------------------------------
+provenance_schema:
+  required_fields:
+    - source_channel
+    - trust_level
+    - timestamp
+    - taint
+  optional_fields:
+    - session_id
+    - event_id
+    - transformation_chain
+    - url_origin              # URL of the page where data was collected.
+  learning_gate:
+    requires_verified: true
+
+
+# ---------------------------------------------------------------------------
+# Budget limits
+# ---------------------------------------------------------------------------
+budgets:
+  max_actions_per_session: 80
+  max_external_reads: 30
+  max_external_writes: 5        # Hard cap on form submissions per session.
+  custom:
+    - tool: browser_submit_form
+      max_calls: 3
+    - tool: browser_navigate
+      max_calls: 25
