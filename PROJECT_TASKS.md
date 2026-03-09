@@ -311,7 +311,7 @@ Issue template:
 
 ---
 
-### [ ] Deterministic policy engine — #15 (OPEN)
+### [x] Deterministic policy engine — #15 (CLOSED)
 
 **Labels:** runtime, high-priority
 
@@ -330,7 +330,7 @@ Issue template:
 
 ---
 
-### [ ] Provenance graph — #16 (OPEN)
+### [x] Provenance graph — #16 (CLOSED)
 
 **Labels:** runtime
 
@@ -347,7 +347,7 @@ Issue template:
 
 ---
 
-### [ ] Determinism and ontology tests — #17 (OPEN)
+### [x] Determinism and ontology tests — #17 (CLOSED)
 
 **Labels:** runtime, benchmarks
 
