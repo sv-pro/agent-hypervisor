@@ -293,7 +293,7 @@ Issue template:
 
 ---
 
-### [ ] Intent proposal API — #14 (OPEN)
+### [x] Intent proposal API — #14 (CLOSED)
 
 **Labels:** runtime, architecture
 
