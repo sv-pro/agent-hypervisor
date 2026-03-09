@@ -273,7 +273,7 @@ Issue template:
 
 ---
 
-### [ ] Semantic event model — #13 (OPEN)
+### [x] Semantic event model — #13 (CLOSED)
 
 **Labels:** runtime, architecture
 
