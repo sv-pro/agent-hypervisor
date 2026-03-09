@@ -195,7 +195,7 @@ Issue template:
 
 ---
 
-### [ ] POSITIONING.md — #9 (OPEN)
+### [x] POSITIONING.md — #9 (CLOSED)
 
 **Labels:** docs, product
 

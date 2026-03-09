@@ -100,6 +100,8 @@ Ontological security, AI Aikido, the World Manifest compiler, design-time human-
 
 🗺️ **[ROADMAP](ROADMAP.md)** — Design→Compile→Deploy→Learn→Redesign cycle. Three stages: PoC, executable proof, beta product.
 
+📍 **[POSITIONING](POSITIONING.md)** — Architecture thesis vs. reference implementation vs. research claims vs. mini-product. Scope is explicit.
+
 ❓ **[FAQ](FAQ.md)** — "Is this a guardrail?" "Is this a sandbox?" Semantic gap in practice. Why HITL at design-time.
 
 🔒 **[THREAT MODEL](THREAT_MODEL.md)** — Trust channels, in-scope threats, virtualization boundary, and explicit constraints.
