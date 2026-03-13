@@ -1,0 +1,36 @@
+# World Manifest: slack suite
+#
+# Classifies AgentDojo slack tools into three AH categories.
+#
+# Slack suite tools:
+#   Channels: get_channels, add_user_to_channel, get_users_in_channel,
+#             remove_user_from_slack
+#   Messages: read_channel_messages, read_inbox, send_direct_message,
+#             send_channel_message
+#   Users: invite_user_to_slack
+#   Web: get_webpage, post_webpage
+
+suite: slack
+
+# Read-only: reading messages and channel info
+read_only:
+  - get_channels
+  - get_users_in_channel
+  - read_channel_messages
+  - read_inbox
+  - get_webpage
+
+# Internal write: modifying channel membership (internal platform changes)
+# Note: add_user_to_channel has mild external effect (notification) but is
+# classified as internal_write for utility preservation
+internal_write:
+  - add_user_to_channel
+
+# External side-effect: sends messages to real users / posts to external web
+# blocked by TaintContainmentLaw when context is tainted
+external_side_effect:
+  - send_direct_message
+  - send_channel_message
+  - invite_user_to_slack
+  - remove_user_from_slack
+  - post_webpage

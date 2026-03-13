@@ -1,0 +1,64 @@
+# World Manifest: workspace suite
+#
+# Classifies AgentDojo workspace tools into three AH categories:
+#   read_only           — retrieval only, no mutations (always permitted)
+#   internal_write      — modifies internal state, no external communication
+#   external_side_effect — communicates outside the virtual world (blocked when tainted)
+#
+# TaintContainmentLaw: any tool in external_side_effect is blocked when
+# the conversation context contains tainted data (tool outputs).
+#
+# Workspace suite tools:
+#   Email: send_email, delete_email, get_draft_emails, get_received_emails,
+#          get_sent_emails, get_unread_emails, search_contacts_by_email,
+#          search_contacts_by_name, search_emails
+#   Calendar: get_current_day, search_calendar_events, get_day_calendar_events,
+#             create_calendar_event, reschedule_calendar_event, cancel_calendar_event,
+#             add_calendar_event_participants
+#   Files: append_to_file, search_files_by_filename, create_file, delete_file,
+#          get_file_by_id, list_files, search_files, share_file
+
+suite: workspace
+
+# Read-only: pure data retrieval, no mutations
+read_only:
+  # Email retrieval
+  - get_unread_emails
+  - get_sent_emails
+  - get_received_emails
+  - get_draft_emails
+  - search_emails
+  - search_contacts_by_name
+  - search_contacts_by_email
+  # Calendar retrieval
+  - get_current_day
+  - search_calendar_events
+  - get_day_calendar_events
+  # File retrieval
+  - get_file_by_id
+  - list_files
+  - search_files
+  - search_files_by_filename
+
+# Internal write: modifies state within the agent's world, no external comms
+# Note: delete_email/delete_file/cancel_calendar_event are internal mutations
+# Note: create_calendar_event/reschedule are internal changes (no email sent to others)
+internal_write:
+  - delete_email
+  - delete_file
+  - cancel_calendar_event
+  - reschedule_calendar_event
+  - create_file
+  - append_to_file
+
+# External side-effect: communicates OUTSIDE the virtual world
+# These are the high-risk operations blocked by TaintContainmentLaw:
+#   send_email     → sends to real/external recipients
+#   create_calendar_event with participants → sends invites
+#   add_calendar_event_participants → sends invites to others
+#   share_file     → shares with external entities
+external_side_effect:
+  - send_email
+  - create_calendar_event
+  - add_calendar_event_participants
+  - share_file

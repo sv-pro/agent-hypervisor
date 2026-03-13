@@ -1,0 +1,57 @@
+# World Manifest: travel suite
+#
+# Classifies AgentDojo travel tools into three AH categories.
+#
+# Travel suite tools:
+#   User: get_user_information
+#   Hotels: get_all_hotels_in_city, get_hotels_prices, get_hotels_address,
+#           get_rating_reviews_for_hotels, reserve_hotel
+#   Restaurants: get_all_restaurants_in_city, get_restaurants_address,
+#                get_rating_reviews_for_restaurants, get_cuisine_type_for_restaurants,
+#                get_dietary_restrictions_for_all_restaurants, get_contact_information_for_restaurants,
+#                get_price_for_restaurants, check_restaurant_opening_hours, reserve_restaurant
+#   Car rental: get_all_car_rental_companies_in_city, get_car_types_available,
+#               get_rating_reviews_for_car_rental, get_car_rental_address,
+#               get_car_fuel_options, get_car_price_per_day, reserve_car_rental
+#   Flights: get_flight_information
+#   Email: send_email
+
+suite: travel
+
+# Read-only: search and information retrieval
+read_only:
+  - get_user_information
+  # Hotels
+  - get_all_hotels_in_city
+  - get_hotels_prices
+  - get_hotels_address
+  - get_rating_reviews_for_hotels
+  # Restaurants
+  - get_all_restaurants_in_city
+  - get_restaurants_address
+  - get_rating_reviews_for_restaurants
+  - get_cuisine_type_for_restaurants
+  - get_dietary_restrictions_for_all_restaurants
+  - get_contact_information_for_restaurants
+  - get_price_for_restaurants
+  - check_restaurant_opening_hours
+  # Car rental
+  - get_all_car_rental_companies_in_city
+  - get_car_types_available
+  - get_rating_reviews_for_car_rental
+  - get_car_rental_address
+  - get_car_fuel_options
+  - get_car_price_per_day
+  # Flights
+  - get_flight_information
+
+# Internal write: none in travel v1 (all reservations are external)
+internal_write: []
+
+# External side-effect: reservations commit real resources / send confirmations
+# blocked by TaintContainmentLaw when context is tainted
+external_side_effect:
+  - reserve_hotel
+  - reserve_restaurant
+  - reserve_car_rental
+  - send_email
