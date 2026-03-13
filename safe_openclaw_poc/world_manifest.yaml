@@ -1,0 +1,57 @@
+# world_manifest.yaml
+# ---------------------------------------------------------
+# The World Manifest defines the "physics" of the agent's
+# universe: what tools exist, what channels are allowed,
+# what trust rules apply, and what side-effect policy is
+# enforced.
+#
+# In safe mode this file is the SOLE source of truth.
+# Tools not listed here do not exist for the agent.
+# ---------------------------------------------------------
+
+# LAW 2 — Capabilities define the universe
+allowed_tools:
+  - name: read_memory
+    side_effect: false
+    allowed_channels: [memory_channel]
+  - name: write_memory
+    side_effect: false
+    allowed_channels: [memory_channel]
+  # send_email is intentionally OMITTED from safe mode.
+  # Uncomment the block below to add it back to the universe:
+  # - name: send_email
+  #   side_effect: true
+  #   allowed_channels: [instruction_channel]
+
+# LAW 1 — Semantic channels are typed
+channel_rules:
+  instruction_channel:
+    trusted: true
+    may_propose_side_effects: true
+  data_channel:
+    trusted: false
+    may_propose_side_effects: false
+  memory_channel:
+    trusted: false          # memory is data, not instructions
+    may_propose_side_effects: false
+  tool_result_channel:
+    trusted: false
+    may_propose_side_effects: false
+
+# LAW 3 — Trust flows through provenance
+trust_rules:
+  default_trust: untrusted
+  trusted_sources:
+    - system_prompt
+    - operator_config
+  untrusted_sources:
+    - memory
+    - external_document
+    - tool_result
+
+# Side-effect policy
+side_effect_policy:
+  # An action proposal that originates from an untrusted channel
+  # and targets a side-effect tool is DENIED.
+  deny_if_tainted: true
+  deny_if_channel_not_allowed: true
