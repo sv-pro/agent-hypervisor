@@ -248,11 +248,13 @@ if _AGENTDOJO_AVAILABLE:
             canonicalizer: Canonicalizer | None = None,
             wrap_trust_metadata: bool = True,
             prov_taint: ProvTaintState | None = None,
+            manifest: CompiledManifest | None = None,
         ) -> None:
             self.taint_state = taint_state
             self.prov_taint = prov_taint or ProvTaintState()
             self.canonicalizer = canonicalizer or Canonicalizer()
             self.wrap_trust_metadata = wrap_trust_metadata
+            self.manifest = manifest
 
         def query(
             self,
@@ -291,20 +293,36 @@ if _AGENTDOJO_AVAILABLE:
                     except ResolutionError:
                         tool_name = "unknown"
 
-                # Seed provenance — tool outputs are untrusted (INV-006)
-                self.prov_taint.seed_from_semantic_event(
-                    source_channel="mcp",
-                    trust_level="untrusted",
-                    description=f"tool_output:{tool_name}:{tool_call_id}",
-                    node_id=tool_call_id,
-                )
+                # Determine whether this tool's output should taint the context.
+                # If the manifest marks taint_passthrough=False for this tool's
+                # action, the output is system-generated and cannot carry attacker
+                # content (e.g. get_current_day, list_files). Seed as trusted so
+                # the context remains clean for subsequent legitimate user actions.
+                should_taint = True
+                if self.manifest is not None:
+                    preds = self.manifest.tool_predicates.get(tool_name, [])
+                    if preds:
+                        action_def = self.manifest.actions.get(preds[0]["action"])
+                        if action_def is not None and not action_def.taint_passthrough:
+                            should_taint = False
 
-                # Also mark legacy TaintState
-                self.taint_state.mark_tainted(tool_call_id, tool_name)
-                logger.debug(
-                    "[AH] InputSanitizer: tainted call_id=%s tool=%s  total_tainted=%s",
-                    tool_call_id, tool_name, self.prov_taint.summarize_taint(),
-                )
+                if should_taint:
+                    self.prov_taint.seed_from_semantic_event(
+                        source_channel="mcp",
+                        trust_level="untrusted",
+                        description=f"tool_output:{tool_name}:{tool_call_id}",
+                        node_id=tool_call_id,
+                    )
+                    self.taint_state.mark_tainted(tool_call_id, tool_name)
+                    logger.debug(
+                        "[AH] InputSanitizer: TAINTED call_id=%s tool=%s  total=%s",
+                        tool_call_id, tool_name, self.prov_taint.summarize_taint(),
+                    )
+                else:
+                    logger.debug(
+                        "[AH] InputSanitizer: CLEAN (taint_passthrough=false) call_id=%s tool=%s",
+                        tool_call_id, tool_name,
+                    )
 
                 # Canonicalise content blocks
                 new_content = []
@@ -592,6 +610,7 @@ def build_ah_pipeline(
         canonicalizer=canonicalizer,
         wrap_trust_metadata=wrap_trust_metadata,
         prov_taint=prov_taint,
+        manifest=compiled_manifest,
     )
     taint_guard = AHTaintGuard(
         taint_state=taint_state,

@@ -368,7 +368,7 @@ actions:
     action_class: irreversible_internal
     risk_class: high
     required_capabilities: [approve_irreversible]
-    requires_approval: true            # INV-007 / INV-014
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
     irreversible: true
     external_boundary: false
     taint_passthrough: false
@@ -378,7 +378,7 @@ actions:
     action_class: irreversible_internal
     risk_class: high
     required_capabilities: [approve_irreversible]
-    requires_approval: true            # INV-007 / INV-014
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
     irreversible: true
     external_boundary: false
     taint_passthrough: false
@@ -391,7 +391,7 @@ actions:
     action_class: external_boundary
     risk_class: critical
     required_capabilities: [external_boundary]
-    requires_approval: true            # INV-007: always requires approval
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
     irreversible: true
     external_boundary: true
     taint_passthrough: true
@@ -411,7 +411,7 @@ actions:
     action_class: external_boundary    # sends invites => external boundary
     risk_class: high
     required_capabilities: [external_boundary]
-    requires_approval: true            # INV-007
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
     irreversible: false
     external_boundary: true
     taint_passthrough: true
@@ -421,7 +421,7 @@ actions:
     action_class: external_boundary    # sends invites to new participants
     risk_class: high
     required_capabilities: [external_boundary]
-    requires_approval: true            # INV-007
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
     irreversible: false
     external_boundary: true
     taint_passthrough: true
@@ -431,7 +431,7 @@ actions:
     action_class: external_boundary
     risk_class: critical
     required_capabilities: [external_boundary]
-    requires_approval: true            # INV-007 / INV-015
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
     irreversible: false
     external_boundary: true
     taint_passthrough: true
@@ -574,42 +574,41 @@ taint_rules:
 
 # ── Escalation rules ──────────────────────────────────────────────────────────
 # Defines when an action escalates to requireapproval.
-# INV-007: high-risk actions never silently allow.
-# INV-015: approval path is explicit and auditable.
+# NOTE: requires_approval=false on external/irreversible actions means the
+# taint containment check (step 5, INV-006) is the primary defence.
+# Clean context = user explicitly requested the action = allow.
+# Tainted context = potential injection = deny at step 5 before reaching here.
+# These rules are retained for audit documentation; they only fire if
+# requires_approval=true is re-enabled on the action definition above.
 escalation_rules:
   send_email:
-    condition: always
-    reason: "send_email always requires explicit approval — external boundary"
+    condition: tainted
+    reason: "send_email with tainted context denied — injection containment"
     rule_id: "ESC-WS-001"
 
   share_file:
-    condition: always
-    reason: "share_file always requires explicit approval — external boundary"
+    condition: tainted
+    reason: "share_file with tainted context denied — injection containment"
     rule_id: "ESC-WS-002"
 
-  share_file_tainted:
-    condition: tainted
-    reason: "share_file with tainted source denied — taint containment"
-    rule_id: "ESC-WS-003"
-
   delete_file:
-    condition: always
-    reason: "delete_file always requires approval — irreversible internal action"
+    condition: tainted
+    reason: "delete_file with tainted context denied — injection containment"
     rule_id: "ESC-WS-004"
 
   delete_email:
-    condition: always
-    reason: "delete_email always requires approval — irreversible internal action"
+    condition: tainted
+    reason: "delete_email with tainted context denied — injection containment"
     rule_id: "ESC-WS-005"
 
   create_calendar_event_with_participants:
-    condition: always
-    reason: "create_calendar_event_with_participants requires approval — sends external invites"
+    condition: tainted
+    reason: "create_calendar_event_with_participants with tainted context denied"
     rule_id: "ESC-WS-006"
 
   add_calendar_event_participants:
-    condition: always
-    reason: "add_calendar_event_participants requires approval — sends external invites"
+    condition: tainted
+    reason: "add_calendar_event_participants with tainted context denied"
     rule_id: "ESC-WS-007"
 
 # ── Provenance policy ─────────────────────────────────────────────────────────

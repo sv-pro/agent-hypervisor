@@ -309,16 +309,21 @@ def check_taint_containment(
     action_def: ActionDefinition,
     taint_summary: TaintSummary | None,
 ) -> tuple[TraceStep, tuple | None]:
-    """Step 5 — INV-006: tainted data must not cross external boundary.
+    """Step 5 — INV-006: tainted data must not cross external boundary or trigger
+    irreversible internal actions.
+
+    Blocks when:
+      - external_boundary=True AND context is tainted (prevents exfiltration)
+      - irreversible=True AND context is tainted (prevents injection-driven destruction)
 
     Returns (step, early_result_or_None).
     """
-    if not action_def.external_boundary:
+    if not action_def.external_boundary and not action_def.irreversible:
         step = TraceStep(
             step_name="check_taint_containment",
             verdict="pass",
-            reason_code="NOT_EXTERNAL_BOUNDARY",
-            detail=f"Action '{action_def.name}' does not cross external boundary",
+            reason_code="NOT_SENSITIVE_ACTION",
+            detail=f"Action '{action_def.name}' is neither external boundary nor irreversible",
             invariant=None,
         )
         return step, None
@@ -333,19 +338,29 @@ def check_taint_containment(
         )
         return step, None
 
+    if action_def.external_boundary:
+        detail = (
+            f"Action '{action_def.name}' crosses external boundary"
+            f" with tainted context (channels: {sorted(taint_summary.tainted_channels)})"
+        )
+        human = f"Tainted data must not cross external boundary via '{action_def.name}'"
+    else:
+        detail = (
+            f"Action '{action_def.name}' is irreversible"
+            f" with tainted context (channels: {sorted(taint_summary.tainted_channels)})"
+        )
+        human = f"Irreversible action '{action_def.name}' blocked: tainted context may indicate injection"
+
     step = TraceStep(
         step_name="check_taint_containment",
         verdict=DENY,
         reason_code="TAINT_CONTAINMENT_VIOLATION",
-        detail=(
-            f"Action '{action_def.name}' crosses external boundary"
-            f" with tainted context (channels: {sorted(taint_summary.tainted_channels)})"
-        ),
+        detail=detail,
         invariant="INV-006",
     )
     return step, (
         DENY, "TAINT_CONTAINMENT_VIOLATION",
-        f"Tainted data must not cross external boundary via '{action_def.name}'",
+        human,
         "INV-006", None,
     )
 
