@@ -301,6 +301,10 @@ if _AGENTDOJO_AVAILABLE:
 
                 # Also mark legacy TaintState
                 self.taint_state.mark_tainted(tool_call_id, tool_name)
+                logger.debug(
+                    "[AH] InputSanitizer: tainted call_id=%s tool=%s  total_tainted=%s",
+                    tool_call_id, tool_name, self.prov_taint.summarize_taint(),
+                )
 
                 # Canonicalise content blocks
                 new_content = []
@@ -380,44 +384,40 @@ if _AGENTDOJO_AVAILABLE:
 
             for tc in tool_calls:
                 verdict, reason = self._evaluate_one(tc)
-
+                tool_name = _safe_get_tool_name(tc)
                 if verdict == "allow":
                     allowed_calls.append(tc)
-                    logger.debug("AHTaintGuard: ALLOW %s", _safe_get_tool_name(tc))
+                    logger.debug("[AH] ALLOW  %-30s", tool_name)
                 else:
                     denied_calls.append((tc, reason))
+                    taint_summary = (
+                        self.prov_taint.summarize_taint() if self.prov_taint else "n/a"
+                    )
                     logger.info(
-                        "AHTaintGuard: %s %s — %s",
-                        verdict.upper(), _safe_get_tool_name(tc), reason,
+                        "[AH] %-15s %-30s reason=%s  taint=%s",
+                        verdict.upper(), tool_name, reason, taint_summary,
                     )
 
             if not denied_calls:
                 return query, runtime, env, messages, extra_args
 
-            messages = list(messages)
-            last = deepcopy(last)
-
-            if allowed_calls:
-                last["tool_calls"] = allowed_calls
-            else:
-                last["tool_calls"] = None
-
-            messages[-1] = last
-
-            # Inject synthetic error tool result messages for denied calls
-            from agentdojo.types import ChatToolResultMessage
+            # We do NOT remove denied calls from last["tool_calls"] because OpenAI API 
+            # requires that if we append a tool message, the prior assistant message 
+            # must contain the exact tool_calls.
+            # Instead, we mutate the function name in place to an invalid one so 
+            # ToolsExecutor rejects it without running, and we save the original name.
+            extra_args = dict(extra_args)
             for tc, reason in denied_calls:
                 call_id = _get_call_id(tc)
-                error_msg = ChatToolResultMessage(
-                    role="tool",
-                    content=[text_content_block_from_string(
-                        f"[AH SECURITY] Action blocked by Agent Hypervisor: {reason}"
-                    )],
-                    tool_call_id=call_id,
-                    tool_call=tc,
-                    error=reason,
-                )
-                messages.append(error_msg)
+                if hasattr(tc, "function"):
+                    orig_func = str(tc.function)
+                    tc.function = "ah_security_blocked"
+                elif isinstance(tc, dict):
+                    orig_func = str(tc.get("function", "unknown"))
+                    tc["function"] = "ah_security_blocked"
+                else:
+                    orig_func = "unknown"
+                extra_args[f"ah_blocked_{call_id}"] = (orig_func, reason)
 
             return query, runtime, env, messages, extra_args
 
@@ -427,27 +427,92 @@ if _AGENTDOJO_AVAILABLE:
             Uses the episode-based full pipeline if episode is set,
             otherwise falls back to legacy IntentValidator.
             """
+            tool_name = _safe_get_tool_name(tc)
             if self.episode is not None and self.episode.manifest is not None:
+                logger.debug("[AH] _evaluate_one tool=%s path=episode_manifest", tool_name)
                 result = evaluate_tool_call(
                     tc=tc,
                     episode=self.episode,
                     prov_taint=self.prov_taint,
                     source_channel="user",
                 )
+                logger.debug(
+                    "[AH] _evaluate_one tool=%s verdict=%s action=%s risk=%s rule=%s",
+                    tool_name, result.verdict, result.action_name,
+                    result.risk_class, result.matched_rule_id,
+                )
                 if result.verdict in (DENY, REQUIRE_APPROVAL):
                     return result.verdict, result.human_reason
                 return "allow", result.human_reason
             else:
                 # Legacy path
+                logger.debug("[AH] _evaluate_one tool=%s path=legacy_intent_validator", tool_name)
                 try:
                     tool_name = extract_tool_name(tc)
                 except ResolutionError as exc:
                     return "deny", str(exc)
 
                 result = self.intent_validator.validate(tool_name, self.taint_state)
+                logger.debug(
+                    "[AH] _evaluate_one tool=%s verdict=%s reason=%s",
+                    tool_name, result.verdict, result.reason,
+                )
                 if result.verdict == "allow":
                     return "allow", result.reason
                 return result.verdict, result.reason
+
+    class AHBlockedCallInjector(BasePipelineElement):
+        """Appends tool error messages for calls blocked by AHTaintGuard.
+        Must run AFTER ToolsExecutor so it doesn't break executor's assistant format check.
+        """
+        name = "ah_error_injector"
+
+        def query(
+            self,
+            query: str,
+            runtime: FunctionsRuntime,
+            env: Env = EmptyEnv(),
+            messages: Sequence[ChatMessage] = [],
+            extra_args: dict = {},
+        ) -> tuple[str, FunctionsRuntime, Env, Sequence[ChatMessage], dict]:
+            
+            # Find trailing tool messages and restore their original function names and 
+            # rewrite the error message if they were blocked by AH.
+            from agentdojo.types import text_content_block_from_string
+            
+            for i in range(len(messages) - 1, -1, -1):
+                msg = messages[i]
+                if msg["role"] == "assistant":
+                    break
+                if msg["role"] == "tool":
+                    tc = msg.get("tool_call")
+                    call_id = _get_call_id(tc)
+                    key = f"ah_blocked_{call_id}"
+                    if key in extra_args:
+                        orig_func, reason = extra_args[key]
+
+                        # NOTE: Do NOT restore tc.function here.
+                        # functions_stack_trace_from_messages reads tool_call objects
+                        # from assistant messages to build the trace used for security
+                        # scoring. If we restore the original name (e.g. send_email),
+                        # the scorer will think the call succeeded even though AH blocked
+                        # it. Keeping the name as ah_security_blocked ensures blocked
+                        # calls are invisible to the security checker.
+
+                        # Override the execution engine's generic "Invalid tool" error
+                        msg["error"] = reason
+                        error_msg = (
+                            f"[AH SECURITY] Action '{orig_func}' blocked: {reason}\n"
+                            f"IMPORTANT: Do NOT retry this action. It will always be blocked. "
+                            f"Find an alternative approach or report to the user."
+                        )
+                        msg["content"] = [text_content_block_from_string(error_msg)]
+                        logger.info(
+                            "[AH] BlockedCallInjector: injected error for tool=%s  msg=%s",
+                            orig_func, error_msg[:120],
+                        )
+
+            return query, runtime, env, messages, extra_args
 
 else:
     # Stubs when agentdojo is not installed
@@ -462,6 +527,12 @@ else:
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise ImportError("agentdojo is required for AHTaintGuard")
+
+    class AHBlockedCallInjector:  # type: ignore[no-redef]
+        name = "ah_error_injector"
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise ImportError("agentdojo is required for AHBlockedCallInjector")
 
 
 def build_ah_pipeline(
@@ -529,11 +600,14 @@ def build_ah_pipeline(
         prov_taint=prov_taint,
     )
 
+    blocked_injector = AHBlockedCallInjector()
+
     tools_loop = ToolsExecutionLoop([
+        taint_guard,
         ToolsExecutor(tool_result_to_str),
+        blocked_injector,
         input_sanitizer,
         llm,
-        taint_guard,
     ])
 
     pipeline = AgentPipeline([

@@ -10,22 +10,20 @@ Runs the full benchmark matrix comparing:
 across suites and attacks, producing results for comparison.
 
 Usage:
-    # Quick test (single suite, single task pair)
-    python run_benchmark.py --model claude-3-5-sonnet-20241022 \\
-        --suite workspace --user-task user_task_0 \\
-        --injection-task injection_task_0 --attack important_instructions
+    # Small scope (5 user tasks x 3 injection tasks, ~1-2 min)
+    python run_benchmark.py --model gpt-4o-mini-2024-07-18 \\
+        --scope small --all-defenses --attack important_instructions
 
-    # Full AH defense benchmark
-    python run_benchmark.py --model claude-3-5-sonnet-20241022 \\
-        --suite workspace --suite travel \\
-        --defense agent_hypervisor --attack important_instructions
+    # Medium scope (15 user tasks x 7 injection tasks, ~10-15 min)
+    python run_benchmark.py --model gpt-4o-mini-2024-07-18 \\
+        --scope medium --all-defenses --attack important_instructions
 
-    # All defenses comparison
-    python run_benchmark.py --model claude-3-5-sonnet-20241022 \\
-        --suite workspace --all-defenses --attack important_instructions
+    # Full scope (40 user tasks x 14 injection tasks, ~1-2 hr)
+    python run_benchmark.py --model gpt-4o-mini-2024-07-18 \\
+        --scope full --all-defenses --attack important_instructions
 
     # No-attack utility test
-    python run_benchmark.py --model claude-3-5-sonnet-20241022 \\
+    python run_benchmark.py --model gpt-4o-mini-2024-07-18 \\
         --suite workspace --no-attack
 
 Environment:
@@ -72,6 +70,35 @@ from ah_defense.pipeline import AHInputSanitizer, AHTaintGuard
 # Defense names
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Scope presets
+# ---------------------------------------------------------------------------
+
+SCOPES: dict[str, dict] = {
+    "small": {
+        "user_tasks": ["user_task_0", "user_task_1", "user_task_2", "user_task_3", "user_task_4"],
+        "injection_tasks": ["injection_task_0", "injection_task_1", "injection_task_2"],
+        "description": "5 user tasks x 3 injection tasks (~15 task pairs)",
+    },
+    "medium": {
+        "user_tasks": [
+            "user_task_0", "user_task_1", "user_task_2", "user_task_3", "user_task_4",
+            "user_task_5", "user_task_6", "user_task_7", "user_task_8", "user_task_9",
+            "user_task_10", "user_task_11", "user_task_12", "user_task_13", "user_task_14",
+        ],
+        "injection_tasks": [
+            "injection_task_0", "injection_task_1", "injection_task_2", "injection_task_3",
+            "injection_task_4", "injection_task_5", "injection_task_6",
+        ],
+        "description": "15 user tasks x 7 injection tasks (~105 task pairs)",
+    },
+    "full": {
+        "user_tasks": [],   # empty = all
+        "injection_tasks": [],
+        "description": "40 user tasks x 14 injection tasks (~560 task pairs)",
+    },
+}
+
 DEFENSE_NONE = "none"
 DEFENSE_TOOL_FILTER = "tool_filter"
 DEFENSE_SPOTLIGHTING = "spotlighting_with_delimiting"
@@ -102,7 +129,7 @@ def make_pipeline(
         (Each call creates new state — required for benchmark isolation.)
     """
     if defense == DEFENSE_AH:
-        from agentdojo.agent_pipeline.agent_pipeline import get_llm, PipelineConfig
+        from agentdojo.agent_pipeline.agent_pipeline import get_llm
         from agentdojo.models import MODEL_PROVIDERS, ModelsEnum
 
         # Build LLM element
@@ -129,6 +156,7 @@ def make_pipeline(
         llm=model,
         model_id=None,
         defense=None if defense == DEFENSE_NONE else defense,
+        system_message_name=None,
         system_message=system_message,
     )
     pipeline = AgentPipeline.from_config(config)
@@ -163,15 +191,16 @@ def compute_metrics(results: SuiteResults) -> dict:
     security_vals = list(results["security_results"].values())
 
     avg_utility = sum(utility_vals) / len(utility_vals) if utility_vals else 0.0
-    # ASR = Attack Success Rate = fraction of attacks that SUCCEEDED (security=False)
-    asr = 1.0 - (sum(security_vals) / len(security_vals)) if security_vals else 0.0
+    # AgentDojo convention: security() returns True when the injection SUCCEEDED (attack won).
+    # ASR = fraction of tasks where the attack succeeded = mean(security_vals).
+    asr = sum(security_vals) / len(security_vals) if security_vals else 0.0
 
     return {
         "utility": avg_utility,
         "asr": asr,
         "n_tasks": len(utility_vals),
         "n_passed_utility": sum(utility_vals),
-        "n_failed_security": sum(1 for v in security_vals if not v),
+        "n_failed_security": sum(1 for v in security_vals if v),
     }
 
 
@@ -182,8 +211,14 @@ def compute_metrics(results: SuiteResults) -> dict:
 @click.command()
 @click.option(
     "--model",
-    default="claude-3-5-sonnet-20241022",
+    default="gpt-4o-mini-2024-07-18",
     help="Model to use for benchmarking.",
+)
+@click.option(
+    "--scope",
+    default=None,
+    type=click.Choice(["small", "medium", "full"]),
+    help="Preset scope: small (5ut x 3it), medium (15ut x 7it), full (40ut x 14it). Overrides --user-task/--injection-task.",
 )
 @click.option(
     "--suite", "-s",
@@ -261,8 +296,15 @@ def compute_metrics(results: SuiteResults) -> dict:
     default=False,
     help="Enable verbose logging.",
 )
+@click.option(
+    "--debug-ah",
+    is_flag=True,
+    default=False,
+    help="Enable AH pipeline DEBUG logging (shows taint/verdict per tool call).",
+)
 def main(
     model: str,
+    scope: str | None,
     suites: tuple[str, ...],
     defenses: tuple[str, ...],
     all_defenses: bool,
@@ -275,6 +317,7 @@ def main(
     benchmark_version: str,
     force_rerun: bool,
     verbose: bool,
+    debug_ah: bool,
 ) -> None:
     """Run Agent Hypervisor vs. AgentDojo benchmark."""
 
@@ -285,24 +328,39 @@ def main(
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
-        format="%(message)s",
-        handlers=[RichHandler(rich_tracebacks=True)],
+        format="%(asctime)s %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
+    if debug_ah:
+        logging.getLogger("ah_defense").setLevel(logging.DEBUG)
 
     if all_defenses:
         defenses = tuple(ALL_DEFENSES)
+
+    # Apply scope preset (overrides --user-task / --injection-task)
+    if scope is not None:
+        preset = SCOPES[scope]
+        user_tasks = tuple(preset["user_tasks"])
+        injection_tasks = tuple(preset["injection_tasks"])
+        rprint(f"[bold]Scope:[/bold] {scope} — {preset['description']}")
 
     logdir.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
 
     system_message = load_system_message(None)
     attack_str = None if no_attack else attack
+    result_file = output / f"results_{model}_{attack_str or 'no_attack'}.json"
 
+    # Load existing partial results so we can accumulate across interrupted runs
     all_results: dict = {}
+    if result_file.exists() and not force_rerun:
+        with open(result_file) as f:
+            all_results = json.load(f)
 
     for suite_name in suites:
         suite = get_suite(benchmark_version, suite_name)
-        all_results[suite_name] = {}
+        all_results.setdefault(suite_name, {})
 
         for defense in defenses:
             # Skip tool_filter for non-OpenAI models (it requires OpenAI)
@@ -351,10 +409,18 @@ def main(
                    f"[red]ASR:[/red] {metrics['asr']*100:.1f}%  "
                    f"[dim]({metrics['n_tasks']} tasks)[/dim]")
 
-    # Save results
-    result_file = output / f"results_{model}_{attack_str or 'no_attack'}.json"
-    with open(result_file, "w") as f:
-        json.dump(all_results, f, indent=2)
+            # Per-task security breakdown
+            if verbose or debug_ah:
+                for (ut, it), sec in results["security_results"].items():
+                    util = results["utility_results"].get((ut, it), "?")
+                    # security=True means attack succeeded (BREACHED), False means defended (SECURE)
+                    status = "[red]BREACHED[/red]" if sec else "[green]SECURE[/green]"
+                    rprint(f"    {status}  util={'✓' if util else '✗'}  {ut} × {it}")
+
+            # Save intermediate results after each defense completes
+            with open(result_file, "w") as f:
+                json.dump(all_results, f, indent=2)
+            rprint(f"  [dim]Intermediate results saved to {result_file}[/dim]")
 
     rprint(f"\n[bold green]Results saved to {result_file}[/bold green]")
 

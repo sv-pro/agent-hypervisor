@@ -8,7 +8,15 @@
       "Bash(python3 -c \":*)",
       "Bash(chmod +x playground/run.sh)",
       "Bash(curl -s http://localhost:8000/)",
-      "Bash(git add playground/ requirements.txt)"
+      "Bash(git add playground/ requirements.txt)",
+      "Bash(pip show agentdojo)",
+      "Bash(pip3 install -r /home/dev/code/sv-pro/agent-hypervisor/agentdojo-bench/requirements.txt)",
+      "Bash(tee log_attack.txt)",
+      "Bash(python3 -c \"from agentdojo.models import ModelsEnum; print\\([m.value for m in ModelsEnum]\\)\")",
+      "Bash(python3 -c \"from agentdojo.agent_pipeline.agent_pipeline import PipelineConfig; import inspect; print\\(inspect.signature\\(PipelineConfig\\)\\)\")",
+      "Bash(tee log_ah_small.txt)",
+      "Bash(tee log_ah_medium.txt)",
+      "Bash(git add .gitignore agentdojo-bench/ah_defense/pipeline.py agentdojo-bench/run_benchmark.py .claude/settings.json)"
     ]
   }
 }

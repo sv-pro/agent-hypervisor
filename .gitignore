@@ -30,3 +30,15 @@ node_modules/
 # Logs
 *.log
 CLAUDE_CODE_PROMPT*.md
+
+# AgentDojo benchmark artifacts
+agentdojo-bench/runs/
+agentdojo-bench/results/
+agentdojo-bench/log_*.txt
+
+# Environment files
+.env
+agentdojo-bench/.env
+
+# Cursor rules
+.cursorrules
