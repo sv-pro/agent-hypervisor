@@ -1,0 +1,17 @@
+# Agent Hypervisor × AgentDojo Benchmark Requirements
+# Install with: pip install -r requirements.txt
+
+# Core benchmark framework
+agentdojo>=0.1.35
+
+# Agent Hypervisor defense dependencies
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# LLM providers (choose the ones you need)
+openai>=1.0            # For GPT-4o (recommended for AgentDojo comparison)
+anthropic>=0.20        # For Claude models
+
+# CLI and output
+click>=8.0
+rich>=13.0

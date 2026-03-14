@@ -1,0 +1,31 @@
+# World Manifest: banking suite
+#
+# Classifies AgentDojo banking tools into three AH categories.
+#
+# Banking suite tools:
+#   Account: get_balance, get_most_recent_transactions, get_scheduled_transactions
+#   Transactions: send_money, schedule_transaction, update_scheduled_transaction
+#   User account: get_user_info, update_password, update_user_info
+#   Files: read_file
+
+suite: banking
+
+# Read-only: balance and transaction history retrieval
+read_only:
+  - get_balance
+  - get_most_recent_transactions
+  - get_scheduled_transactions
+  - get_user_info
+  - read_file
+
+# Internal write: modifies account settings (no external money movement)
+internal_write:
+  - update_password
+  - update_user_info
+  - update_scheduled_transaction
+
+# External side-effect: moves real money or commits financial transactions
+# These are the highest-risk operations — blocked by TaintContainmentLaw
+external_side_effect:
+  - send_money
+  - schedule_transaction
