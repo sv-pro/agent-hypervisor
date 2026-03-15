@@ -1,0 +1,46 @@
+# gateway_config.yaml — Agent Hypervisor Tool Gateway configuration.
+#
+# This file controls which tools are registered, which policy file governs
+# execution, and the server's network settings.
+#
+# Fields:
+#
+#   tools           list of tool names to register on startup.
+#                   Only registered tools can be executed via the gateway.
+#
+#   policy_file     path to the YAML policy file loaded by PolicyEngine.
+#                   Hot-reloadable via POST /policy/reload without restart.
+#
+#   task_manifest   (optional) path to a task manifest YAML loaded by
+#                   ProvenanceFirewall for structural provenance checks.
+#                   If omitted, the gateway uses a built-in default task
+#                   that grants all registered tools and treats
+#                   user_declared provenance as trusted.
+#
+#   server          HTTP server settings.
+#
+#   traces          in-memory trace buffer configuration.
+
+tools:
+  - send_email
+  - http_post
+  - read_file
+
+policy_file: policies/default_policy.yaml
+
+# Uncomment to use a specific task manifest for ProvenanceFirewall checks:
+# task_manifest: manifests/task_allow_send.yaml
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+traces:
+  max_entries: 1000
+
+# Persistent storage for traces, approvals, and policy version history.
+# backend: "jsonl" — JSONL for traces/policy history, per-file JSON for approvals.
+# path:    root directory; created automatically on first write.
+storage:
+  backend: "jsonl"
+  path: ".data"

@@ -1,0 +1,74 @@
+# default_policy.yaml — Default provenance firewall policy rules.
+#
+# These rules define the baseline behavior of the provenance-aware firewall.
+# Rules are evaluated in order; the highest-precedence verdict wins.
+#
+# Verdict precedence: deny > ask > allow
+#
+# This policy implements a conservative default:
+#   - Read-only tools are always allowed.
+#   - Any side-effect tool (email, write, HTTP) requires clean provenance.
+#   - external_document provenance on a side-effect argument is always denied.
+#   - user_declared provenance on a side-effect argument requires confirmation (ask).
+#
+# To customize: copy this file, adjust the rules, and load with:
+#   PolicyEngine.from_yaml("policies/my_policy.yaml")
+
+rules:
+
+  # --- Read-only tools (always allowed) ---
+
+  - id: allow-read-file
+    tool: read_file
+    verdict: allow
+
+  - id: allow-list-dir
+    tool: list_dir
+    verdict: allow
+
+  # --- send_email: provenance-gated ---
+
+  # RULE-01 / RULE-02: external_document in the recipient chain → deny
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  # Clean recipient from user_declared source → ask for confirmation
+  - id: ask-email-declared-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask
+
+  # --- write_file: provenance-gated ---
+
+  # Data derived from external_document reaching write_file → deny
+  - id: deny-write-external-data
+    tool: write_file
+    argument: content
+    provenance: external_document
+    verdict: deny
+
+  # Clean data → ask for confirmation before writing
+  - id: ask-write-clean
+    tool: write_file
+    verdict: ask
+
+  # --- http_post: provenance-gated ---
+
+  # Data derived from external_document reaching http_post → deny (SSRF / exfiltration)
+  - id: deny-http-external-body
+    tool: http_post
+    argument: body
+    provenance: external_document
+    verdict: deny
+
+  # Clean data → ask for confirmation before sending HTTP request
+  - id: ask-http-clean
+    tool: http_post
+    verdict: ask
+
+  # --- Default fallback: deny unknown tools ---
+  # (No explicit rule needed — PolicyEngine defaults to deny on no match.)

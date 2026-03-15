@@ -1,186 +1,314 @@
 # Agent Hypervisor
 
-*Deterministic virtualization of reality for AI agentic systems.*
+**An execution governance layer for AI agent tools.**
 
----
+AI agents can execute real-world actions through tools — sending email,
+making HTTP requests, writing files.  Most current defenses operate at
+the prompt layer, classifying whether inputs *look* malicious.
 
-## The Problem
-
-Modern AI agents inhabit **raw reality**: unmediated input, shared mutable memory, direct tool execution, irreversible consequences. Every guardrail, classifier, and LLM-based safety layer placed on this foundation is probabilistic — and [bypassable](docs/VULNERABILITY_CASE_STUDIES.md).
-
-These vulnerabilities are not bugs. They are **architectural consequences**. No amount of behavioral filtering fixes a system that hands an agent unstructured text and unlimited tools.
-
-## The Shift
-
-Traditional security asks: *"Can the agent do X?"* — then tries to detect and block dangerous actions at runtime.
-
-Agent Hypervisor asks: **"Does X exist in the agent's universe?"**
-
-This is the move from **permission-based security** to **ontological security**. Dangerous actions are not prohibited by policy — they do not exist by construction.
-
-## How It Works
-
-```text
-┌──────────────────────────────────────────┐
-│              Raw Reality                 │
-│   (unstructured input, external APIs,    │
-│    files, networks, user messages)       │
-└────────────────┬─────────────────────────┘
-                 │
-    ┌────────────▼────────────────────┐
-    │     Agent Hypervisor            │
-    │                                 │
-    │  ● Semantic Events (in)         │
-    │    Raw input → structured,      │
-    │    attributed, taint-tracked    │
-    │                                 │
-    │  ● World Policy                 │
-    │    Physics laws — no LLM on     │
-    │    the critical security path   │
-    │                                 │
-    │  ● Intent Proposals (out)       │
-    │    Agent proposes actions;      │
-    │    hypervisor decides           │
-    └────────────┬────────────────────┘
-                 │
-    ┌────────────▼────────────────────┐
-    │           Agent                 │
-    │                                 │
-    │  Perceives only Semantic Events │
-    │  Can only propose Intent        │
-    │  Never executes directly        │
-    └─────────────────────────────────┘
-```
-
-The hypervisor **virtualizes the agent's perception and actions** — not just its behavior. The agent lives inside a constructed world where security properties are enforced as physics laws, not policies.
-
-> *"We do not make agents safe. We make the world they live in safe."*
-
----
-
-## What Already Works
-
-*Demonstrated in the proof-of-concept.*
-
-| Capability                        | How                                                                                                                                                                                          |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Prompt injection containment**  | External input arrives as taint-tracked Semantic Events. Injected instructions cannot cross trust boundaries — taint propagates automatically and is enforced as a physics law.              |
-| **Taint containment**             | Data from untrusted sources carries a taint label through every transformation. Tainted data cannot reach privileged actions without explicit sanitization.                                  |
-| **Provenance tracking**           | Every piece of data carries its origin and handling history as part of its type. Provenance is not metadata — it is an architectural invariant.                                              |
-| **Deterministic intent handling** | Agent proposes Intent Proposals; the hypervisor evaluates them against a deterministic policy (tool whitelist, forbidden patterns, state limits). No LLM sits on the critical decision path. |
-
-See [examples/](examples/) for runnable demonstrations.
+Agent Hypervisor introduces a different control point: **the execution
+boundary**.  Every tool call is evaluated against the provenance of its
+arguments before anything executes.  The check is structural, not
+probabilistic.
 
 ---
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/sv-pro/agent-hypervisor.git
-cd agent-hypervisor
-pip install -e .
-python examples/basic/01_simple_demo.py
+pip install fastapi uvicorn pyyaml
+python scripts/run_showcase_demo.py
 ```
 
-The demo runs seven scenarios through the hypervisor, showing three layers of physics enforcement: forbidden patterns, tool whitelist, and state limits. Each scenario prints the agent's proposed action and the hypervisor's deterministic decision.
+This starts the gateway and runs a three-scenario demo:
+
+1. A file read — passes through with no friction
+2. A prompt injection attempt — blocked deterministically
+3. A legitimate sensitive action — held for human approval, then executed
 
 ---
 
-## Provenance Firewall MVP
+## The Problem
 
-A self-contained demo showing the core security idea: the same agent task can succeed without protection, be blocked when dangerous tool-call arguments originate from untrusted data, and be allowed when the same action is authorised through task-scoped declared inputs.
+LLM agents use tools that cause real-world side effects.  Two classes
+of attack exploit this:
 
-### Architecture (5 lines)
+**Prompt injection** — an attacker embeds malicious instructions inside
+content the agent reads (documents, emails, web pages).  The agent
+follows those instructions and routes attacker-controlled data to a
+side-effect tool.
+
+**Data exfiltration** — an agent processing sensitive data is
+manipulated into sending that data to an attacker-controlled endpoint
+via a legitimate-looking tool call.
+
+The common structure of both attacks: **a tool argument is derived from
+untrusted content**.  The text may look benign.  The problem is
+structural — it is in the derivation chain of the argument.
+
+---
+
+## The Approach
+
+Every tool argument carries a **provenance label** recording where it
+came from:
+
+| Provenance class    | Meaning                                          |
+|---------------------|--------------------------------------------------|
+| `external_document` | Content from files, emails, web pages            |
+| `derived`           | Computed from one or more parents                |
+| `user_declared`     | Explicitly declared by the operator in the task  |
+| `system`            | Hardcoded — no user or document influence        |
+
+The provenance label is sticky through derivation.  If an email address
+is extracted from an external document, the resulting `ValueRef` traces
+back to `external_document` — even if the extraction passes through
+intermediate variables.
+
+At execution time, the gateway walks the **full derivation chain** of
+every argument and evaluates it against a policy.  A three-way verdict
+controls what happens:
+
+- **allow** — tool executes, result returned
+- **deny** — blocked, reason and trace recorded
+- **ask** — held pending human approval; `approval_id` returned
+
+The check is deterministic.  There are no classifiers to fool.
+
+---
+
+## Architecture
 
 ```
-simulated agent  →  proposed ToolCall (arguments are ValueRefs with provenance)
-                 →  ProvenanceFirewall.check()
-                 →  allow / deny / ask
-                 →  (mock) tool execution
+  Agent / LLM Runtime
+       │
+       │  POST /tools/execute  {tool, arguments: {arg: ArgSpec}}
+       ▼
+  ┌────────────────────────────────────────────┐
+  │        Agent Hypervisor Gateway            │
+  │                                            │
+  │  ┌──────────────────────────────────────┐  │
+  │  │  1. Resolve provenance chains        │  │
+  │  │  2. PolicyEngine.evaluate()          │◄─┤─ YAML rules (hot-reload)
+  │  │  3. ProvenanceFirewall.check()       │◄─┤─ structural rules
+  │  │  4. Combine: deny > ask > allow      │  │
+  │  │  5. Write TraceEntry (always)        │  │
+  │  └────────────────┬─────────────────────┘  │
+  │                   │                        │
+  │       ┌───────────┼───────────┐             │
+  │       ▼           ▼           ▼             │
+  │     deny         ask        allow           │
+  │     403          200         200            │
+  │              approval     execute           │
+  │              record       adapter           │
+  └────────────────────────────────────────────┘
 ```
 
-Every argument to every tool call carries a `ValueRef` — a value plus its provenance class (`user_declared`, `external_document`, `derived`), roles (`recipient_source`, `extracted_recipients`, …), and a derivation chain back to its origin. The firewall evaluates provenance structurally, not by pattern-matching.
+All decisions persist to `.data/` and survive process restarts.  Every
+trace entry links to the exact policy version active when the decision
+was made.
 
-### Run it
+See [docs/gateway_architecture.md](docs/gateway_architecture.md) for the
+full component map, approval flow diagram, and HTTP API reference.
+
+---
+
+## Comparison
+
+| | Prompt Guardrails | Tool Allowlists | Dual-LLM / CaMeL | Agent Hypervisor |
+|---|---|---|---|---|
+| **Execution boundary** | Pre-LLM (input) | Tool name only | LLM level | Argument level |
+| **Provenance awareness** | No | No | Partial | Yes — full chain |
+| **Decision mechanism** | Probabilistic | Static list | Context separation | Structural check |
+| **Approval workflow** | No | No | No | Yes |
+| **Audit trail** | No | No | No | Yes — persisted |
+| **Policy versioning** | No | Manual | No | Yes |
+| **Integration point** | Input filter | Framework hook | Model layer | HTTP gateway |
+
+The key distinction: Agent Hypervisor checks **where arguments came
+from**, not whether they look malicious.  An injection does not need to
+contain keywords.  It just needs to cause untrusted data to flow into a
+side-effect tool — which is detectable at the execution boundary.
+
+See [docs/benchmark_brief.md](docs/benchmark_brief.md) for a full
+analysis of the attack surface and why existing defenses fall short.
+
+---
+
+## Approval Workflow
+
+When the verdict is `ask`, the tool is not executed immediately.
+A pending approval record is created and the `approval_id` returned.
+
+```
+POST /tools/execute → verdict=ask, approval_id=X
+     │
+     ├── GET  /approvals/{X}    reviewer inspects the request
+     └── POST /approvals/{X}    reviewer decides
+              │
+              ├── {approved: true}   → tool executed → verdict=allow
+              └── {approved: false}  → blocked        → verdict=deny
+```
+
+Both outcomes produce a trace entry with `original_verdict=ask` and the
+reviewer's identity.  Pending approvals survive process restarts.
+
+```python
+from agent_hypervisor.gateway_client import GatewayClient, arg
+
+client = GatewayClient("http://localhost:8080")
+
+# Agent proposes a tool call
+resp = client.execute_tool("send_email", {
+    "to":      arg("alice@company.com", "user_declared", role="recipient_source"),
+    "subject": arg("Q3 Report", "system"),
+    "body":    arg("See attached.", "system"),
+})
+# → verdict=ask, approval_id=ab3f9c1d
+
+# Reviewer approves
+result = client.submit_approval("ab3f9c1d", approved=True, actor="alice-security")
+# → verdict=allow, result={...}
+```
+
+---
+
+## Policy Example
+
+```yaml
+# policies/default_policy.yaml (excerpt)
+rules:
+  # Read-only tools: always allowed
+  - id: allow-read-file
+    tool: read_file
+    verdict: allow
+
+  # Recipient from external document → block outbound email
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  # Clean recipient from declared source → ask for confirmation
+  - id: ask-email-declared-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask
+```
+
+Policy is hot-reloadable (`POST /policy/reload`) without restarting the
+gateway.  Every reload creates a new version entry.  All traces link to
+the version that produced them.
+
+---
+
+## Running the Gateway
 
 ```bash
-python examples/provenance_firewall/demo.py
+# Start the gateway
+python scripts/run_gateway.py
+
+# Query the audit trail
+curl http://localhost:8080/traces
+curl http://localhost:8080/approvals
+curl http://localhost:8080/policy/history
 ```
 
-Traces are saved to `traces/provenance_firewall/` as JSON.
+### MCP integration
 
-### Three demo modes
+The MCP adapter shim exposes the gateway as a Model Context Protocol
+server, so any MCP-compatible client (Claude Desktop, Cursor) can
+delegate tool governance to Agent Hypervisor:
 
-| Mode | Task config | What happens |
-|------|-------------|--------------|
-| **A — unprotected** | none | Agent reads a malicious document containing an injected `send to attacker@example.com` instruction. The recipient is extracted and used as-is. `send_email` executes with the attacker address. |
-| **B — protected, blocked** | `manifests/task_deny_send.yaml` | Same agent behaviour. Firewall traces the `to` argument's provenance chain: `derived ← external_document`. RULE-01 fires — external documents cannot authorise outbound email. `send_email` is denied. |
-| **C — protected, trusted source** | `manifests/task_allow_send.yaml` | Agent reads `demo_data/contacts.txt`, a file declared as `recipient_source` in the task manifest. Recipient is extracted from that file. Provenance chain: `derived ← user_declared:approved_contacts`. Firewall returns `ask` — clean provenance, confirmation required before sending. |
-
-### Key policy rules
-
-- **RULE-01** — `external_document` cannot directly authorise outbound side-effects.
-- **RULE-02** — `send_email.to` must trace back to a declared `recipient_source`.
-- **RULE-03** — Provenance is sticky: derived values inherit the least-trusted ancestor.
-- **RULE-04** — Tools not granted in the task manifest are denied.
-- **RULE-05** — `require_confirmation: true` returns `ask` instead of `allow`.
-
-The decision is based on provenance / role / task-grant structure — not on matching specific strings. Any prompt injection pattern that causes the agent to extract a recipient from an external document will be caught.
-
-### Files added
-
-```
-examples/provenance_firewall/
-  models.py       — ValueRef, ToolCall, Decision
-  policies.py     — ProvenanceFirewall (policy engine)
-  agent_sim.py    — simulated agent scenarios
-  demo.py         — CLI entrypoint
-
-manifests/
-  task_allow_send.yaml   — task with declared recipient_source
-  task_deny_send.yaml    — task with no trusted recipient source
-
-demo_data/
-  contacts.txt           — approved recipient addresses
-  malicious_doc.txt      — document containing injected send instruction
-  reports/q3_summary.txt — normal report document
-
-traces/provenance_firewall/   — JSON decision traces (written at runtime)
+```bash
+python examples/integrations/mcp_gateway_adapter_example.py --demo
 ```
 
 ---
 
-## Documents
+## Repository Layout
 
-📄 **[WHITEPAPER](docs/WHITEPAPER.md)** — Canonical architecture document.
-Ontological security, AI Aikido, the World Manifest compiler, design-time human-in-the-loop.
-*Start here for the full thesis.*
+```
+core runtime
+  src/agent_hypervisor/
+    models.py           ValueRef, ToolCall, Decision (provenance data model)
+    provenance.py       resolve_chain(), mixed_provenance() (chain utilities)
+    firewall.py         ProvenanceFirewall (RULE-01 through RULE-05)
+    policy_engine.py    PolicyEngine, PolicyRule (declarative YAML evaluator)
 
-📘 **[CONCEPT](CONCEPT.md)** — Short overview: problem, classical hypervisor analogy, what's proven, what's open.
-*Shortest serious explainer — start here if you have 10 minutes.*
+gateway
+  src/agent_hypervisor/gateway/
+    gateway_server.py   FastAPI app, all HTTP endpoints
+    execution_router.py enforcement pipeline, approval workflow
+    tool_registry.py    ToolRegistry, built-in adapters
+    config_loader.py    GatewayConfig, StorageConfig
+  gateway_config.yaml   server and storage configuration
+  scripts/run_gateway.py  CLI entrypoint
 
-📐 **[12-FACTOR-AGENT](12-FACTOR-AGENT.md)** — Twelve principles for building secure agentic systems.
-*For builders of agentic applications.*
+storage
+  src/agent_hypervisor/storage/
+    trace_store.py      JSONL append-only trace log
+    approval_store.py   per-file JSON approval records
+    policy_store.py     JSONL policy version history
+  .data/                runtime storage (gitignored)
 
-🗺️ **[ROADMAP](ROADMAP.md)** — Design→Compile→Deploy→Learn→Redesign cycle. Three stages: PoC, executable proof, beta product.
+integrations
+  src/agent_hypervisor/gateway_client.py  Python client (stdlib only)
+  examples/integrations/
+    langchain_gateway_example.py   framework-agnostic decorator pattern
+    approval_flow_example.py       full approval lifecycle demo
+    mcp_gateway_adapter_example.py MCP JSON-RPC adapter shim
 
-📍 **[POSITIONING](POSITIONING.md)** — Architecture thesis vs. reference implementation vs. research claims vs. mini-product. Scope is explicit.
+examples
+  examples/showcase/showcase_demo.py      end-to-end governance demo
+  examples/provenance_firewall/demo.py    firewall-only scenario demos
 
-❓ **[FAQ](FAQ.md)** — "Is this a guardrail?" "Is this a sandbox?" Semantic gap in practice. Why HITL at design-time.
+docs
+  docs/benchmark_brief.md        attack surface and defense comparison
+  docs/gateway_architecture.md   HTTP API, enforcement pipeline, diagrams
+  docs/audit_model.md            trace / approval / policy version schema
+  docs/integrations.md           GatewayClient, MCP adapter, curl examples
+  docs/threat_model.md           attacks in scope and explicit non-goals
+  docs/provenance_model.md       ValueRef, chains, mixed provenance
+  docs/policy_engine.md          declarative rule evaluation
+  docs/architecture.md           component map and data flow
 
-🔒 **[THREAT MODEL](THREAT_MODEL.md)** — Trust channels, in-scope threats, virtualization boundary, and explicit constraints.
+policies / manifests
+  policies/default_policy.yaml   baseline rules
+  manifests/                     example task manifests for ProvenanceFirewall
+```
 
-🏗️ **[ARCHITECTURE](docs/ARCHITECTURE.md)** — Runtime path, compile path, module map, and conformance test pattern.
-*For implementers.*
+---
 
-📖 **[GLOSSARY](docs/GLOSSARY.md)** — Core terms: Semantic Event, Intent Proposal, Taint, Provenance, World Manifest, AI Aikido.
+## Documentation
 
-See also: [docs/](docs/) for technical spec, case studies, hello-world tutorial, and comparisons to existing solutions.
+| Document | What it covers |
+|---|---|
+| [benchmark_brief.md](docs/benchmark_brief.md) | Attack surface, defense comparison, why execution governance |
+| [gateway_architecture.md](docs/gateway_architecture.md) | Full architecture, HTTP API, approval flow, persistence |
+| [audit_model.md](docs/audit_model.md) | Trace / approval / policy version field reference |
+| [integrations.md](docs/integrations.md) | GatewayClient, MCP adapter, curl examples |
+| [threat_model.md](docs/threat_model.md) | Attacks in scope and explicit non-goals |
+| [provenance_model.md](docs/provenance_model.md) | ValueRef, chains, mixed provenance |
+| [policy_engine.md](docs/policy_engine.md) | Declarative rule evaluation |
 
 ---
 
 ## Status
 
-Architectural proof of concept. This repository defines a model — not a product, framework, or SDK.
+Research-grade prototype demonstrating the execution governance pattern.
+The implementation is intentionally minimal to keep the concept clear.
 
-Contributions welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Core capabilities:
+- Provenance-aware tool call evaluation (deterministic, structural)
+- Three-way verdict: allow / deny / ask
+- Human approval workflow with persistent records
+- Policy hot-reload with version history
+- Persisted audit trail (traces survive restarts)
+- MCP adapter, Python client, framework-agnostic integration examples
+- 365 tests
+
+See [docs/benchmark_brief.md](docs/benchmark_brief.md) for scope,
+limitations, and evaluation methodology.
