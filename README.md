@@ -134,6 +134,15 @@ curl -s -X POST http://127.0.0.1:8080/tools/execute \
 
 Built-in tool adapters: `send_email`, `http_post`, `read_file`.
 
+Decisions, approvals, and policy versions are written to `.data/` and survive
+process restarts. Query them:
+
+```bash
+curl http://localhost:8080/traces          # execution log
+curl http://localhost:8080/approvals       # pending / resolved approvals
+curl http://localhost:8080/policy/history  # policy version timeline
+```
+
 ### Python client
 
 ```python
@@ -212,6 +221,20 @@ def send_email(to, subject, body):
 ```
 
 See `examples/integrations/` for complete runnable demos.
+
+### MCP integration
+
+The MCP adapter shim exposes the gateway as a Model Context Protocol server
+so any MCP-compatible client (Claude Desktop, Cursor) can delegate tool
+governance to Agent Hypervisor:
+
+```bash
+python examples/integrations/mcp_gateway_adapter_example.py  # port 9090
+python examples/integrations/mcp_gateway_adapter_example.py --demo
+```
+
+All MCP tool call arguments are tagged `user_declared` and evaluated by the
+full gateway enforcement pipeline before execution.
 
 ---
 
@@ -334,6 +357,7 @@ for experimental setup.
     integrations/
         langchain_gateway_example.py ← framework-agnostic gateway demo
         approval_flow_example.py     ← full approval workflow demo
+        mcp_gateway_adapter_example.py ← MCP JSON-RPC adapter shim
 /manifests/
     task_allow_send.yaml             ← task: email allowed from declared contacts
     task_deny_send.yaml              ← task: email denied (no trusted recipients)
@@ -356,7 +380,11 @@ for experimental setup.
         gateway_server.py            ← FastAPI app, all HTTP endpoints
         execution_router.py          ← enforcement pipeline, approval store
         tool_registry.py             ← ToolRegistry, built-in adapters
-        config_loader.py             ← GatewayConfig, load_config()
+        config_loader.py             ← GatewayConfig, StorageConfig, load_config()
+    storage/
+        trace_store.py               ← JSONL append-only trace log
+        approval_store.py            ← per-file JSON approval store
+        policy_store.py              ← JSONL policy version history
 /tests/
     test_provenance_firewall.py      ← unit tests for core provenance logic
     test_gateway_layer.py            ← unit tests for gateway components
@@ -367,8 +395,9 @@ for experimental setup.
 
 ## Documentation
 
-- [Gateway Architecture](docs/gateway_architecture.md) — HTTP API, enforcement pipeline, approval workflow
-- [Integrations](docs/integrations.md) — GatewayClient, integration patterns, curl examples
+- [Gateway Architecture](docs/gateway_architecture.md) — HTTP API, enforcement pipeline, persistence, policy versioning
+- [Audit Model](docs/audit_model.md) — trace / approval / policy version field reference
+- [Integrations](docs/integrations.md) — GatewayClient, MCP adapter, curl examples
 - [Architecture](docs/architecture.md) — component map and data flow
 - [Threat Model](docs/threat_model.md) — attacks addressed and explicit non-goals
 - [Provenance Model](docs/provenance_model.md) — ValueRef, chains, mixed provenance

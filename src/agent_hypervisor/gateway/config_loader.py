@@ -37,6 +37,21 @@ class TracesConfig:
 
 
 @dataclass
+class StorageConfig:
+    """
+    Persistent storage configuration.
+
+    backend: storage backend identifier; currently only "jsonl" is supported.
+    path:    root directory for all storage files.
+             Traces go to {path}/traces.jsonl
+             Approvals go to {path}/approvals/{id}.json
+             Policy history goes to {path}/policy_history.jsonl
+    """
+    backend: str = "jsonl"
+    path: str = ".data"
+
+
+@dataclass
 class GatewayConfig:
     """
     Top-level gateway configuration.
@@ -46,12 +61,14 @@ class GatewayConfig:
     task_manifest:  optional path to task manifest for ProvenanceFirewall
     server:         host and port settings
     traces:         trace buffer configuration
+    storage:        persistent storage configuration
     """
     tools: list[str] = field(default_factory=lambda: ["send_email", "http_post", "read_file"])
     policy_file: str = "policies/default_policy.yaml"
     task_manifest: Optional[str] = None          # e.g. "manifests/task_allow_send.yaml"
     server: ServerConfig = field(default_factory=ServerConfig)
     traces: TracesConfig = field(default_factory=TracesConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
 
 def load_config(path: str | Path = "gateway_config.yaml") -> GatewayConfig:
@@ -74,10 +91,17 @@ def load_config(path: str | Path = "gateway_config.yaml") -> GatewayConfig:
         max_entries=int(traces_raw.get("max_entries", 1000)),
     )
 
+    storage_raw = raw.get("storage", {})
+    storage = StorageConfig(
+        backend=storage_raw.get("backend", "jsonl"),
+        path=storage_raw.get("path", ".data"),
+    )
+
     return GatewayConfig(
         tools=raw.get("tools", ["send_email", "http_post", "read_file"]),
         policy_file=raw.get("policy_file", "policies/default_policy.yaml"),
         task_manifest=raw.get("task_manifest"),
         server=server,
         traces=traces,
+        storage=storage,
     )

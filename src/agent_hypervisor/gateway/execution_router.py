@@ -51,6 +51,7 @@ from ..models import ProvenanceClass, Role, ToolCall, ValueRef, Verdict
 from ..provenance import provenance_summary
 from ..firewall import ProvenanceFirewall
 from ..policy_engine import PolicyEngine, RuleVerdict
+from ..storage import ApprovalStore, TraceStore
 from .tool_registry import ToolRegistry
 
 
@@ -214,6 +215,33 @@ class ApprovalRecord:
             "resolved_at": self.resolved_at,
         }
 
+    def to_store_dict(self) -> dict:
+        """Serialise to a dict suitable for durable storage (includes request)."""
+        d = self.to_dict()
+        d["request"] = self.request.model_dump()
+        return d
+
+    @classmethod
+    def from_store_dict(cls, d: dict) -> "ApprovalRecord":
+        """Reconstruct an ApprovalRecord from a dict loaded from the store."""
+        request = ToolRequest.model_validate(d.get("request", {}))
+        return cls(
+            approval_id=d["approval_id"],
+            tool=d["tool"],
+            call_id=d["call_id"],
+            request=request,
+            arg_provenance=d.get("arg_provenance", {}),
+            reason=d.get("reason", ""),
+            matched_rule=d.get("matched_rule", ""),
+            policy_version=d.get("policy_version", "unknown"),
+            created_at=d.get("created_at", ""),
+            trace_id=d.get("trace_id", ""),
+            status=d.get("status", "pending"),
+            actor=d.get("actor"),
+            resolved_at=d.get("resolved_at"),
+            result=d.get("result"),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Gateway task for ProvenanceFirewall
@@ -290,6 +318,8 @@ class ExecutionRouter:
         firewall: ProvenanceFirewall,
         policy_version: str = "unversioned",
         max_traces: int = 1000,
+        trace_store: Optional[TraceStore] = None,
+        approval_store: Optional[ApprovalStore] = None,
     ) -> None:
         self._registry = registry
         self._policy_engine = policy_engine
@@ -297,6 +327,11 @@ class ExecutionRouter:
         self._policy_version = policy_version
         self._traces: deque[TraceEntry] = deque(maxlen=max_traces)
         self._pending_approvals: dict[str, ApprovalRecord] = {}
+        self._trace_store = trace_store
+        self._approval_store = approval_store
+        # Recover pending approvals from durable storage on startup
+        if self._approval_store:
+            self._load_pending_from_store()
 
     @property
     def policy_version(self) -> str:
@@ -318,7 +353,14 @@ class ExecutionRouter:
         self._policy_version = policy_version
 
     def get_traces(self, limit: int = 100) -> list[dict]:
-        """Return the most recent trace entries as dicts, newest first."""
+        """
+        Return the most recent trace entries as dicts, newest first.
+
+        Reads from the durable TraceStore when available so traces
+        survive process restarts.  Falls back to the in-memory deque.
+        """
+        if self._trace_store:
+            return self._trace_store.list_recent(limit=limit)
         entries = list(self._traces)
         entries.reverse()
         return [e.to_dict() for e in entries[:limit]]
@@ -329,7 +371,11 @@ class ExecutionRouter:
 
         If status is given (e.g. "pending"), only records with that status
         are returned. Valid statuses: pending | approved | rejected | executed.
+
+        Reads from the durable ApprovalStore when available.
         """
+        if self._approval_store:
+            return self._approval_store.list_recent(status=status, limit=limit)
         records = list(self._pending_approvals.values())
         records.reverse()
         if status:
@@ -337,8 +383,39 @@ class ExecutionRouter:
         return [r.to_dict() for r in records[:limit]]
 
     def get_approval(self, approval_id: str) -> Optional[ApprovalRecord]:
-        """Return one ApprovalRecord by id, or None if not found."""
-        return self._pending_approvals.get(approval_id)
+        """
+        Return one ApprovalRecord by id, or None if not found.
+
+        Checks the in-memory cache first, then the durable store.  When
+        loaded from disk the record is cached in memory for fast subsequent
+        access (e.g. during resolve_approval).
+        """
+        record = self._pending_approvals.get(approval_id)
+        if record is not None:
+            return record
+        if self._approval_store:
+            stored = self._approval_store.get(approval_id)
+            if stored:
+                record = ApprovalRecord.from_store_dict(stored)
+                self._pending_approvals[approval_id] = record
+                return record
+        return None
+
+    def _load_pending_from_store(self) -> None:
+        """
+        Load pending approval records from durable storage into memory.
+
+        Called on startup so that pending approvals created before a
+        process restart can still be resolved via resolve_approval().
+        """
+        if not self._approval_store:
+            return
+        for stored in self._approval_store.list_recent(status="pending", limit=1000):
+            try:
+                record = ApprovalRecord.from_store_dict(stored)
+                self._pending_approvals[record.approval_id] = record
+            except Exception:
+                pass  # Skip records that cannot be reconstructed
 
     # ------------------------------------------------------------------
     # Main execution path
@@ -454,6 +531,8 @@ class ExecutionRouter:
                 status="pending",
             )
             self._pending_approvals[approval_id] = record
+            if self._approval_store:
+                self._approval_store.create(record.to_store_dict())
 
         return response
 
@@ -484,7 +563,7 @@ class ExecutionRouter:
           KeyError:   approval_id does not exist.
           ValueError: approval is not in "pending" status.
         """
-        record = self._pending_approvals.get(approval_id)
+        record = self.get_approval(approval_id)  # checks memory then disk
         if record is None:
             raise KeyError(f"Approval '{approval_id}' not found")
         if record.status != "pending":
@@ -500,6 +579,13 @@ class ExecutionRouter:
             record.status = "rejected"
             record.actor = actor
             record.resolved_at = resolved_at
+            if self._approval_store:
+                self._approval_store.update(
+                    approval_id,
+                    status="rejected",
+                    actor=actor,
+                    resolved_at=resolved_at,
+                )
             return self._respond_and_trace(
                 trace_id=new_trace_id,
                 call_id=record.call_id,
@@ -521,11 +607,20 @@ class ExecutionRouter:
         record.status = "approved"
         record.actor = actor
         record.resolved_at = resolved_at
+        if self._approval_store:
+            self._approval_store.update(
+                approval_id,
+                status="approved",
+                actor=actor,
+                resolved_at=resolved_at,
+            )
 
         tool_def = self._registry.get_tool(record.tool)
         if tool_def is None:
             # Tool was deregistered after the approval was created
             record.status = "rejected"
+            if self._approval_store:
+                self._approval_store.update(approval_id, status="rejected")
             return self._respond_and_trace(
                 trace_id=new_trace_id,
                 call_id=record.call_id,
@@ -551,6 +646,8 @@ class ExecutionRouter:
 
         record.status = "executed"
         record.result = result
+        if self._approval_store:
+            self._approval_store.update(approval_id, status="executed", result=result)
 
         return self._respond_and_trace(
             trace_id=new_trace_id,
@@ -664,6 +761,8 @@ class ExecutionRouter:
             original_verdict=original_verdict,
         )
         self._traces.append(entry)
+        if self._trace_store:
+            self._trace_store.append(entry.to_dict())
 
         return GatewayResponse(
             verdict=verdict,

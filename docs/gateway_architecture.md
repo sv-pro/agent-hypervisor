@@ -182,28 +182,87 @@ Response:
 
 ---
 
-## Policy Hot Reload
+## Persistence Layer
 
-The PolicyEngine loads rules from a YAML file at startup. To update the policy
-without restarting the server:
+Gateway decisions survive process restarts.  Three durable stores back
+the three kinds of mutable state:
+
+```
+.data/
+├── traces.jsonl              ← append-only evaluation log (JSONL)
+├── policy_history.jsonl      ← append-only version history (JSONL)
+└── approvals/
+    ├── {approval_id}.json    ← one JSON file per approval record
+    └── …
+```
+
+**TraceStore** — appends one JSON line per evaluation.  `GET /traces`
+reads from the file, so traces are available after restart.
+
+**ApprovalStore** — one JSON file per approval.  On startup, pending
+approvals are loaded back into memory so they can be resolved normally.
+
+**PolicyStore** — appends one JSON line per distinct policy version.
+Content-hash deduplication prevents duplicate entries on restart.
+
+See [docs/audit_model.md](audit_model.md) for the complete field-level
+specification and example records.
+
+---
+
+## Policy Hot Reload and Version History
+
+The PolicyEngine loads rules from a YAML file at startup. Every distinct
+policy content fingerprint is recorded in `PolicyStore`.
+
+To update the policy without restarting:
 
 1. Edit `policies/default_policy.yaml`
-2. POST `/policy/reload`
+2. `POST /policy/reload`
 3. New rules apply immediately to all subsequent requests
 
-The server responds with the new policy version (a SHA-256 hash of the policy
-file content):
+The `POST /policy/reload` response includes a `changed` flag:
 ```json
 {
   "status": "reloaded",
   "policy_version": "b4d7e29a",
+  "changed": true,
+  "rule_count": 6,
   "policy_file": "policies/default_policy.yaml",
-  "timestamp": "2024-01-15T12:34:56+00:00"
+  "timestamp": "2026-03-15T12:34:56+00:00"
 }
 ```
 
-**Policy version is included in every response**, so you can correlate each
-decision with the exact policy that was active when it was made.
+`changed: false` means the file content was identical to the last
+recorded version — no new version entry was created.
+
+**Version history** is available at `GET /policy/history`:
+```json
+{
+  "current_version": "b4d7e29a",
+  "history": [
+    {
+      "version_id": "b4d7e29a",
+      "timestamp": "2026-03-15T12:34:56+00:00",
+      "policy_file": "policies/default_policy.yaml",
+      "content_hash": "b4d7e29a…",
+      "rule_count": 6
+    },
+    {
+      "version_id": "deadbeef",
+      "timestamp": "2026-03-15T10:00:00+00:00",
+      "rule_count": 4
+    }
+  ]
+}
+```
+
+**Policy version is included in every trace entry**, so you can correlate
+each decision with the exact policy that was active when it was made:
+
+```bash
+jq 'select(.policy_version == "deadbeef")' .data/traces.jsonl
+```
 
 **Demo: policy change changes behavior**
 
@@ -224,8 +283,9 @@ changes the declarative rules but not the structural invariants.
 
 ## Trace Auditing
 
-Every tool execution attempt is recorded to an in-memory trace log, regardless
-of verdict. Traces are available at `GET /traces`.
+Every tool execution attempt is recorded to a **persistent JSONL log**,
+regardless of verdict. Traces survive process restarts. Available at
+`GET /traces`.
 
 Example trace entry:
 ```json
@@ -340,7 +400,12 @@ Execute a tool with provenance-based access control.
 HTTP status: 200 for allow/ask, 403 for deny.
 
 ### `POST /policy/reload`
-Hot-reload policy rules from disk. Returns new policy version.
+Hot-reload policy rules from disk.  Records a new policy version if content changed.
+Returns `{status, policy_version, changed, rule_count, policy_file, timestamp}`.
+
+### `GET /policy/history?limit=N`
+Return policy version history, newest first.
+Returns `{current_version, history: [{version_id, timestamp, policy_file, content_hash, rule_count}]}`.
 
 ### `GET /traces?limit=N`
 Return up to N recent trace entries (newest first, default 50, max 500).
@@ -383,19 +448,30 @@ The gateway listens on `http://127.0.0.1:8080` by default.
 ```
 src/agent_hypervisor/gateway/
   __init__.py           package entry point
-  config_loader.py      GatewayConfig, load_config() — parse gateway_config.yaml
+  config_loader.py      GatewayConfig, StorageConfig, load_config()
   tool_registry.py      ToolDefinition, ToolRegistry, built-in adapters
-  execution_router.py   ExecutionRouter — enforcement pipeline + approval store
-                        ApprovalRecord, TraceEntry (with approval lifecycle fields)
+  execution_router.py   ExecutionRouter — enforcement pipeline, approval store
+                        ApprovalRecord, TraceEntry (approval lifecycle fields)
   gateway_server.py     FastAPI app — all HTTP endpoints
 
 src/agent_hypervisor/
   gateway_client.py     GatewayClient — Python HTTP client (stdlib only)
+  storage/
+    __init__.py         TraceStore, ApprovalStore, PolicyStore exports
+    trace_store.py      Append-only JSONL trace log
+    approval_store.py   Per-file JSON approval store
+    policy_store.py     Append-only JSONL policy version history
 
-gateway_config.yaml     root-level configuration file
+gateway_config.yaml     root-level configuration (includes storage: section)
 scripts/run_gateway.py  CLI entrypoint
 
 examples/integrations/
   langchain_gateway_example.py   framework-agnostic integration demo
   approval_flow_example.py       full approval workflow demo
+  mcp_gateway_adapter_example.py MCP JSON-RPC adapter shim
+
+docs/
+  gateway_architecture.md  this file
+  audit_model.md           trace / approval / policy version field reference
+  integrations.md          GatewayClient, MCP adapter, integration patterns
 ```

@@ -37,3 +37,10 @@ server:
 
 traces:
   max_entries: 1000
+
+# Persistent storage for traces, approvals, and policy version history.
+# backend: "jsonl" — JSONL for traces/policy history, per-file JSON for approvals.
+# path:    root directory; created automatically on first write.
+storage:
+  backend: "jsonl"
+  path: ".data"

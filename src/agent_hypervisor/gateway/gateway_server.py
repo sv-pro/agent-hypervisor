@@ -39,6 +39,7 @@ from pydantic import BaseModel
 
 from ..firewall import ProvenanceFirewall
 from ..policy_engine import PolicyEngine
+from ..storage import ApprovalStore, PolicyStore, TraceStore
 from .config_loader import GatewayConfig, load_config
 from .execution_router import ExecutionRouter, ToolRequest, _make_gateway_firewall_task
 from .tool_registry import build_default_registry
@@ -64,28 +65,55 @@ class GatewayState:
         # Tool registry
         self.registry = build_default_registry(config.tools)
 
-        # Initial policy version (hash of policy file content)
-        self.policy_engine, self.firewall, self.policy_version = (
+        # Persistent storage stores
+        storage_root = Path(config.storage.path)
+        self.trace_store = TraceStore(storage_root / "traces.jsonl")
+        self.approval_store = ApprovalStore(storage_root / "approvals")
+        self.policy_store = PolicyStore(storage_root / "policy_history.jsonl")
+
+        # Initial policy engines + version record
+        self.policy_engine, self.firewall, self.policy_version, version_record = (
             self._load_engines()
         )
 
-        # Execution router (owns trace log and approval store)
+        # Register startup version (only if content changed since last run)
+        self._maybe_record_version(version_record)
+
+        # Execution router wired to durable stores
         self.router = ExecutionRouter(
             registry=self.registry,
             policy_engine=self.policy_engine,
             firewall=self.firewall,
             policy_version=self.policy_version,
             max_traces=config.traces.max_entries,
+            trace_store=self.trace_store,
+            approval_store=self.approval_store,
         )
 
         self.started_at = datetime.now(timezone.utc).isoformat()
 
-    def _load_engines(self) -> tuple[PolicyEngine, ProvenanceFirewall, str]:
-        """Load PolicyEngine and ProvenanceFirewall from configured files."""
+    def _load_engines(self) -> tuple[PolicyEngine, ProvenanceFirewall, str, dict]:
+        """
+        Load PolicyEngine and ProvenanceFirewall from configured files.
+
+        Returns a 4-tuple: (engine, firewall, version_id, version_record).
+        version_id is the first 8 hex chars of SHA-256(policy_content).
+        version_record is ready to be passed to _maybe_record_version().
+        """
         policy_engine = PolicyEngine.from_yaml(self.policy_file)
 
         content = self.policy_file.read_bytes()
-        policy_version = hashlib.sha256(content).hexdigest()[:8]
+        content_hash = hashlib.sha256(content).hexdigest()
+        version_id = content_hash[:8]
+        rule_count = len(getattr(policy_engine, "_rules", []))
+
+        version_record = {
+            "version_id": version_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "policy_file": str(self.policy_file),
+            "content_hash": content_hash,
+            "rule_count": rule_count,
+        }
 
         if self.config.task_manifest:
             firewall = ProvenanceFirewall.from_manifest(self.config.task_manifest)
@@ -93,21 +121,47 @@ class GatewayState:
             task_dict = _make_gateway_firewall_task(self.config.tools)
             firewall = ProvenanceFirewall(task=task_dict, protection_enabled=True)
 
-        return policy_engine, firewall, policy_version
+        return policy_engine, firewall, version_id, version_record
 
-    def reload_policy(self) -> str:
+    def _maybe_record_version(self, record: dict) -> bool:
         """
-        Hot-reload policy rules from disk. Returns the new policy version.
+        Record a policy version if the content differs from the current one.
+
+        Deduplicates on content_hash so the store does not grow on every
+        server restart when the policy file has not changed.
+
+        Returns True if a new version was recorded.
+        """
+        current = self.policy_store.get_current()
+        if current and current.get("content_hash") == record.get("content_hash"):
+            return False
+        self.policy_store.record_version(record)
+        return True
+
+    def reload_policy(self) -> dict:
+        """
+        Hot-reload policy rules from disk.
 
         The PolicyEngine and ProvenanceFirewall are replaced atomically.
         In-flight requests complete with the old engines.
+
+        Returns a dict with version info and a ``changed`` flag.
         """
-        policy_engine, firewall, policy_version = self._load_engines()
+        policy_engine, firewall, new_version, version_record = self._load_engines()
+        changed = self._maybe_record_version(version_record)
         self.policy_engine = policy_engine
         self.firewall = firewall
-        self.policy_version = policy_version
-        self.router.update_engines(policy_engine, firewall, policy_version)
-        return policy_version
+        self.policy_version = new_version
+        self.router.update_engines(policy_engine, firewall, new_version)
+        return {
+            "version_id": new_version,
+            "changed": changed,
+            "rule_count": version_record["rule_count"],
+        }
+
+    def get_policy_history(self, limit: int = 20) -> list[dict]:
+        """Return policy version history, newest first."""
+        return self.policy_store.get_history(limit=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -209,18 +263,40 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
 
         Edit policies/default_policy.yaml, then call this endpoint.
         New rules apply immediately to all subsequent requests.
-        Returns the new policy version hash.
+        Returns version info including a ``changed`` flag (False when the
+        file content has not changed since the last reload).
         """
         gw: GatewayState = app.state.gw
         try:
-            new_version = gw.reload_policy()
+            info = gw.reload_policy()
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Policy reload failed: {exc}")
         return {
             "status": "reloaded",
-            "policy_version": new_version,
+            "policy_version": info["version_id"],
+            "changed": info["changed"],
+            "rule_count": info["rule_count"],
             "policy_file": str(gw.policy_file),
             "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.get("/policy/history")
+    async def policy_history(limit: int = 20):
+        """
+        Return the policy version history, newest first.
+
+        Each entry records:
+          version_id   — short SHA-256 of the policy content
+          timestamp    — when this version became active
+          policy_file  — source YAML file path
+          content_hash — full SHA-256 for integrity verification
+          rule_count   — number of rules in this version
+        """
+        gw: GatewayState = app.state.gw
+        limit = min(max(1, limit), 100)
+        return {
+            "current_version": gw.router.policy_version,
+            "history": gw.get_policy_history(limit=limit),
         }
 
     @app.get("/traces")

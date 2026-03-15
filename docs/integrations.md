@@ -299,4 +299,111 @@ curl -s http://127.0.0.1:8080/traces | python -m json.tool
 
 # Reload policy
 curl -s -X POST http://127.0.0.1:8080/policy/reload | python -m json.tool
+
+# View policy version history
+curl -s http://127.0.0.1:8080/policy/history | python -m json.tool
 ```
+
+---
+
+## MCP Gateway Adapter
+
+The MCP (Model Context Protocol) adapter shim exposes the gateway as an
+MCP server. An MCP host (Claude Desktop, Cursor, or any MCP-compatible
+client) can delegate tool execution governance to Agent Hypervisor.
+
+```
+MCP client
+    │
+    │  JSON-RPC 2.0 over HTTP  (port 9090)
+    ▼
+MCP Gateway Adapter Shim
+    │  translate MCP ↔ gateway HTTP
+    │
+    │  POST /tools/execute (port 8080)
+    ▼
+Agent Hypervisor Gateway
+    (provenance + policy enforcement)
+```
+
+**Protocol subset implemented:**
+
+| MCP method              | Gateway translation                        |
+|-------------------------|--------------------------------------------|
+| `initialize`            | Return server capabilities                 |
+| `tools/list`            | `POST /tools/list` → MCP tool schemas      |
+| `tools/call`            | `POST /tools/execute` → MCP content result |
+
+**Provenance mapping:**  All arguments arriving from an MCP client are
+tagged `user_declared` — they come from an authorised agent host, not an
+untrusted external document.  The gateway enforces its full policy on top.
+
+**Verdict mapping:**
+
+| Gateway verdict | MCP response                                              |
+|-----------------|-----------------------------------------------------------|
+| `allow`         | `{isError: false, content: [{type: "text", text: result}]}` |
+| `deny`          | `{isError: true,  content: [{type: "text", text: "[BLOCKED] ..."}]}` |
+| `ask`           | `{isError: false, content: [{type: "text", text: "[APPROVAL REQUIRED] ..."}]}` |
+
+**Running the adapter:**
+
+```bash
+# Terminal 1 — start the gateway
+python scripts/run_gateway.py
+
+# Terminal 2 — start the MCP adapter shim
+python examples/integrations/mcp_gateway_adapter_example.py
+# Listening on http://127.0.0.1:9090
+
+# Built-in demo (exercises all three verdicts)
+python examples/integrations/mcp_gateway_adapter_example.py --demo
+```
+
+**Example: MCP tools/call translated to gateway**
+
+MCP client sends:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "send_email",
+    "arguments": {"to": "alice@example.com", "subject": "Report", "body": "Hi"}
+  }
+}
+```
+
+Adapter translates to:
+```json
+POST /tools/execute
+{
+  "tool": "send_email",
+  "arguments": {
+    "to":      {"value": "alice@example.com", "source": "user_declared"},
+    "subject": {"value": "Report",            "source": "user_declared"},
+    "body":    {"value": "Hi",                "source": "user_declared"}
+  }
+}
+```
+
+Gateway returns `verdict=ask` (user_declared email requires confirmation).
+Adapter returns to MCP client:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "isError": false,
+    "content": [{
+      "type": "text",
+      "text": "[APPROVAL REQUIRED] ...\napproval_id: ab3f9c1d\nTo approve: POST http://127.0.0.1:8080/approvals/ab3f9c1d ..."
+    }]
+  }
+}
+```
+
+The MCP client receives a structured message indicating that approval is
+needed, with the exact endpoint to call.  The approval can be resolved via
+the gateway directly (out-of-band from the MCP session).
