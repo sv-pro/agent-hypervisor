@@ -255,9 +255,42 @@ Trace fields:
 - `final_verdict` — the winning verdict (deny > ask > allow)
 - `arg_provenance` — full provenance chain for each argument
 - `matched_rule` — the specific rule that determined the final verdict
+- `approval_id` — set when this trace is part of an approval flow
+- `approval_status` — pending | approved | rejected | executed
+- `approved_by` — actor who resolved the approval
+- `original_verdict` — the pre-resolution verdict (ask) when final differs
 
 Traces provide a complete audit trail for security review, incident response,
-and policy tuning.
+and policy tuning. See [docs/integrations.md](integrations.md) for approval
+trace examples.
+
+---
+
+## Approval Workflow
+
+When verdict is `ask`, the tool is not executed. A pending `ApprovalRecord`
+is created and the `approval_id` is returned to the caller.
+
+```
+POST /tools/execute → verdict=ask, approval_id=X
+     │
+     ├── GET  /approvals             (reviewer inspects all pending)
+     ├── GET  /approvals/{X}         (reviewer fetches one record)
+     └── POST /approvals/{X}         (reviewer decides)
+              │
+              ├── {approved: true}   → tool executed → verdict=allow
+              └── {approved: false}  → denied         → verdict=deny
+```
+
+Both outcomes produce a new trace entry with `original_verdict=ask` and the
+reviewer's identity (`approved_by`). The approval record transitions:
+
+```
+pending → approved → executed   (happy path)
+pending → rejected              (reviewer declines)
+```
+
+A resolved approval returns 409 Conflict if resolved again.
 
 ---
 
@@ -298,7 +331,9 @@ Execute a tool with provenance-based access control.
   "matched_rule": "<rule_id>",
   "policy_version": "<hash>",
   "trace_id": "<id>",
-  "result": "<tool_output_or_null>"
+  "result": "<tool_output_or_null>",
+  "approval_id": "<id_when_ask>",
+  "approval_required": false
 }
 ```
 
@@ -309,6 +344,20 @@ Hot-reload policy rules from disk. Returns new policy version.
 
 ### `GET /traces?limit=N`
 Return up to N recent trace entries (newest first, default 50, max 500).
+
+### `GET /approvals?status=pending&limit=N`
+Return approval records filtered by status.
+
+### `GET /approvals/{approval_id}`
+Return one approval record. Returns 404 if not found.
+
+### `POST /approvals/{approval_id}`
+Resolve a pending approval.
+
+**Request:** `{"approved": true, "actor": "alice-reviewer"}`
+
+Returns the tool result (if approved) or a deny response (if rejected).
+Returns 404 if not found, 409 if already resolved.
 
 ---
 
@@ -336,9 +385,17 @@ src/agent_hypervisor/gateway/
   __init__.py           package entry point
   config_loader.py      GatewayConfig, load_config() — parse gateway_config.yaml
   tool_registry.py      ToolDefinition, ToolRegistry, built-in adapters
-  execution_router.py   ExecutionRouter — core enforcement pipeline
-  gateway_server.py     FastAPI app — HTTP endpoints and gateway state
+  execution_router.py   ExecutionRouter — enforcement pipeline + approval store
+                        ApprovalRecord, TraceEntry (with approval lifecycle fields)
+  gateway_server.py     FastAPI app — all HTTP endpoints
+
+src/agent_hypervisor/
+  gateway_client.py     GatewayClient — Python HTTP client (stdlib only)
 
 gateway_config.yaml     root-level configuration file
 scripts/run_gateway.py  CLI entrypoint
+
+examples/integrations/
+  langchain_gateway_example.py   framework-agnostic integration demo
+  approval_flow_example.py       full approval workflow demo
 ```

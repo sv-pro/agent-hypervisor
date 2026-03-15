@@ -10,10 +10,18 @@ Enforcement pipeline:
     2. ProvenanceFirewall.check()    — structural provenance rules (RULE-01–05)
     Verdict: deny > ask > allow across both engines.
 
+Approval workflow:
+    When the combined verdict is "ask", the router:
+      1. Creates an ApprovalRecord and stores it in memory.
+      2. Returns the response with approval_id and approval_required=True.
+      3. Waits for resolve_approval() to be called by a reviewer.
+      4. On approval: executes the adapter and records a second trace entry.
+      5. On rejection: records a deny trace entry.
+
 Trace record:
-    Every execution attempt is logged regardless of verdict. Traces contain
-    the tool name, argument provenance summary, matched rule, and final verdict.
-    This provides a complete audit trail for every tool call the gateway received.
+    Every execution attempt is logged regardless of verdict. Approval lifecycle
+    events (create / approve / reject) each produce their own trace entry so
+    the full decision chain is auditable.
 
 Usage:
     router = ExecutionRouter(
@@ -23,6 +31,10 @@ Usage:
         policy_version="v1",
     )
     response = router.execute(request)
+    # → verdict="ask", approval_id="ab3f9c1d"
+
+    response = router.resolve_approval("ab3f9c1d", approved=True, actor="alice")
+    # → verdict="allow", result={...}
 """
 
 from __future__ import annotations
@@ -71,9 +83,9 @@ class ToolRequest(BaseModel):
     """
     Incoming tool execution request from an agent or client.
 
-    tool:      name of the tool to execute (must be registered)
-    arguments: map of argument name → ArgSpec
-    call_id:   optional client-supplied identifier for correlation
+    tool:       name of the tool to execute (must be registered)
+    arguments:  map of argument name → ArgSpec
+    call_id:    optional client-supplied identifier for correlation
     provenance: optional request-level metadata (session_id, task, etc.)
     """
     tool: str
@@ -86,12 +98,14 @@ class GatewayResponse(BaseModel):
     """
     Gateway decision response.
 
-    verdict:        "allow" | "deny" | "ask"
-    reason:         human-readable explanation of the decision
-    matched_rule:   rule id that produced the verdict (or "firewall:<rule>")
-    policy_version: version string of the active policy
-    trace_id:       unique id for this evaluation (link to trace log)
-    result:         tool output, only present when verdict == "allow"
+    verdict:          "allow" | "deny" | "ask"
+    reason:           human-readable explanation of the decision
+    matched_rule:     rule id that produced the verdict (or "firewall:<rule>")
+    policy_version:   version string of the active policy
+    trace_id:         unique id for this evaluation (link to trace log)
+    result:           tool output, only present when verdict == "allow"
+    approval_id:      set when verdict == "ask"; used to resolve the approval
+    approval_required: True when human review is needed before execution
     """
     verdict: str
     reason: str
@@ -99,6 +113,8 @@ class GatewayResponse(BaseModel):
     policy_version: str
     trace_id: str
     result: Optional[Any] = None
+    approval_id: Optional[str] = None
+    approval_required: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -108,10 +124,11 @@ class GatewayResponse(BaseModel):
 @dataclass
 class TraceEntry:
     """
-    Immutable record of one tool evaluation attempt.
+    Immutable record of one tool evaluation or approval lifecycle event.
 
-    Written for every request regardless of verdict. The full trace log
-    provides an audit trail for security review and debugging.
+    Written for every request regardless of verdict. Approval lifecycle
+    fields (approval_id, approval_status, etc.) are populated when the
+    trace entry is associated with an approval decision.
     """
     trace_id: str
     timestamp: str
@@ -125,6 +142,11 @@ class TraceEntry:
     policy_version: str
     arg_provenance: dict[str, str]
     result_summary: Optional[str] = None
+    # Approval lifecycle fields (None when not part of an approval flow)
+    approval_id: Optional[str] = None
+    approval_status: Optional[str] = None   # "pending" | "approved" | "rejected" | "executed"
+    approved_by: Optional[str] = None
+    original_verdict: Optional[str] = None  # verdict before approval resolution
 
     def to_dict(self) -> dict:
         return {
@@ -140,6 +162,56 @@ class TraceEntry:
             "policy_version": self.policy_version,
             "arg_provenance": self.arg_provenance,
             "result_summary": self.result_summary,
+            "approval_id": self.approval_id,
+            "approval_status": self.approval_status,
+            "approved_by": self.approved_by,
+            "original_verdict": self.original_verdict,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Approval record
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ApprovalRecord:
+    """
+    Pending approval for an ASK verdict.
+
+    Stores the original ToolRequest so it can be re-executed on approval
+    without the client needing to resend it. Status transitions:
+        pending → approved → executed   (happy path)
+        pending → rejected              (reviewer declines)
+    """
+    approval_id: str
+    tool: str
+    call_id: str
+    request: ToolRequest            # stored for re-execution on approval
+    arg_provenance: dict[str, str]  # pre-computed provenance summary
+    reason: str                     # reason the ask verdict was produced
+    matched_rule: str
+    policy_version: str
+    created_at: str
+    trace_id: str                   # trace_id of the original ask entry
+    status: str = "pending"         # pending | approved | rejected | executed
+    actor: Optional[str] = None     # reviewer who resolved this approval
+    resolved_at: Optional[str] = None
+    result: Optional[Any] = None    # tool output after execution
+
+    def to_dict(self) -> dict:
+        return {
+            "approval_id": self.approval_id,
+            "tool": self.tool,
+            "call_id": self.call_id,
+            "arg_provenance": self.arg_provenance,
+            "reason": self.reason,
+            "matched_rule": self.matched_rule,
+            "policy_version": self.policy_version,
+            "created_at": self.created_at,
+            "trace_id": self.trace_id,
+            "status": self.status,
+            "actor": self.actor,
+            "resolved_at": self.resolved_at,
         }
 
 
@@ -163,7 +235,6 @@ def _make_gateway_firewall_task(tool_names: list[str]) -> dict:
     - user_declared provenance     → allowed but requires confirmation
     - system provenance            → allowed unconditionally
     """
-    # Side-effect tools require confirmation; read-only tools do not.
     _SIDE_EFFECT_TOOLS = {"send_email", "http_post", "write_file"}
 
     grants = []
@@ -201,14 +272,13 @@ def _make_gateway_firewall_task(tool_names: list[str]) -> dict:
 
 class ExecutionRouter:
     """
-    Core execution switch — routes tool requests through policy enforcement
-    and dispatches to tool adapters on approval.
+    Core execution switch — routes tool requests through policy enforcement,
+    dispatches to tool adapters on approval, and manages the approval workflow.
 
     Args:
         registry:       ToolRegistry with registered adapters.
         policy_engine:  PolicyEngine for declarative YAML rules.
         firewall:       ProvenanceFirewall for structural rules.
-                        If None, only PolicyEngine is used.
         policy_version: Human-readable version string for the active policy.
         max_traces:     Maximum number of traces to keep in memory.
     """
@@ -226,6 +296,7 @@ class ExecutionRouter:
         self._firewall = firewall
         self._policy_version = policy_version
         self._traces: deque[TraceEntry] = deque(maxlen=max_traces)
+        self._pending_approvals: dict[str, ApprovalRecord] = {}
 
     @property
     def policy_version(self) -> str:
@@ -252,6 +323,23 @@ class ExecutionRouter:
         entries.reverse()
         return [e.to_dict() for e in entries[:limit]]
 
+    def get_approvals(self, limit: int = 50, status: Optional[str] = None) -> list[dict]:
+        """
+        Return approval records, newest first.
+
+        If status is given (e.g. "pending"), only records with that status
+        are returned. Valid statuses: pending | approved | rejected | executed.
+        """
+        records = list(self._pending_approvals.values())
+        records.reverse()
+        if status:
+            records = [r for r in records if r.status == status]
+        return [r.to_dict() for r in records[:limit]]
+
+    def get_approval(self, approval_id: str) -> Optional[ApprovalRecord]:
+        """Return one ApprovalRecord by id, or None if not found."""
+        return self._pending_approvals.get(approval_id)
+
     # ------------------------------------------------------------------
     # Main execution path
     # ------------------------------------------------------------------
@@ -267,7 +355,8 @@ class ExecutionRouter:
           4. Run ProvenanceFirewall (structural provenance rules).
           5. Combine verdicts: deny > ask > allow.
           6. Execute tool adapter if verdict is allow.
-          7. Record trace.
+          6.5 Create ApprovalRecord if verdict is ask.
+          7. Record trace and return response.
         """
         trace_id = str(uuid.uuid4())[:8]
         call_id = request.call_id or f"gw-{trace_id}"
@@ -295,11 +384,11 @@ class ExecutionRouter:
 
         # Step 3: PolicyEngine evaluation
         pe_result = self._policy_engine.evaluate(call, registry)
-        pe_verdict = pe_result.verdict.value  # "allow" | "deny" | "ask"
+        pe_verdict = pe_result.verdict.value
 
         # Step 4: ProvenanceFirewall check
         fw_decision = self._firewall.check(call, registry)
-        fw_verdict = fw_decision.verdict.value  # "allow" | "deny" | "ask"
+        fw_verdict = fw_decision.verdict.value
 
         # Step 5: Combine verdicts — deny > ask > allow
         _prec = {"deny": 2, "ask": 1, "allow": 0}
@@ -324,8 +413,15 @@ class ExecutionRouter:
             result = tool_def.adapter(raw_args)
             result_summary = str(result)[:200] if result else None
 
-        # Step 7: Record trace
-        return self._respond_and_trace(
+        # Step 6.5: Pre-generate approval_id for ask verdicts
+        approval_id = None
+        approval_required = False
+        if final_verdict == "ask":
+            approval_id = str(uuid.uuid4())[:8]
+            approval_required = True
+
+        # Step 7: Record trace and build response
+        response = self._respond_and_trace(
             trace_id=trace_id,
             call_id=call_id,
             tool=request.tool,
@@ -337,6 +433,141 @@ class ExecutionRouter:
             arg_provenance=arg_prov,
             result=result,
             result_summary=result_summary,
+            approval_id=approval_id,
+            approval_required=approval_required,
+            approval_status="pending" if approval_id else None,
+        )
+
+        # Step 7.5: Store approval record after trace is written
+        if approval_id:
+            record = ApprovalRecord(
+                approval_id=approval_id,
+                tool=request.tool,
+                call_id=call_id,
+                request=request,
+                arg_provenance=arg_prov,
+                reason=reason,
+                matched_rule=matched_rule,
+                policy_version=self._policy_version,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                trace_id=trace_id,
+                status="pending",
+            )
+            self._pending_approvals[approval_id] = record
+
+        return response
+
+    # ------------------------------------------------------------------
+    # Approval workflow
+    # ------------------------------------------------------------------
+
+    def resolve_approval(
+        self,
+        approval_id: str,
+        approved: bool,
+        actor: str = "unknown",
+    ) -> GatewayResponse:
+        """
+        Resolve a pending approval record.
+
+        On approval:
+          - Executes the stored tool request via the registered adapter.
+          - Records a trace entry with approval metadata.
+          - Returns the tool result in the response.
+
+        On rejection:
+          - Marks the record as rejected.
+          - Records a trace entry.
+          - Returns a deny-like response.
+
+        Raises:
+          KeyError:   approval_id does not exist.
+          ValueError: approval is not in "pending" status.
+        """
+        record = self._pending_approvals.get(approval_id)
+        if record is None:
+            raise KeyError(f"Approval '{approval_id}' not found")
+        if record.status != "pending":
+            raise ValueError(
+                f"Approval '{approval_id}' is already {record.status!r} "
+                "and cannot be resolved again"
+            )
+
+        resolved_at = datetime.now(timezone.utc).isoformat()
+        new_trace_id = str(uuid.uuid4())[:8]
+
+        if not approved:
+            record.status = "rejected"
+            record.actor = actor
+            record.resolved_at = resolved_at
+            return self._respond_and_trace(
+                trace_id=new_trace_id,
+                call_id=record.call_id,
+                tool=record.tool,
+                verdict="deny",
+                reason=f"Approval rejected by {actor!r}",
+                matched_rule="approval:rejected",
+                pe_verdict="ask",
+                fw_verdict="ask",
+                arg_provenance=record.arg_provenance,
+                result=None,
+                approval_id=approval_id,
+                approval_status="rejected",
+                approved_by=actor,
+                original_verdict="ask",
+            )
+
+        # Approved: execute the tool adapter
+        record.status = "approved"
+        record.actor = actor
+        record.resolved_at = resolved_at
+
+        tool_def = self._registry.get_tool(record.tool)
+        if tool_def is None:
+            # Tool was deregistered after the approval was created
+            record.status = "rejected"
+            return self._respond_and_trace(
+                trace_id=new_trace_id,
+                call_id=record.call_id,
+                tool=record.tool,
+                verdict="deny",
+                reason=f"Tool '{record.tool}' is no longer registered",
+                matched_rule="gateway:unregistered_tool",
+                pe_verdict="ask",
+                fw_verdict="ask",
+                arg_provenance=record.arg_provenance,
+                result=None,
+                approval_id=approval_id,
+                approval_status="rejected",
+                approved_by=actor,
+                original_verdict="ask",
+            )
+
+        # Re-build ValueRefs to extract raw argument values
+        args_map, _ = self._build_value_refs(record.request.arguments, record.call_id)
+        raw_args = {k: v.value for k, v in args_map.items()}
+        result = tool_def.adapter(raw_args)
+        result_summary = str(result)[:200] if result else None
+
+        record.status = "executed"
+        record.result = result
+
+        return self._respond_and_trace(
+            trace_id=new_trace_id,
+            call_id=record.call_id,
+            tool=record.tool,
+            verdict="allow",
+            reason=f"Approved by {actor!r} — {record.reason}",
+            matched_rule="approval:approved",
+            pe_verdict="ask",
+            fw_verdict="ask",
+            arg_provenance=record.arg_provenance,
+            result=result,
+            result_summary=result_summary,
+            approval_id=approval_id,
+            approval_status="executed",
+            approved_by=actor,
+            original_verdict="ask",
         )
 
     # ------------------------------------------------------------------
@@ -359,14 +590,14 @@ class ExecutionRouter:
         'gateway_trusted' — the id declared in the gateway firewall task —
         so that RULE-02 recipient_source checks pass correctly.
         """
-        ref_map: dict[str, ValueRef] = {}  # arg_name -> ValueRef
+        ref_map: dict[str, ValueRef] = {}
 
         for arg_name, spec in arguments.items():
             ref_id = f"{call_id}:{arg_name}"
             try:
                 prov = ProvenanceClass(spec.source)
             except ValueError:
-                prov = ProvenanceClass.external_document  # default: untrusted
+                prov = ProvenanceClass.external_document
 
             roles: list[Role] = []
             if spec.role:
@@ -375,8 +606,6 @@ class ExecutionRouter:
                 except ValueError:
                     pass
 
-            # Map user_declared to 'gateway_trusted' source label so that
-            # ProvenanceFirewall's RULE-02 can find the declared recipient_source.
             source_label = (
                 "gateway_trusted"
                 if prov == ProvenanceClass.user_declared
@@ -410,6 +639,11 @@ class ExecutionRouter:
         arg_provenance: dict[str, str],
         result: Any,
         result_summary: Optional[str] = None,
+        approval_id: Optional[str] = None,
+        approval_required: bool = False,
+        approval_status: Optional[str] = None,
+        approved_by: Optional[str] = None,
+        original_verdict: Optional[str] = None,
     ) -> GatewayResponse:
         entry = TraceEntry(
             trace_id=trace_id,
@@ -424,6 +658,10 @@ class ExecutionRouter:
             policy_version=self._policy_version,
             arg_provenance=arg_provenance,
             result_summary=result_summary,
+            approval_id=approval_id,
+            approval_status=approval_status,
+            approved_by=approved_by,
+            original_verdict=original_verdict,
         )
         self._traces.append(entry)
 
@@ -434,4 +672,6 @@ class ExecutionRouter:
             policy_version=self._policy_version,
             trace_id=trace_id,
             result=result if verdict == "allow" else None,
+            approval_id=approval_id,
+            approval_required=approval_required,
         )

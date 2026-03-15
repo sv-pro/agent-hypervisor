@@ -1,17 +1,21 @@
 """
 gateway_server.py — FastAPI HTTP gateway for provenance-aware tool execution.
 
-This module builds and returns the FastAPI application. It manages shared
-gateway state (policy engine, firewall, tool registry, trace log) and
-exposes four endpoints:
+Endpoints:
+  GET  /                         — status and registered tools
+  POST /tools/list               — list registered tools
+  POST /tools/execute            — execute a tool (provenance-checked)
+  POST /policy/reload            — hot-reload policy rules from YAML
+  GET  /traces                   — fetch recent trace entries
+  GET  /approvals                — list pending/recent approval records
+  GET  /approvals/{approval_id}  — fetch one approval record
+  POST /approvals/{approval_id}  — approve or reject a pending request
 
-  POST /tools/list       — list registered tools
-  POST /tools/execute    — execute a tool (provenance-checked)
-  POST /policy/reload    — hot-reload policy rules from YAML
-  GET  /traces           — fetch recent trace entries
-
-The server is stateless per-request. All state lives in GatewayState which
-is attached to the FastAPI app lifespan and accessible via app.state.
+Approval workflow:
+    1. POST /tools/execute returns verdict="ask" + approval_id
+    2. Reviewer calls POST /approvals/{id} with {"approved": true, "actor": "..."}
+    3. Gateway executes the stored request and returns the result
+    4. Both the original ask and the resolution appear in GET /traces
 
 Usage (programmatic):
     app = create_app("gateway_config.yaml")
@@ -19,7 +23,6 @@ Usage (programmatic):
 
 Usage (CLI):
     python scripts/run_gateway.py
-    python scripts/run_gateway.py --config my_config.yaml
 """
 
 from __future__ import annotations
@@ -66,7 +69,7 @@ class GatewayState:
             self._load_engines()
         )
 
-        # Execution router
+        # Execution router (owns trace log and approval store)
         self.router = ExecutionRouter(
             registry=self.registry,
             policy_engine=self.policy_engine,
@@ -81,11 +84,9 @@ class GatewayState:
         """Load PolicyEngine and ProvenanceFirewall from configured files."""
         policy_engine = PolicyEngine.from_yaml(self.policy_file)
 
-        # Version = short hash of policy file content
         content = self.policy_file.read_bytes()
         policy_version = hashlib.sha256(content).hexdigest()[:8]
 
-        # ProvenanceFirewall: use task manifest if configured, else gateway default
         if self.config.task_manifest:
             firewall = ProvenanceFirewall.from_manifest(self.config.task_manifest)
         else:
@@ -99,7 +100,7 @@ class GatewayState:
         Hot-reload policy rules from disk. Returns the new policy version.
 
         The PolicyEngine and ProvenanceFirewall are replaced atomically.
-        In-flight requests (if any) will complete with the old engines.
+        In-flight requests complete with the old engines.
         """
         policy_engine, firewall, policy_version = self._load_engines()
         self.policy_engine = policy_engine
@@ -107,6 +108,21 @@ class GatewayState:
         self.policy_version = policy_version
         self.router.update_engines(policy_engine, firewall, policy_version)
         return policy_version
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
+class ApprovalSubmission(BaseModel):
+    """
+    Request body for POST /approvals/{approval_id}.
+
+    approved: True to approve (execute the stored request), False to reject.
+    actor:    identifier of the reviewer making this decision (for audit log).
+    """
+    approved: bool
+    actor: str = "human-reviewer"
 
 
 # ---------------------------------------------------------------------------
@@ -133,9 +149,10 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
         title="Agent Hypervisor — Tool Gateway",
         description=(
             "Provenance-aware execution control gateway for AI agent tools. "
-            "All tool calls are evaluated against provenance policy before execution."
+            "All tool calls are evaluated against provenance policy before execution. "
+            "ASK verdicts create approval records that require human review."
         ),
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
@@ -143,7 +160,7 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
     app.state.gw = state
 
     # ------------------------------------------------------------------
-    # Endpoints
+    # Tool endpoints
     # ------------------------------------------------------------------
 
     @app.get("/")
@@ -173,27 +190,12 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
         """
         Execute a tool with provenance-based access control.
 
-        The gateway evaluates the request against the active PolicyEngine and
-        ProvenanceFirewall. It returns a decision (allow / deny / ask) and,
-        when allowed, the tool's result.
+        Returns one of three verdicts:
+          allow (200) — tool executed, result included in response
+          deny  (403) — blocked by policy or provenance check
+          ask   (200) — approval required; approval_id returned, not executed yet
 
-        Request body example:
-            {
-              "tool": "send_email",
-              "arguments": {
-                "to":      {"value": "alice@company.com", "source": "user_declared"},
-                "subject": {"value": "Report", "source": "system"},
-                "body":    {"value": "See attached.", "source": "system"}
-              }
-            }
-
-        Response fields:
-            verdict       — "allow" | "deny" | "ask"
-            reason        — explanation of the decision
-            matched_rule  — which rule determined the verdict
-            policy_version — hash of the active policy
-            trace_id      — link to the trace log entry
-            result        — tool output (only when verdict == "allow")
+        When verdict is "ask", call POST /approvals/{approval_id} to resolve.
         """
         gw: GatewayState = app.state.gw
         response = gw.router.execute(request)
@@ -203,16 +205,11 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
     @app.post("/policy/reload")
     async def reload_policy():
         """
-        Hot-reload the policy rules from disk.
+        Hot-reload the policy rules from disk without restarting the server.
 
-        The PolicyEngine and ProvenanceFirewall are replaced with fresh
-        instances loaded from the configured YAML files. In-flight requests
-        are not interrupted. Returns the new policy version hash.
-
-        Use this endpoint to deploy policy changes without restarting the server:
-            1. Edit policies/default_policy.yaml
-            2. POST /policy/reload
-            3. New rules apply to all subsequent requests
+        Edit policies/default_policy.yaml, then call this endpoint.
+        New rules apply immediately to all subsequent requests.
+        Returns the new policy version hash.
         """
         gw: GatewayState = app.state.gw
         try:
@@ -231,15 +228,8 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
         """
         Return recent execution trace entries, newest first.
 
-        Each trace entry records:
-          • timestamp and tool name
-          • per-argument provenance chains
-          • PolicyEngine verdict and matched rule
-          • ProvenanceFirewall verdict
-          • final combined verdict
-          • result summary (if executed)
-
-        Traces are stored in memory and reset when the server restarts.
+        Trace entries include approval lifecycle fields (approval_id,
+        approval_status, approved_by) when associated with an approval flow.
         """
         gw: GatewayState = app.state.gw
         limit = min(max(1, limit), 500)
@@ -248,5 +238,77 @@ def create_app(config_path: str | Path = "gateway_config.yaml") -> FastAPI:
             "policy_version": gw.router.policy_version,
             "traces": gw.router.get_traces(limit=limit),
         }
+
+    # ------------------------------------------------------------------
+    # Approval endpoints
+    # ------------------------------------------------------------------
+
+    @app.get("/approvals")
+    async def list_approvals(status: Optional[str] = None, limit: int = 50):
+        """
+        Return approval records, newest first.
+
+        Query params:
+          status — filter by status: pending | approved | rejected | executed
+          limit  — max records to return (default 50, max 500)
+
+        Pending approvals are tool requests that returned verdict="ask" and
+        are waiting for a human reviewer to call POST /approvals/{id}.
+        """
+        gw: GatewayState = app.state.gw
+        limit = min(max(1, limit), 500)
+        return {
+            "approvals": gw.router.get_approvals(limit=limit, status=status),
+            "policy_version": gw.router.policy_version,
+        }
+
+    @app.get("/approvals/{approval_id}")
+    async def get_approval(approval_id: str):
+        """
+        Return one approval record by id.
+
+        Returns 404 if not found.
+        """
+        gw: GatewayState = app.state.gw
+        record = gw.router.get_approval(approval_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Approval '{approval_id}' not found",
+            )
+        return record.to_dict()
+
+    @app.post("/approvals/{approval_id}")
+    async def submit_approval(approval_id: str, submission: ApprovalSubmission):
+        """
+        Approve or reject a pending tool execution request.
+
+        On approval:
+          - Executes the stored tool request with the registered adapter.
+          - Returns the tool result.
+          - Records a trace entry with approved_by and original_verdict fields.
+
+        On rejection:
+          - Marks the request as rejected.
+          - Returns a deny-like response.
+          - Records a trace entry.
+
+        Returns 404 if the approval_id is not found.
+        Returns 409 if the approval is not in "pending" status.
+        """
+        gw: GatewayState = app.state.gw
+        try:
+            response = gw.router.resolve_approval(
+                approval_id=approval_id,
+                approved=submission.approved,
+                actor=submission.actor,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+        status_code = 200 if response.verdict == "allow" else 403
+        return JSONResponse(content=response.model_dump(), status_code=status_code)
 
     return app
