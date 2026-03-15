@@ -86,6 +86,70 @@ The demo runs seven scenarios through the hypervisor, showing three layers of ph
 
 ---
 
+## Provenance Firewall MVP
+
+A self-contained demo showing the core security idea: the same agent task can succeed without protection, be blocked when dangerous tool-call arguments originate from untrusted data, and be allowed when the same action is authorised through task-scoped declared inputs.
+
+### Architecture (5 lines)
+
+```
+simulated agent  →  proposed ToolCall (arguments are ValueRefs with provenance)
+                 →  ProvenanceFirewall.check()
+                 →  allow / deny / ask
+                 →  (mock) tool execution
+```
+
+Every argument to every tool call carries a `ValueRef` — a value plus its provenance class (`user_declared`, `external_document`, `derived`), roles (`recipient_source`, `extracted_recipients`, …), and a derivation chain back to its origin. The firewall evaluates provenance structurally, not by pattern-matching.
+
+### Run it
+
+```bash
+python examples/provenance_firewall/demo.py
+```
+
+Traces are saved to `traces/provenance_firewall/` as JSON.
+
+### Three demo modes
+
+| Mode | Task config | What happens |
+|------|-------------|--------------|
+| **A — unprotected** | none | Agent reads a malicious document containing an injected `send to attacker@example.com` instruction. The recipient is extracted and used as-is. `send_email` executes with the attacker address. |
+| **B — protected, blocked** | `manifests/task_deny_send.yaml` | Same agent behaviour. Firewall traces the `to` argument's provenance chain: `derived ← external_document`. RULE-01 fires — external documents cannot authorise outbound email. `send_email` is denied. |
+| **C — protected, trusted source** | `manifests/task_allow_send.yaml` | Agent reads `demo_data/contacts.txt`, a file declared as `recipient_source` in the task manifest. Recipient is extracted from that file. Provenance chain: `derived ← user_declared:approved_contacts`. Firewall returns `ask` — clean provenance, confirmation required before sending. |
+
+### Key policy rules
+
+- **RULE-01** — `external_document` cannot directly authorise outbound side-effects.
+- **RULE-02** — `send_email.to` must trace back to a declared `recipient_source`.
+- **RULE-03** — Provenance is sticky: derived values inherit the least-trusted ancestor.
+- **RULE-04** — Tools not granted in the task manifest are denied.
+- **RULE-05** — `require_confirmation: true` returns `ask` instead of `allow`.
+
+The decision is based on provenance / role / task-grant structure — not on matching specific strings. Any prompt injection pattern that causes the agent to extract a recipient from an external document will be caught.
+
+### Files added
+
+```
+examples/provenance_firewall/
+  models.py       — ValueRef, ToolCall, Decision
+  policies.py     — ProvenanceFirewall (policy engine)
+  agent_sim.py    — simulated agent scenarios
+  demo.py         — CLI entrypoint
+
+manifests/
+  task_allow_send.yaml   — task with declared recipient_source
+  task_deny_send.yaml    — task with no trusted recipient source
+
+demo_data/
+  contacts.txt           — approved recipient addresses
+  malicious_doc.txt      — document containing injected send instruction
+  reports/q3_summary.txt — normal report document
+
+traces/provenance_firewall/   — JSON decision traces (written at runtime)
+```
+
+---
+
 ## Documents
 
 📄 **[WHITEPAPER](docs/WHITEPAPER.md)** — Canonical architecture document.
