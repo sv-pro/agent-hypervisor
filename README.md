@@ -1,5 +1,9 @@
 # Agent Hypervisor
 
+![Tests](https://img.shields.io/badge/tests-365%20passing-brightgreen)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
+
 **An execution governance layer for AI agent tools.**
 
 AI agents can execute real-world actions through tools — sending email,
@@ -228,56 +232,47 @@ python examples/integrations/mcp_gateway_adapter_example.py --demo
 
 ---
 
-## Repository Layout
+## Repository Overview
 
 ```
-core runtime
-  src/agent_hypervisor/
-    models.py           ValueRef, ToolCall, Decision (provenance data model)
-    provenance.py       resolve_chain(), mixed_provenance() (chain utilities)
-    firewall.py         ProvenanceFirewall (RULE-01 through RULE-05)
-    policy_engine.py    PolicyEngine, PolicyRule (declarative YAML evaluator)
+src/agent_hypervisor/           core runtime
+  models.py                     ValueRef, ToolCall, Decision — provenance data model
+  provenance.py                 resolve_chain(), mixed_provenance()
+  firewall.py                   ProvenanceFirewall — structural rules RULE-01 to RULE-05
+  policy_engine.py              PolicyEngine — declarative YAML evaluator
+  gateway/                      HTTP gateway server
+    gateway_server.py           FastAPI app, all HTTP endpoints
+    execution_router.py         enforcement pipeline, approval workflow
+    tool_registry.py            ToolRegistry, built-in adapters
+  storage/                      persistence layer
+    trace_store.py              JSONL append-only trace log
+    approval_store.py           per-file JSON approval records
+    policy_store.py             JSONL policy version history
 
 gateway
-  src/agent_hypervisor/gateway/
-    gateway_server.py   FastAPI app, all HTTP endpoints
-    execution_router.py enforcement pipeline, approval workflow
-    tool_registry.py    ToolRegistry, built-in adapters
-    config_loader.py    GatewayConfig, StorageConfig
-  gateway_config.yaml   server and storage configuration
-  scripts/run_gateway.py  CLI entrypoint
-
-storage
-  src/agent_hypervisor/storage/
-    trace_store.py      JSONL append-only trace log
-    approval_store.py   per-file JSON approval records
-    policy_store.py     JSONL policy version history
-  .data/                runtime storage (gitignored)
-
-integrations
-  src/agent_hypervisor/gateway_client.py  Python client (stdlib only)
-  examples/integrations/
-    langchain_gateway_example.py   framework-agnostic decorator pattern
-    approval_flow_example.py       full approval lifecycle demo
-    mcp_gateway_adapter_example.py MCP JSON-RPC adapter shim
+  scripts/run_gateway.py        CLI entrypoint — start the gateway server
+  scripts/run_showcase_demo.py  CLI entrypoint — run the showcase demo
+  gateway_config.yaml           server and storage configuration
+  policies/default_policy.yaml  baseline rules
 
 examples
-  examples/showcase/showcase_demo.py      end-to-end governance demo
-  examples/provenance_firewall/demo.py    firewall-only scenario demos
+  examples/showcase/            end-to-end governance demo (start here)
+  examples/integrations/        LangChain, MCP adapter, approval flow examples
+  examples/provenance_firewall/ firewall-only scenario demos
 
 docs
-  docs/benchmark_brief.md        attack surface and defense comparison
-  docs/gateway_architecture.md   HTTP API, enforcement pipeline, diagrams
-  docs/audit_model.md            trace / approval / policy version schema
-  docs/integrations.md           GatewayClient, MCP adapter, curl examples
-  docs/threat_model.md           attacks in scope and explicit non-goals
-  docs/provenance_model.md       ValueRef, chains, mixed provenance
-  docs/policy_engine.md          declarative rule evaluation
-  docs/architecture.md           component map and data flow
+  docs/one_pager.md             project overview — read this first
+  docs/demo_guide.md            demo walkthrough and inspection guide
+  docs/benchmark_brief.md       attack surface and defense comparison
+  docs/gateway_architecture.md  HTTP API, enforcement pipeline, diagrams
+  docs/audit_model.md           trace / approval / policy version schema
+  docs/integrations.md          GatewayClient, MCP adapter, curl examples
+  docs/threat_model.md          attacks in scope and explicit non-goals
+  docs/provenance_model.md      ValueRef, chains, mixed provenance
+  docs/policy_engine.md         declarative rule evaluation
 
-policies / manifests
-  policies/default_policy.yaml   baseline rules
-  manifests/                     example task manifests for ProvenanceFirewall
+tests
+  tests/                        365 tests — provenance, policy, gateway, persistence
 ```
 
 ---
@@ -286,6 +281,8 @@ policies / manifests
 
 | Document | What it covers |
 |---|---|
+| [one_pager.md](docs/one_pager.md) | Project overview — problem, approach, architecture (start here) |
+| [demo_guide.md](docs/demo_guide.md) | How to run and inspect the demo |
 | [benchmark_brief.md](docs/benchmark_brief.md) | Attack surface, defense comparison, why execution governance |
 | [gateway_architecture.md](docs/gateway_architecture.md) | Full architecture, HTTP API, approval flow, persistence |
 | [audit_model.md](docs/audit_model.md) | Trace / approval / policy version field reference |
