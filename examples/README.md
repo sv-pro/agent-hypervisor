@@ -55,6 +55,26 @@ python examples/workarounds/01_input_classification.py
 3. Review `examples/workarounds/README.md`
 4. Check `examples/integrations/` for your framework
 
+### [provenance_firewall/](provenance_firewall/) — Provenance-Aware Tool Execution Firewall
+
+A runnable MVP demonstrating the core Agent Hypervisor security idea: a provenance-aware firewall that sits between an agent and its tools, blocking dangerous tool calls when their arguments originate from untrusted data sources.
+
+**Run this** to see prompt injection blocked at the enforcement boundary rather than the model layer.
+
+```bash
+python examples/provenance_firewall/demo.py
+```
+
+Three modes are demonstrated:
+
+| Mode | Description | Verdict |
+| --- | --- | --- |
+| A — Unprotected | Agent reads malicious doc, proposes send to `attacker@example.com` | ALLOW (baseline) |
+| B — Protected | Same scenario with firewall on | DENY (external_document provenance) |
+| C — Trusted source | Agent uses declared contacts file as recipient source | ASK (clean chain, confirmation required) |
+
+See [provenance_firewall/README.md](provenance_firewall/README.md) for full details.
+
 ---
 
 ## Contributing Examples

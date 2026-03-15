@@ -46,3 +46,4 @@ agentdojo-bench/.env
 
 # Cursor rules
 .cursorrules
+traces/provenance_firewall/*.json
