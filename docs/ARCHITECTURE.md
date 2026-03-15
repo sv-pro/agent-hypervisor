@@ -98,7 +98,7 @@ World Manifest (YAML)
 The repository is organized to match the five-layer architecture directly.
 
 | Layer | Purpose | Planned Module | Current Status |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Layer 1: Input Boundary | Trust classification, taint assignment, injection stripping | `src/boundary/` | PoC in `src/hypervisor.py` |
 | Layer 2: Universe Definition | Object schema registry, capability set, World Physics | `src/universe/` | Partial — policy YAML |
 | Layer 3: Agent Interface | Semantic Event delivery, virtualized memory | `src/agent_interface/` | Stub in `src/agent_stub.py` |
@@ -197,7 +197,7 @@ See `examples/basic/01_simple_demo.py` for the runnable PoC demonstration of all
 The following are architecturally specified but not yet present in code:
 
 | Component | Status | Issue |
-|---|---|---|
+| --- | --- | --- |
 | World Manifest schema (YAML format) | Specified in WHITEPAPER §12, not formalized | #10 |
 | Compiler CLI (`ahc build`) | Not implemented | #11 |
 | Taint rule compiler | Not implemented | #12 |
@@ -211,6 +211,22 @@ The PoC in `src/hypervisor.py` demonstrates the determinism and ontological boun
 
 ---
 
+---
+
+## 8. Open Architectural Decisions
+
+The following decisions are unresolved. Each is tracked as an ADR in [`docs/ADR/`](ADR/README.md) with options, criteria, and a resolution trigger.
+
+| ID | Decision | Phase | Status |
+| --- | --- | --- | --- |
+| [ADR-001](ADR/ADR-001-manifest-schema-versioning.md) | Manifest schema versioning: additive superset vs. clean break (v1 → v2) | v0.2 | Open |
+| [ADR-002](ADR/ADR-002-ahc-simulate-fidelity.md) | `ahc simulate` fidelity: compiled artifact vs. YAML re-interpretation | v0.3 | Open |
+| [ADR-003](ADR/ADR-003-policy-ir-stability.md) | Policy IR: internal compiler format vs. stable external interface | v0.4 | Open |
+| [ADR-004](ADR/ADR-004-policy-language-backend.md) | Policy language backend: Datalog vs. Rego vs. Cedar | v0.4 | Open |
+
+---
+
 *See [WHITEPAPER.md](WHITEPAPER.md) for the full architectural thesis.*
 *See [CONCEPT.md](../CONCEPT.md) for architectural invariants and conformance criteria.*
 *See [THREAT_MODEL.md](../THREAT_MODEL.md) for trust assumptions and in-scope threats.*
+*See [ADR/](ADR/README.md) for open architectural decisions.*

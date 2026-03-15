@@ -16,7 +16,27 @@
       "Bash(python3 -c \"from agentdojo.agent_pipeline.agent_pipeline import PipelineConfig; import inspect; print\\(inspect.signature\\(PipelineConfig\\)\\)\")",
       "Bash(tee log_ah_small.txt)",
       "Bash(tee log_ah_medium.txt)",
-      "Bash(git add .gitignore agentdojo-bench/ah_defense/pipeline.py agentdojo-bench/run_benchmark.py .claude/settings.json)"
+      "Bash(git add .gitignore agentdojo-bench/ah_defense/pipeline.py agentdojo-bench/run_benchmark.py .claude/settings.json)",
+      "Bash(git checkout -b claude/analyze-utility-drop)",
+      "Bash(python3 -m ah_defense.generate_manifest --suite workspace)",
+      "Bash(tee ../log_ah_small_fixed.txt)",
+      "Bash(tee log_ah_small_fixed2.txt)",
+      "Bash(tee log_standalone.txt)",
+      "Bash(git add agentdojo-bench/ah_defense/intent_validator.py agentdojo-bench/ah_defense/pipeline.py agentdojo-bench/ah_defense/manifests/workspace_v2.yaml agentdojo-bench/ah_defense/generate_manifest.py)",
+      "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) print\\(json.dumps\\(data, indent=2\\)\\) \")",
+      "WebSearch",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:agentdojo.spylab.ai)",
+      "WebFetch(domain:simonwillison.net)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:spylab.ai)",
+      "WebFetch(domain:www.researchgate.net)",
+      "Bash(tee log_medium.txt)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(suite, defense, d[suite][defense][''''metrics'''']\\) for suite in d for defense in d[suite]]\")",
+      "Bash(source ../.venv/bin/activate)",
+      "Bash(tee log_full_scope.txt)",
+      "Bash(.venv/bin/python -c \"import textual; print\\(textual.__version__\\)\")"
     ]
   }
 }

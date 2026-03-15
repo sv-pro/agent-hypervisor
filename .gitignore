@@ -29,7 +29,11 @@ node_modules/
 
 # Logs
 *.log
+log_*.txt
 CLAUDE_CODE_PROMPT*.md
+
+# Claude Code project memory (local session state)
+.claude/projects/
 
 # AgentDojo benchmark artifacts
 agentdojo-bench/runs/

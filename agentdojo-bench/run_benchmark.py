@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Literal
@@ -117,6 +118,7 @@ def make_pipeline(
     defense: str,
     suite_name: str,
     system_message: str,
+    delay: float = 0.0,
 ) -> AgentPipeline:
     """
     Build the appropriate pipeline for a given defense.
@@ -149,19 +151,38 @@ def make_pipeline(
             manifests_dir=manifests_dir,
         )
         pipeline.name = f"{model}-agent_hypervisor"
-        return pipeline
+    else:
+        # Built-in defenses via AgentPipeline.from_config
+        config = PipelineConfig(
+            llm=model,
+            model_id=None,
+            defense=None if defense == DEFENSE_NONE else defense,
+            system_message_name=None,
+            system_message=system_message,
+        )
+        pipeline = AgentPipeline.from_config(config)
+        pipeline.name = f"{model}-{defense}"
 
-    # Built-in defenses via AgentPipeline.from_config
-    config = PipelineConfig(
-        llm=model,
-        model_id=None,
-        defense=None if defense == DEFENSE_NONE else defense,
-        system_message_name=None,
-        system_message=system_message,
-    )
-    pipeline = AgentPipeline.from_config(config)
-    pipeline.name = f"{model}-{defense}"
+    if delay > 0.0:
+        _wrap_pipeline_with_delay(pipeline, delay)
+
     return pipeline
+
+
+def _wrap_pipeline_with_delay(pipeline: AgentPipeline, delay: float) -> None:
+    """Monkey-patch pipeline.query to sleep `delay` seconds before each call.
+
+    This is the least-invasive hook available without modifying AgentDojo internals.
+    Sleeping before the query (rather than after) gives the API a breather between
+    consecutive task pairs, which is when rate-limit bursts occur.
+    """
+    original_query = pipeline.query
+
+    def _delayed_query(*args, **kwargs):
+        time.sleep(delay)
+        return original_query(*args, **kwargs)
+
+    pipeline.query = _delayed_query
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +323,12 @@ def compute_metrics(results: SuiteResults) -> dict:
     default=False,
     help="Enable AH pipeline DEBUG logging (shows taint/verdict per tool call).",
 )
+@click.option(
+    "--delay",
+    default=0.0,
+    type=float,
+    help="Seconds to sleep between task pairs (reduces 429 rate-limit errors). Default: 0.",
+)
 def main(
     model: str,
     scope: str | None,
@@ -318,6 +345,7 @@ def main(
     force_rerun: bool,
     verbose: bool,
     debug_ah: bool,
+    delay: float,
 ) -> None:
     """Run Agent Hypervisor vs. AgentDojo benchmark."""
 
@@ -373,7 +401,7 @@ def main(
                    f"[bold]Model:[/bold] {model}  "
                    f"[bold]Attack:[/bold] {attack_str or 'none'}")
 
-            pipeline = make_pipeline(model, defense, suite_name, system_message)
+            pipeline = make_pipeline(model, defense, suite_name, system_message, delay=delay)
 
             with OutputLogger(str(logdir)):
                 if no_attack or attack_str is None:
