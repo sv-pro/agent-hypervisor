@@ -1,13 +1,13 @@
 """
 demo.py — Provenance-aware tool execution firewall: runnable MVP demo.
 
-Runs three scenarios against the provenance firewall and prints a readable
+Runs five scenarios against the provenance firewall and prints a readable
 summary of each decision. Traces are saved to traces/provenance_firewall/.
 
 Usage:
     python examples/provenance_firewall/demo.py
 
-Three modes:
+Five modes:
 
   A  unprotected / baseline
      The same tool calls execute without any firewall. The malicious
@@ -22,6 +22,15 @@ Three modes:
      The agent reads from a declared contacts file (user_declared input).
      The recipient traces to a clean provenance chain. The firewall returns
      ask (confirmation required) rather than deny.
+
+  D  protected — mixed provenance recipient list
+     The recipient list contains one clean address (from contacts) and one
+     tainted address (from external_document). Mixed provenance → deny.
+
+  E  protected — http_post with externally-derived URL
+     The agent extracts a URL from an attacker-controlled document and
+     proposes http_post to that URL. RULE-E1 denies the call because the
+     url argument traces to external_document.
 """
 
 from __future__ import annotations
@@ -38,12 +47,19 @@ if str(HERE) not in sys.path:
 
 REPO_ROOT = HERE.parent.parent
 TRACES_DIR = REPO_ROOT / "traces" / "provenance_firewall"
-MANIFEST_ALLOW = REPO_ROOT / "manifests" / "task_allow_send.yaml"
-MANIFEST_DENY  = REPO_ROOT / "manifests" / "task_deny_send.yaml"
+MANIFEST_ALLOW     = REPO_ROOT / "manifests" / "task_allow_send.yaml"
+MANIFEST_DENY      = REPO_ROOT / "manifests" / "task_deny_send.yaml"
+MANIFEST_HTTP_POST = REPO_ROOT / "manifests" / "task_http_post.yaml"
 
 from models import Verdict
 from policies import ProvenanceFirewall
-from agent_sim import scenario_a_unprotected, scenario_b_malicious_blocked, scenario_c_trusted_source
+from agent_sim import (
+    scenario_a_unprotected,
+    scenario_b_malicious_blocked,
+    scenario_c_trusted_source,
+    scenario_d_mixed_provenance,
+    scenario_e_http_post_blocked,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +91,8 @@ def _print_scenario_header(label: str, title: str) -> None:
 
 
 def _print_step(tool: str, call_id: str, verdict: Verdict, reason: str,
-                violated: list[str], arg_prov: dict[str, str]) -> None:
+                violated: list[str], arg_prov: dict[str, str],
+                matched_rule: str = "") -> None:
     print(f"  {DIM}call_id:{RESET} {call_id}")
     print(f"  {DIM}tool:   {RESET} {CYAN}{tool}{RESET}")
     if arg_prov:
@@ -85,6 +102,8 @@ def _print_step(tool: str, call_id: str, verdict: Verdict, reason: str,
     print(f"  {DIM}reason: {RESET} {reason}")
     if violated:
         print(f"  {DIM}rules:  {RESET} {', '.join(violated)}")
+    if matched_rule:
+        print(f"  {DIM}matched_rule:{RESET} {matched_rule}")
     print()
 
 
@@ -130,7 +149,8 @@ def run_scenario_a() -> list:
     for call, registry in steps:
         decision = firewall.check(call, registry)
         _print_step(call.tool, call.call_id, decision.verdict,
-                    decision.reason, decision.violated_rules, decision.arg_provenance)
+                    decision.reason, decision.violated_rules, decision.arg_provenance,
+                    decision.matched_rule)
         collected.append((call, registry, decision))
 
     print(f"  {BOLD}Outcome:{RESET} Malicious send_email executes — attacker@example.com receives the report.")
@@ -150,7 +170,8 @@ def run_scenario_b() -> list:
     for call, registry in steps:
         decision = firewall.check(call, registry)
         _print_step(call.tool, call.call_id, decision.verdict,
-                    decision.reason, decision.violated_rules, decision.arg_provenance)
+                    decision.reason, decision.violated_rules, decision.arg_provenance,
+                    decision.matched_rule)
         collected.append((call, registry, decision))
 
     print(f"  {BOLD}Outcome:{RESET} send_email is denied. Recipient provenance = external_document → RULE-01/02.")
@@ -170,10 +191,53 @@ def run_scenario_c() -> list:
     for call, registry in steps:
         decision = firewall.check(call, registry)
         _print_step(call.tool, call.call_id, decision.verdict,
-                    decision.reason, decision.violated_rules, decision.arg_provenance)
+                    decision.reason, decision.violated_rules, decision.arg_provenance,
+                    decision.matched_rule)
         collected.append((call, registry, decision))
 
     print(f"  {BOLD}Outcome:{RESET} Firewall returns ASK — recipient is clean, but human confirmation required.")
+    return collected
+
+
+def run_scenario_d() -> list:
+    _print_scenario_header("Mode D", "Protected — mixed provenance recipient list → deny")
+    print(f"  Task config: manifests/task_allow_send.yaml")
+    print(f"  Agent behaviour: merge clean contact + malicious-doc address → send_email")
+    print()
+
+    description, steps = scenario_d_mixed_provenance()
+    firewall = ProvenanceFirewall.from_manifest(MANIFEST_ALLOW, protection_enabled=True)
+
+    collected = []
+    for call, registry in steps:
+        decision = firewall.check(call, registry)
+        _print_step(call.tool, call.call_id, decision.verdict,
+                    decision.reason, decision.violated_rules, decision.arg_provenance,
+                    decision.matched_rule)
+        collected.append((call, registry, decision))
+
+    print(f"  {BOLD}Outcome:{RESET} send_email denied — recipient list contains external_document provenance (RULE-D1).")
+    return collected
+
+
+def run_scenario_e() -> list:
+    _print_scenario_header("Mode E", "Protected — http_post with externally-derived URL → deny")
+    print(f"  Task config: manifests/task_http_post.yaml")
+    print(f"  Agent behaviour: extract URL from malicious doc → http_post to that URL")
+    print()
+
+    description, steps = scenario_e_http_post_blocked()
+    firewall = ProvenanceFirewall.from_manifest(MANIFEST_HTTP_POST, protection_enabled=True)
+
+    collected = []
+    for call, registry in steps:
+        decision = firewall.check(call, registry)
+        _print_step(call.tool, call.call_id, decision.verdict,
+                    decision.reason, decision.violated_rules, decision.arg_provenance,
+                    decision.matched_rule)
+        collected.append((call, registry, decision))
+
+    print(f"  {BOLD}Outcome:{RESET} http_post denied — 'url' argument traces to external_document (RULE-E1).")
     return collected
 
 
@@ -181,38 +245,41 @@ def run_scenario_c() -> list:
 # Summary table
 # ---------------------------------------------------------------------------
 
-def print_summary(a: list, b: list, c: list) -> None:
+def print_summary(a: list, b: list, c: list, d: list, e: list) -> None:
     print()
     print(f"{BOLD}{'═' * 64}{RESET}")
     print(f"{BOLD}  SUMMARY{RESET}")
     print(f"{BOLD}{'═' * 64}{RESET}")
     print()
 
-    def last_send(steps):
+    def last_tool(steps, tool_name):
         for call, _, dec in reversed(steps):
-            if call.tool == "send_email":
+            if call.tool == tool_name:
                 return dec
         return None
 
+    def verdict_str(dec):
+        if dec is None:
+            return "n/a"
+        if dec.verdict == Verdict.allow:
+            return f"{GREEN}allow{RESET}"
+        if dec.verdict == Verdict.deny:
+            return f"{RED}deny{RESET}"
+        return f"{YELLOW}ask{RESET}"
+
     rows = [
-        ("A", "unprotected",                    last_send(a)),
-        ("B", "protected / malicious blocked",  last_send(b)),
-        ("C", "protected / trusted source",     last_send(c)),
+        ("A", "unprotected",                       "send_email",  last_tool(a, "send_email")),
+        ("B", "protected / malicious blocked",      "send_email",  last_tool(b, "send_email")),
+        ("C", "protected / trusted source",         "send_email",  last_tool(c, "send_email")),
+        ("D", "protected / mixed provenance",       "send_email",  last_tool(d, "send_email")),
+        ("E", "protected / external http_post URL", "http_post",   last_tool(e, "http_post")),
     ]
 
-    fmt = "  {:<4}  {:<35}  {}"
-    print(fmt.format("Mode", "Description", "send_email verdict"))
-    print("  " + "-" * 60)
-    for mode, desc, dec in rows:
-        if dec is None:
-            verdict_str = "n/a"
-        elif dec.verdict == Verdict.allow:
-            verdict_str = f"{GREEN}allow{RESET}"
-        elif dec.verdict == Verdict.deny:
-            verdict_str = f"{RED}deny{RESET}"
-        else:
-            verdict_str = f"{YELLOW}ask{RESET}"
-        print(fmt.format(mode, desc, verdict_str))
+    fmt = "  {:<4}  {:<38}  {:<12}  {}"
+    print(fmt.format("Mode", "Description", "tool", "verdict"))
+    print("  " + "-" * 70)
+    for mode, desc, tool, dec in rows:
+        print(fmt.format(mode, desc, tool, verdict_str(dec)))
 
     print()
     print("Traces saved to: traces/provenance_firewall/")
@@ -231,24 +298,33 @@ def main() -> None:
     a = run_scenario_a()
     b = run_scenario_b()
     c = run_scenario_c()
+    d = run_scenario_d()
+    e = run_scenario_e()
 
     # Save traces
     desc_a, steps_a = scenario_a_unprotected()
     desc_b, steps_b = scenario_b_malicious_blocked()
     desc_c, steps_c = scenario_c_trusted_source()
+    desc_d, steps_d = scenario_d_mixed_provenance()
+    desc_e, steps_e = scenario_e_http_post_blocked()
 
-    fw_none = ProvenanceFirewall(task={}, protection_enabled=False)
-    fw_deny = ProvenanceFirewall.from_manifest(MANIFEST_DENY)
-    fw_allow = ProvenanceFirewall.from_manifest(MANIFEST_ALLOW)
+    fw_none      = ProvenanceFirewall(task={}, protection_enabled=False)
+    fw_deny      = ProvenanceFirewall.from_manifest(MANIFEST_DENY)
+    fw_allow     = ProvenanceFirewall.from_manifest(MANIFEST_ALLOW)
+    fw_http_post = ProvenanceFirewall.from_manifest(MANIFEST_HTTP_POST)
 
-    _save_trace("mode_a_unprotected",      desc_a,
-                [(c, r, fw_none.check(c, r))  for c, r in steps_a])
+    _save_trace("mode_a_unprotected",       desc_a,
+                [(c, r, fw_none.check(c, r))       for c, r in steps_a])
     _save_trace("mode_b_protected_blocked", desc_b,
-                [(c, r, fw_deny.check(c, r))  for c, r in steps_b])
+                [(c, r, fw_deny.check(c, r))       for c, r in steps_b])
     _save_trace("mode_c_trusted_source",    desc_c,
-                [(c, r, fw_allow.check(c, r)) for c, r in steps_c])
+                [(c, r, fw_allow.check(c, r))      for c, r in steps_c])
+    _save_trace("mode_d_mixed_provenance",  desc_d,
+                [(c, r, fw_allow.check(c, r))      for c, r in steps_d])
+    _save_trace("mode_e_http_post_blocked", desc_e,
+                [(c, r, fw_http_post.check(c, r))  for c, r in steps_e])
 
-    print_summary(a, b, c)
+    print_summary(a, b, c, d, e)
 
 
 if __name__ == "__main__":

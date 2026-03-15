@@ -1,0 +1,33 @@
+# Task Manifest: api-report-poster
+#
+# The agent may read report documents and post summaries via http_post.
+# The destination URL must originate from system configuration — not from
+# document content. No trusted url_source is declared in this manifest,
+# so any URL derived from an external document will be denied by RULE-E1.
+
+task:
+  name: api-report-poster
+  description: >
+    Read report documents and POST summaries to an internal API endpoint.
+    The URL must come from system configuration, not from document content.
+  protection_enabled: true
+
+declared_inputs:
+  - id: report_documents
+    path: demo_data/reports/
+    roles:
+      - report_source
+      - data_source
+    provenance_class: user_declared
+
+action_grants:
+  - tool: read_file
+    effect: read_only
+    allowed: true
+
+  - tool: http_post
+    effect: outbound_side_effect
+    allowed: true
+    require_confirmation: true
+    # No url_source declared — any URL derived from external content is
+    # blocked by RULE-E1 (external_document cannot control http_post destination).

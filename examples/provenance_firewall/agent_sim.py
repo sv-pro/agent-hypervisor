@@ -36,9 +36,10 @@ from models import ProvenanceClass, Role, ToolCall, ValueRef
 
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-CONTACTS_FILE  = REPO_ROOT / "demo_data" / "contacts.txt"
-MALICIOUS_FILE = REPO_ROOT / "demo_data" / "malicious_doc.txt"
-REPORT_FILE    = REPO_ROOT / "demo_data" / "reports" / "q3_summary.txt"
+CONTACTS_FILE       = REPO_ROOT / "demo_data" / "contacts.txt"
+MALICIOUS_FILE      = REPO_ROOT / "demo_data" / "malicious_doc.txt"
+REPORT_FILE         = REPO_ROOT / "demo_data" / "reports" / "q3_summary.txt"
+MALICIOUS_API_FILE  = REPO_ROOT / "demo_data" / "malicious_api_doc.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +96,25 @@ def extract_email_from_document(doc_ref: ValueRef) -> ValueRef:
         value=extracted,
         provenance=ProvenanceClass.derived,
         roles=[Role.extracted_recipients],
+        parents=[doc_ref.id],
+        source_label=f"extracted from {doc_ref.source_label}",
+    )
+
+
+def extract_url_from_document(doc_ref: ValueRef) -> ValueRef:
+    """
+    Simulate the agent extracting a URL from a document.
+    The result is derived from external_document — provenance is tainted.
+    """
+    text = doc_ref.value or ""
+    match = re.search(r"https?://\S+", text)
+    extracted = match.group(0).rstrip(".") if match else "https://unknown.example.com"
+
+    return ValueRef(
+        id=f"extracted:url:{doc_ref.id}",
+        value=extracted,
+        provenance=ProvenanceClass.derived,
+        roles=[Role.url_target],
         parents=[doc_ref.id],
         source_label=f"extracted from {doc_ref.source_label}",
     )
@@ -254,5 +274,150 @@ def scenario_c_trusted_source() -> tuple[str, list[tuple[ToolCall, dict]]]:
         "Agent reads q3_summary.txt (report) and contacts.txt (declared input), "
         "selects 'reports@company.com' from contacts, proposes send_email — "
         "firewall checks provenance, returns ask (confirmation required)."
+    )
+    return description, steps
+
+
+def scenario_d_mixed_provenance() -> tuple[str, list[tuple[ToolCall, dict]]]:
+    """
+    Mode D: Firewall active.  Recipient list merges a clean contact with a
+    malicious-doc-derived address.  Mixed provenance → deny.
+    """
+    registry: dict[str, ValueRef] = {}
+    steps: list[tuple[ToolCall, dict]] = []
+
+    # Step 1: read malicious document (external_document)
+    doc_ref = read_file_as_external_document(MALICIOUS_FILE, "malicious_doc.txt")
+    registry[doc_ref.id] = doc_ref
+    steps.append((
+        ToolCall(
+            tool="read_file",
+            args={"path": ValueRef(id="arg:path:d1", value=str(MALICIOUS_FILE),
+                                   provenance=ProvenanceClass.system, source_label="system")},
+            call_id=f"call-{uuid.uuid4().hex[:6]}",
+        ),
+        dict(registry),
+    ))
+
+    # Step 2: read contacts (user_declared, recipient_source)
+    contacts_ref = read_file_as_declared_input(
+        CONTACTS_FILE, declared_id="approved_contacts", roles=[Role.recipient_source]
+    )
+    registry[contacts_ref.id] = contacts_ref
+    steps.append((
+        ToolCall(
+            tool="read_file",
+            args={"path": ValueRef(id="arg:path:d2", value=str(CONTACTS_FILE),
+                                   provenance=ProvenanceClass.system, source_label="system")},
+            call_id=f"call-{uuid.uuid4().hex[:6]}",
+        ),
+        dict(registry),
+    ))
+
+    # Step 3: extract a legitimate address from contacts
+    good_ref = extract_email_from_contacts(contacts_ref, index=2)  # reports@company.com
+    registry[good_ref.id] = good_ref
+
+    # Step 4: extract a malicious address from the document
+    bad_ref = extract_email_from_document(doc_ref)
+    registry[bad_ref.id] = bad_ref
+
+    # Step 5: merge both into a single "to" ValueRef — provenance DAG spans both
+    merged_ref = ValueRef(
+        id="merged:recipients:d",
+        value=[good_ref.value, bad_ref.value],
+        provenance=ProvenanceClass.derived,
+        roles=[Role.extracted_recipients],
+        parents=[good_ref.id, bad_ref.id],
+        source_label="merged recipient list",
+    )
+    registry[merged_ref.id] = merged_ref
+
+    # Step 6: propose send_email with the merged recipient list
+    steps.append((
+        ToolCall(
+            tool="send_email",
+            args={
+                "to": merged_ref,
+                "subject": ValueRef(id="arg:subject:d", value="Q3 Report",
+                                    provenance=ProvenanceClass.system, source_label="system"),
+                "body": ValueRef(id="arg:body:d", value="See attached.",
+                                 provenance=ProvenanceClass.system, source_label="system"),
+            },
+            call_id=f"call-{uuid.uuid4().hex[:6]}",
+        ),
+        dict(registry),
+    ))
+
+    description = (
+        "Agent merges an approved contact with an address extracted from the malicious doc, "
+        "then proposes send_email — firewall detects mixed provenance and denies."
+    )
+    return description, steps
+
+
+def scenario_e_http_post_blocked() -> tuple[str, list[tuple[ToolCall, dict]]]:
+    """
+    Mode E: Firewall active.  Agent reads an attacker-controlled document that
+    contains a URL.  The URL is extracted (derived from external_document) and
+    used as the destination for http_post.  Firewall denies.
+    """
+    registry: dict[str, ValueRef] = {}
+    steps: list[tuple[ToolCall, dict]] = []
+
+    # Step 1: read the malicious API doc (external_document with injected URL)
+    api_doc_ref = read_file_as_external_document(MALICIOUS_API_FILE, "malicious_api_doc.txt")
+    registry[api_doc_ref.id] = api_doc_ref
+    steps.append((
+        ToolCall(
+            tool="read_file",
+            args={"path": ValueRef(id="arg:path:e1", value=str(MALICIOUS_API_FILE),
+                                   provenance=ProvenanceClass.system, source_label="system")},
+            call_id=f"call-{uuid.uuid4().hex[:6]}",
+        ),
+        dict(registry),
+    ))
+
+    # Step 2: read the legitimate report as the payload source
+    report_ref = read_file_as_external_document(REPORT_FILE, "q3_summary.txt")
+    registry[report_ref.id] = report_ref
+    steps.append((
+        ToolCall(
+            tool="read_file",
+            args={"path": ValueRef(id="arg:path:e2", value=str(REPORT_FILE),
+                                   provenance=ProvenanceClass.system, source_label="system")},
+            call_id=f"call-{uuid.uuid4().hex[:6]}",
+        ),
+        dict(registry),
+    ))
+
+    # Step 3: extract the URL from the malicious doc (tainted: derived from external_document)
+    url_ref = extract_url_from_document(api_doc_ref)
+    registry[url_ref.id] = url_ref
+
+    # Step 4: wrap the report content as the HTTP body
+    body_ref = ValueRef(
+        id="payload:report:e",
+        value=report_ref.value[:500],
+        provenance=ProvenanceClass.derived,
+        roles=[Role.payload_source],
+        parents=[report_ref.id],
+        source_label="report payload",
+    )
+    registry[body_ref.id] = body_ref
+
+    # Step 5: propose http_post with attacker-controlled URL
+    steps.append((
+        ToolCall(
+            tool="http_post",
+            args={"url": url_ref, "body": body_ref},
+            call_id=f"call-{uuid.uuid4().hex[:6]}",
+        ),
+        dict(registry),
+    ))
+
+    description = (
+        "Agent reads a document containing an injected URL and proposes http_post "
+        "to that URL — firewall detects external_document provenance on 'url' and denies."
     )
     return description, steps

@@ -46,6 +46,8 @@ class Role(str, Enum):
     report_source        = "report_source"
     data_source          = "data_source"
     generated_report     = "generated_report"
+    url_target           = "url_target"       # destination URL for http_post
+    payload_source       = "payload_source"   # body/payload for http_post
 
 
 class Verdict(str, Enum):
@@ -117,6 +119,7 @@ class Decision:
     reason: str
     violated_rules: list[str] = field(default_factory=list)
     arg_provenance: dict[str, str] = field(default_factory=dict)
+    matched_rule: str = ""   # id of the declarative policy rule that determined this verdict
 
     def to_dict(self) -> dict:
         return {
@@ -126,4 +129,5 @@ class Decision:
             "reason": self.reason,
             "violated_rules": self.violated_rules,
             "arg_provenance": self.arg_provenance,
+            "matched_rule": self.matched_rule,
         }

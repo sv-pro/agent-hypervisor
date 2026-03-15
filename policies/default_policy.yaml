@@ -1,0 +1,120 @@
+# policies/default_policy.yaml
+#
+# Declarative provenance firewall rules.
+#
+# Rules are evaluated in order. The first matching rule wins.
+# When multiple rules could match, the engine returns the strictest verdict
+# (deny > ask > allow).
+#
+# Rule schema:
+#   id:               unique rule identifier — surfaced in Decision.matched_rule
+#   description:      human-readable explanation
+#   applies_to:       list of tool names; ["*"] matches all tools
+#   condition:
+#     type: tool_not_granted          — tool absent from action_grants
+#     type: recipient_provenance      — provenance on send_email "to" arg
+#       has_provenance: <class>       — this class must appear in the chain
+#       unless_has_declared_role: <r> — unless a declared ancestor has this role
+#     type: mixed_provenance          — recipient list has both tainted and clean ancestors
+#       recipient_arg: "to"
+#       tainted_class: external_document
+#     type: no_declared_source        — no declared ancestor with required_role
+#       required_role: <role>
+#     type: any_arg_has_provenance    — any (or a named) arg traces to a class
+#       provenance_class: <class>
+#       arg_name: <name>              — optional; omit to match any arg
+#     type: require_confirmation      — grant has require_confirmation: true
+#   verdict:          allow | deny | ask
+#   reason_template:  human-readable; {tool}, {arg}, {source}, {least_trusted} interpolated
+
+rules:
+
+  - id: RULE-04
+    description: >
+      Tool not granted in the task manifest — deny unconditionally.
+    applies_to: ["*"]
+    condition:
+      type: tool_not_granted
+    verdict: deny
+    reason_template: "Tool '{tool}' is not granted in this task manifest"
+
+  - id: RULE-D1
+    description: >
+      Recipient list has mixed provenance — at least one address traces to
+      external_document while another traces to a clean user_declared source.
+      The entire list is tainted; deny the call.
+    applies_to: ["send_email"]
+    condition:
+      type: mixed_provenance
+      recipient_arg: "to"
+      tainted_class: external_document
+    verdict: deny
+    reason_template: >
+      Recipient list contains mixed provenance — one or more addresses trace to
+      external_document. Entire recipient list is denied (mixed-provenance policy).
+
+  - id: RULE-01
+    description: >
+      external_document anywhere in the recipient provenance chain is a hard block,
+      unless a declared recipient_source ancestor is also present.
+      Prompt-injected addresses carry this taint regardless of their content.
+    applies_to: ["send_email"]
+    condition:
+      type: recipient_provenance
+      has_provenance: external_document
+      unless_has_declared_role: recipient_source
+    verdict: deny
+    reason_template: >
+      Recipient provenance traces to external_document (source: '{source}') —
+      external documents cannot authorize outbound email
+
+  - id: RULE-02
+    description: >
+      No declared recipient_source found in the provenance chain.
+      Without an operator-declared trust anchor the send is denied.
+    applies_to: ["send_email"]
+    condition:
+      type: no_declared_source
+      required_role: recipient_source
+    verdict: deny
+    reason_template: >
+      Recipient has no declared recipient_source in provenance chain
+      (least trusted: '{least_trusted}')
+
+  - id: RULE-E1
+    description: >
+      http_post 'url' argument traces to external_document — SSRF / exfiltration risk.
+      External content must never control the destination of an outbound HTTP call.
+    applies_to: ["http_post"]
+    condition:
+      type: any_arg_has_provenance
+      arg_name: "url"
+      provenance_class: external_document
+    verdict: deny
+    reason_template: >
+      http_post 'url' argument traces to external_document — SSRF/exfiltration
+      risk; external content cannot control outbound HTTP destination
+
+  - id: RULE-03
+    description: >
+      Provenance is sticky. Any argument to a side-effect tool that traces back
+      to external_document is blocked, regardless of how many derivation steps
+      lie in between. Wrapping does not launder provenance.
+    applies_to: ["http_post", "write_file"]
+    condition:
+      type: any_arg_has_provenance
+      provenance_class: external_document
+    verdict: deny
+    reason_template: >
+      Argument '{arg}' traces to external_document — external content cannot
+      drive side-effect tools (provenance stickiness)
+
+  - id: RULE-05
+    description: >
+      Tool marked require_confirmation and all prior rules passed — escalate to
+      ask so a human can preview the call before execution.
+    applies_to: ["*"]
+    condition:
+      type: require_confirmation
+    verdict: ask
+    reason_template: "Tool '{tool}' requires human confirmation before execution"
