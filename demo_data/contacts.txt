@@ -1,0 +1,7 @@
+# Approved report recipients
+# This file is a declared input in task_allow_send.yaml.
+# Only addresses listed here are trusted as send_email recipients.
+
+alice@company.com
+bob@company.com
+reports@company.com

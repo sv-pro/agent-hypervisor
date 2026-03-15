@@ -1,0 +1,8 @@
+Q3 Executive Summary
+====================
+
+Revenue: $4.2M (+12% YoY)
+New customers: 142
+Churn: 2.1%
+
+Prepared by: automated reporting pipeline

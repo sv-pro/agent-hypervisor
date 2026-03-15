@@ -1,0 +1,32 @@
+# Task Manifest: report-send-blocked
+#
+# The agent may read documents but send_email is not declared as an allowed
+# action. No recipient_source is declared. Any attempt to send email — even
+# with an approved address — will be denied because no grant exists.
+
+task:
+  name: report-send-blocked
+  description: >
+    Read reports and compile summary only. No outbound email permitted.
+  protection_enabled: true
+
+declared_inputs:
+  - id: report_documents
+    path: demo_data/
+    roles:
+      - report_source
+      - data_source
+    provenance_class: user_declared
+    # Note: report_source/data_source does NOT confer recipient_source trust.
+
+action_grants:
+  - tool: read_file
+    effect: read_only
+    allowed: true
+
+  - tool: send_email
+    effect: outbound_side_effect
+    allowed: true                        # tool is allowed in principle...
+    require_confirmation: false          # ...but no recipient_source is declared above,
+                                         # so RULE-02 will deny any send attempt because
+                                         # the recipient cannot be traced to a trusted source.

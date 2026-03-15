@@ -1,0 +1,33 @@
+# Task Manifest: report-send-allowed
+#
+# The agent may read documents and send a report email.
+# Recipients must come from the declared contacts file (recipient_source).
+# Outbound email requires confirmation before executing (ask verdict).
+
+task:
+  name: report-send-allowed
+  description: >
+    Read reports, compile summary, send to approved recipients from contacts list.
+  protection_enabled: true
+
+# Declared inputs: sources the agent is explicitly authorised to trust.
+# Values derived from these sources carry a trusted provenance chain.
+declared_inputs:
+  - id: approved_contacts
+    path: demo_data/contacts.txt
+    roles:
+      - recipient_source
+    provenance_class: user_declared
+
+# What actions are permitted and under what conditions.
+action_grants:
+  - tool: read_file
+    effect: read_only
+    allowed: true
+
+  - tool: send_email
+    effect: outbound_side_effect
+    allowed: true
+    require_confirmation: true          # returns "ask" verdict — human must approve
+    recipient_must_come_from:
+      - recipient_source                 # "to" arg provenance must include this role
