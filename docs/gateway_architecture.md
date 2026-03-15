@@ -1,9 +1,58 @@
 # Gateway Architecture
 
-The Agent Hypervisor Tool Gateway is a **centralized execution control layer**
-for AI agent tools. It intercepts every tool call from an agent, enforces
-provenance-based policy, and either executes the tool, blocks it, or requests
-human approval.
+The Agent Hypervisor Tool Gateway is an **execution governance layer**
+that sits between an AI agent runtime and the external systems the agent
+can affect.  Every tool call is evaluated against provenance policy before
+execution.  Nothing executes without passing the enforcement pipeline.
+
+```
+  Agent Runtime  (LLM + tool loop)
+       │
+       │  POST /tools/execute
+       │  {tool, arguments: {arg: {value, source, parents, role}}}
+       ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │           Agent Hypervisor Gateway                      │
+  │                                                         │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │  Enforcement Pipeline                           │   │
+  │  │                                                 │   │
+  │  │  1. Build ValueRef graph from ArgSpec inputs    │   │
+  │  │  2. PolicyEngine.evaluate()      ──► verdict    │◄──┤── YAML rules
+  │  │  3. ProvenanceFirewall.check()   ──► verdict    │◄──┤── structural rules
+  │  │  4. Combine: deny > ask > allow                 │   │
+  │  │  5. Write TraceEntry + policy_version link      │───┤──► TraceStore
+  │  └──────────────────┬──────────────────────────────┘   │
+  │                     │                                   │
+  │         ┌───────────┼──────────────┐                    │
+  │         ▼           ▼              ▼                    │
+  │       deny         ask           allow                  │
+  │       403          200            200                   │
+  │                 ┌──────┐      ┌───────┐                 │
+  │                 │Appro-│      │Execute│                 │
+  │                 │val   │      │adapter│                 │
+  │                 │Record│      └───┬───┘                 │
+  │                 └──┬───┘          │                     │
+  │          ApprovalStore            │── result            │
+  └────────────────────┼──────────────┼─────────────────────┘
+                       ▼              ▼
+              POST /approvals/{id}  External Systems
+              (reviewer decides)    (email · HTTP · filesystem)
+```
+
+**Approval path:**  When verdict is `ask`, an `ApprovalRecord` is stored
+(`.data/approvals/`) and an `approval_id` returned.  A reviewer posts to
+`POST /approvals/{id}` to approve (execute) or reject.  Both outcomes
+produce a trace entry with the reviewer identity and original verdict.
+
+**Trace persistence:**  Every evaluation writes to `.data/traces.jsonl`.
+Traces carry the `policy_version` active at decision time.  All data
+survives process restarts.
+
+**Policy versioning:**  Every distinct policy content fingerprint is
+recorded in `.data/policy_history.jsonl`.  `GET /policy/history` returns
+the version timeline.  Historical traces remain linked to the version that
+produced them.
 
 ---
 

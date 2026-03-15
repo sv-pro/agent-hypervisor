@@ -1,267 +1,175 @@
 # Agent Hypervisor
 
-**A provenance-aware execution firewall for AI agents.**
+**An execution governance layer for AI agent tools.**
+
+AI agents can execute real-world actions through tools — sending email,
+making HTTP requests, writing files.  Most current defenses operate at
+the prompt layer, classifying whether inputs *look* malicious.
+
+Agent Hypervisor introduces a different control point: **the execution
+boundary**.  Every tool call is evaluated against the provenance of its
+arguments before anything executes.  The check is structural, not
+probabilistic.
 
 ---
 
-## Problem
+## Quickstart
 
-LLM agents can execute tools that cause real-world side effects — sending email,
-writing files, making HTTP requests. Two classes of attack exploit this directly:
+```bash
+pip install fastapi uvicorn pyyaml
+python scripts/run_showcase_demo.py
+```
 
-**Prompt injection** — an attacker embeds malicious instructions inside content
-the agent reads (documents, emails, web pages). The agent follows those
-instructions and executes unintended tool calls.
+This starts the gateway and runs a three-scenario demo:
 
-**Data exfiltration** — an agent processing sensitive data is manipulated into
-sending that data to an attacker-controlled endpoint via a side-effect tool.
-
-Traditional defenses focus on *prompt filtering*: detecting injection patterns in
-text before they reach the model. This approach is probabilistic and bypassable.
-The injected instruction does not need to look malicious — it just needs to be
-misclassified.
-
-This project takes a different approach: **enforce security at the tool execution
-boundary**, not at the input boundary.
+1. A file read — passes through with no friction
+2. A prompt injection attempt — blocked deterministically
+3. A legitimate sensitive action — held for human approval, then executed
 
 ---
 
-## Core Idea
+## The Problem
 
-Every value the agent works with — file contents, extracted strings, recipient
-addresses — carries a **provenance label** that records where it came from:
+LLM agents use tools that cause real-world side effects.  Two classes
+of attack exploit this:
+
+**Prompt injection** — an attacker embeds malicious instructions inside
+content the agent reads (documents, emails, web pages).  The agent
+follows those instructions and routes attacker-controlled data to a
+side-effect tool.
+
+**Data exfiltration** — an agent processing sensitive data is
+manipulated into sending that data to an attacker-controlled endpoint
+via a legitimate-looking tool call.
+
+The common structure of both attacks: **a tool argument is derived from
+untrusted content**.  The text may look benign.  The problem is
+structural — it is in the derivation chain of the argument.
+
+---
+
+## The Approach
+
+Every tool argument carries a **provenance label** recording where it
+came from:
 
 | Provenance class    | Meaning                                          |
 |---------------------|--------------------------------------------------|
 | `external_document` | Content from files, emails, web pages            |
-| `derived`           | Computed or extracted from one or more parents   |
+| `derived`           | Computed from one or more parents                |
 | `user_declared`     | Explicitly declared by the operator in the task  |
-| `system`            | Hardcoded by the system — no user influence      |
+| `system`            | Hardcoded — no user or document influence        |
 
-When the agent proposes a tool call, the **Provenance Firewall** inspects the
-derivation chain of each argument and evaluates it against a declarative policy:
+The provenance label is sticky through derivation.  If an email address
+is extracted from an external document, the resulting `ValueRef` traces
+back to `external_document` — even if the extraction passes through
+intermediate variables.
 
-```
-Agent
- ↓  proposes ToolCall(tool, args: ValueRef…)
-Provenance Firewall
- ↓  resolve_chain(arg) → inspect full ancestry
- ↓  match against policy rules
- ↓  verdict: allow / deny / ask
-Tool Execution (or blocked)
- ↓
-External Effects (email, HTTP, file writes)
-```
+At execution time, the gateway walks the **full derivation chain** of
+every argument and evaluates it against a policy.  A three-way verdict
+controls what happens:
 
-The decision is based on **structure** — the provenance graph — not on matching
-specific strings. Any injection pattern that causes the agent to extract a
-recipient from an external document is caught, regardless of the text used.
+- **allow** — tool executes, result returned
+- **deny** — blocked, reason and trace recorded
+- **ask** — held pending human approval; `approval_id` returned
+
+The check is deterministic.  There are no classifiers to fool.
 
 ---
 
 ## Architecture
 
 ```
-LLM / Agent
-     │
-     │  POST /tools/execute  {tool, arguments: {arg: ArgSpec}}
-     ▼
-┌──────────────────────────────────────────┐
-│              Tool Gateway                │
-│           (gateway_server.py)            │
-│                                          │
-│  ┌──────────────────────────────────┐    │
-│  │         ExecutionRouter          │    │
-│  │                                  │    │
-│  │  1. Convert ArgSpec → ValueRef   │    │
-│  │  2. PolicyEngine.evaluate()      │◄── hot-reloadable YAML
-│  │  3. ProvenanceFirewall.check()   │◄── structural rules
-│  │  4. Combine: deny > ask > allow  │    │
-│  │  5. Write TraceEntry (always)    │    │
-│  └────────────────┬─────────────────┘    │
-│                   │                      │
-│       ┌───────────┼───────────┐          │
-│       ▼           ▼           ▼          │
-│     deny         ask        allow        │
-│     403         200         200          │
-│              approval_    execute        │
-│              required     adapter        │
-└──────────────────────────────────────────┘
+  Agent / LLM Runtime
+       │
+       │  POST /tools/execute  {tool, arguments: {arg: ArgSpec}}
+       ▼
+  ┌────────────────────────────────────────────┐
+  │        Agent Hypervisor Gateway            │
+  │                                            │
+  │  ┌──────────────────────────────────────┐  │
+  │  │  1. Resolve provenance chains        │  │
+  │  │  2. PolicyEngine.evaluate()          │◄─┤─ YAML rules (hot-reload)
+  │  │  3. ProvenanceFirewall.check()       │◄─┤─ structural rules
+  │  │  4. Combine: deny > ask > allow      │  │
+  │  │  5. Write TraceEntry (always)        │  │
+  │  └────────────────┬─────────────────────┘  │
+  │                   │                        │
+  │       ┌───────────┼───────────┐             │
+  │       ▼           ▼           ▼             │
+  │     deny         ask        allow           │
+  │     403          200         200            │
+  │              approval     execute           │
+  │              record       adapter           │
+  └────────────────────────────────────────────┘
 ```
 
-**Provenance tracking** — Every `ValueRef` carries its origin class, semantic
-roles, and a pointer to its parent `ValueRef`s. The chain is walked at
-evaluation time to determine the least-trusted ancestor.
+All decisions persist to `.data/` and survive process restarts.  Every
+trace entry links to the exact policy version active when the decision
+was made.
 
-**Policy evaluation** — Rules in `policies/default_policy.yaml` match on tool
-name, argument name, and provenance conditions. The highest-precedence verdict
-wins (deny > ask > allow).
-
-**Allow / deny / ask** — The three-way verdict allows the firewall to block
-clear violations, require human confirmation for borderline cases, and pass
-clean calls through without friction.
-
-**Trace logging** — Every evaluation emits a structured trace record with the
-tool name, argument provenance chain, matched rule, and final verdict.
-
-See [docs/gateway_architecture.md](docs/gateway_architecture.md) for the full
-component map and HTTP API reference.
+See [docs/gateway_architecture.md](docs/gateway_architecture.md) for the
+full component map, approval flow diagram, and HTTP API reference.
 
 ---
 
-## Tool Gateway
+## Comparison
 
-The gateway is an HTTP server that sits in front of every tool call. Agents
-never call tools directly — they send a `POST /tools/execute` request with
-provenance-labeled arguments, and the gateway decides what happens.
+| | Prompt Guardrails | Tool Allowlists | Dual-LLM / CaMeL | Agent Hypervisor |
+|---|---|---|---|---|
+| **Execution boundary** | Pre-LLM (input) | Tool name only | LLM level | Argument level |
+| **Provenance awareness** | No | No | Partial | Yes — full chain |
+| **Decision mechanism** | Probabilistic | Static list | Context separation | Structural check |
+| **Approval workflow** | No | No | No | Yes |
+| **Audit trail** | No | No | No | Yes — persisted |
+| **Policy versioning** | No | Manual | No | Yes |
+| **Integration point** | Input filter | Framework hook | Model layer | HTTP gateway |
 
-```bash
-# Start the gateway
-python scripts/run_gateway.py
+The key distinction: Agent Hypervisor checks **where arguments came
+from**, not whether they look malicious.  An injection does not need to
+contain keywords.  It just needs to cause untrusted data to flow into a
+side-effect tool — which is detectable at the execution boundary.
 
-# Execute a tool (curl)
-curl -s -X POST http://127.0.0.1:8080/tools/execute \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "tool": "send_email",
-    "arguments": {
-      "to":      {"value": "alice@company.com", "source": "user_declared"},
-      "subject": {"value": "Report",            "source": "system"},
-      "body":    {"value": "See attached.",      "source": "system"}
-    }
-  }'
+See [docs/benchmark_brief.md](docs/benchmark_brief.md) for a full
+analysis of the attack surface and why existing defenses fall short.
+
+---
+
+## Approval Workflow
+
+When the verdict is `ask`, the tool is not executed immediately.
+A pending approval record is created and the `approval_id` returned.
+
+```
+POST /tools/execute → verdict=ask, approval_id=X
+     │
+     ├── GET  /approvals/{X}    reviewer inspects the request
+     └── POST /approvals/{X}    reviewer decides
+              │
+              ├── {approved: true}   → tool executed → verdict=allow
+              └── {approved: false}  → blocked        → verdict=deny
 ```
 
-Built-in tool adapters: `send_email`, `http_post`, `read_file`.
-
-Decisions, approvals, and policy versions are written to `.data/` and survive
-process restarts. Query them:
-
-```bash
-curl http://localhost:8080/traces          # execution log
-curl http://localhost:8080/approvals       # pending / resolved approvals
-curl http://localhost:8080/policy/history  # policy version timeline
-```
-
-### Python client
+Both outcomes produce a trace entry with `original_verdict=ask` and the
+reviewer's identity.  Pending approvals survive process restarts.
 
 ```python
 from agent_hypervisor.gateway_client import GatewayClient, arg
 
 client = GatewayClient("http://localhost:8080")
 
-response = client.execute_tool(
-    tool="send_email",
-    arguments={
-        "to":      arg("alice@company.com", "user_declared", role="recipient_source"),
-        "subject": arg("Q3 Report",          "system"),
-        "body":    arg("See attached.",       "system"),
-    },
-)
-print(response["verdict"])  # "allow" | "deny" | "ask"
-```
-
----
-
-## Approval Workflow
-
-When the verdict is `ask`, the tool is not executed. A pending approval record
-is created and the `approval_id` is returned to the caller. A reviewer can then
-inspect and resolve the request:
-
-```
-POST /tools/execute → verdict=ask, approval_id=X
-     │
-     ├── GET  /approvals/{X}    (reviewer inspects)
-     └── POST /approvals/{X}    (reviewer decides)
-              │
-              ├── {approved: true}   → tool executed → verdict=allow
-              └── {approved: false}  → denied         → verdict=deny
-```
-
-```python
-# Agent receives approval_id
-response = client.execute_tool("send_email", {...})
-if response["verdict"] == "ask":
-    approval_id = response["approval_id"]
+# Agent proposes a tool call
+resp = client.execute_tool("send_email", {
+    "to":      arg("alice@company.com", "user_declared", role="recipient_source"),
+    "subject": arg("Q3 Report", "system"),
+    "body":    arg("See attached.", "system"),
+})
+# → verdict=ask, approval_id=ab3f9c1d
 
 # Reviewer approves
-result = client.submit_approval(approval_id, approved=True, actor="alice-reviewer")
-print(result["verdict"])  # "allow"
-print(result["result"])   # tool output
+result = client.submit_approval("ab3f9c1d", approved=True, actor="alice-security")
+# → verdict=allow, result={...}
 ```
-
-Both outcomes produce a trace entry with `original_verdict=ask` and the
-reviewer's identity. See [docs/integrations.md](docs/integrations.md) for the
-full workflow.
-
----
-
-## Integration Example
-
-Any agent framework can route tool calls through the gateway using a decorator:
-
-```python
-def gateway_tool(client, tool_name):
-    def decorator(fn):
-        def wrapper(**kwargs):
-            response = client.execute_tool(tool_name, kwargs)
-            if response["verdict"] == "allow":
-                return response.get("result")
-            elif response["verdict"] == "deny":
-                return f"[BLOCKED] {response['reason']}"
-            else:  # ask
-                return {"approval_required": True, "approval_id": response["approval_id"]}
-        return wrapper
-    return decorator
-
-@gateway_tool(client, "send_email")
-def send_email(to, subject, body):
-    pass  # gateway adapter handles execution
-```
-
-See `examples/integrations/` for complete runnable demos.
-
-### MCP integration
-
-The MCP adapter shim exposes the gateway as a Model Context Protocol server
-so any MCP-compatible client (Claude Desktop, Cursor) can delegate tool
-governance to Agent Hypervisor:
-
-```bash
-python examples/integrations/mcp_gateway_adapter_example.py  # port 9090
-python examples/integrations/mcp_gateway_adapter_example.py --demo
-```
-
-All MCP tool call arguments are tagged `user_declared` and evaluated by the
-full gateway enforcement pipeline before execution.
-
----
-
-## Demo
-
-Install dependencies and run:
-
-```bash
-pip install pyyaml
-python examples/provenance_firewall/demo.py
-```
-
-The demo runs five scenarios (A–E) and prints the firewall verdict for each.
-Traces are saved to `traces/provenance_firewall/` as JSON files.
-
-### Demo modes
-
-| Mode | Task config                  | What happens                                                       |
-|------|------------------------------|--------------------------------------------------------------------|
-| **A** — unprotected      | none                    | Malicious `send_email` executes — attacker receives the report     |
-| **B** — malicious blocked | `task_deny_send.yaml`  | Recipient provenance → `external_document` → RULE-01/02 fires → deny |
-| **C** — trusted source   | `task_allow_send.yaml`  | Recipient traces to `user_declared` contacts → ask (confirm first) |
-| **D** — mixed provenance | `task_allow_send.yaml`  | Recipient derived from both trusted and untrusted parents → deny   |
-| **E** — http_post blocked | `task_http_post.yaml`  | POST body traces to `external_document` → RULE-01 fires → deny    |
-
-See [examples/provenance_firewall/scenarios.md](examples/provenance_firewall/scenarios.md)
-for a detailed explanation of each scenario and the attack logic.
 
 ---
 
@@ -269,9 +177,8 @@ for a detailed explanation of each scenario and the attack logic.
 
 ```yaml
 # policies/default_policy.yaml (excerpt)
-
 rules:
-  # Read-only tools are always allowed
+  # Read-only tools: always allowed
   - id: allow-read-file
     tool: read_file
     verdict: allow
@@ -291,127 +198,117 @@ rules:
     verdict: ask
 ```
 
+Policy is hot-reloadable (`POST /policy/reload`) without restarting the
+gateway.  Every reload creates a new version entry.  All traces link to
+the version that produced them.
+
 ---
 
-## Trace Example
+## Running the Gateway
 
-A decision trace written to `traces/provenance_firewall/`:
+```bash
+# Start the gateway
+python scripts/run_gateway.py
 
-```json
-{
-  "tool": "send_email",
-  "call_id": "call-a3f9c1",
-  "verdict": "deny",
-  "reason": "Recipient provenance traces to external_document (source: 'malicious_doc.txt') — external documents cannot authorize outbound email",
-  "violated_rules": ["RULE-01", "RULE-02"],
-  "arg_provenance": {
-    "to": "derived:extracted from malicious_doc.txt <- external_document:malicious_doc.txt",
-    "subject": "system:system",
-    "body": "system:system"
-  }
-}
+# Query the audit trail
+curl http://localhost:8080/traces
+curl http://localhost:8080/approvals
+curl http://localhost:8080/policy/history
 ```
 
-The trace shows:
-- Which tool was proposed
-- The full provenance chain for each argument
-- Which rule matched and why
-- The final verdict
+### MCP integration
 
-This provides a complete, human-readable audit trail for every tool call the
-agent attempted — blocked or allowed.
+The MCP adapter shim exposes the gateway as a Model Context Protocol
+server, so any MCP-compatible client (Claude Desktop, Cursor) can
+delegate tool governance to Agent Hypervisor:
 
----
-
-## Benchmark
-
-An initial evaluation against the [AgentDojo](https://github.com/ethz-spylab/agentdojo)
-benchmark suite measures:
-
-- **Utility** — fraction of legitimate tasks completed correctly
-- **Attack success rate (ASR)** — fraction of injection attacks that succeed
-
-See [benchmarks/agentdojo/results.md](benchmarks/agentdojo/results.md) for
-results and [benchmarks/agentdojo/methodology.md](benchmarks/agentdojo/methodology.md)
-for experimental setup.
+```bash
+python examples/integrations/mcp_gateway_adapter_example.py --demo
+```
 
 ---
 
-## Repository Structure
+## Repository Layout
 
 ```
-/README.md                           ← this file
-/gateway_config.yaml                 ← gateway server configuration
-/docs/
-    architecture.md                  ← system components and data flow
-    gateway_architecture.md          ← gateway HTTP API and approval workflow
-    integrations.md                  ← GatewayClient, integration patterns
-    threat_model.md                  ← attacks in scope
-    provenance_model.md              ← ValueRef, chains, mixed provenance
-    policy_engine.md                 ← declarative rule model
-    roadmap.md                       ← development phases
-/examples/
-    provenance_firewall/
-        demo.py                      ← runnable demo (5 scenarios)
-        scenarios.md                 ← scenario explanations
-    integrations/
-        langchain_gateway_example.py ← framework-agnostic gateway demo
-        approval_flow_example.py     ← full approval workflow demo
-        mcp_gateway_adapter_example.py ← MCP JSON-RPC adapter shim
-/manifests/
-    task_allow_send.yaml             ← task: email allowed from declared contacts
-    task_deny_send.yaml              ← task: email denied (no trusted recipients)
-    task_http_post.yaml              ← task: http_post blocked on external body
-/policies/
-    default_policy.yaml              ← baseline declarative policy rules
-/scripts/
-    run_gateway.py                   ← CLI entrypoint for the gateway server
-/benchmarks/
-    agentdojo/
-        results.md                   ← utility and ASR numbers
-        methodology.md               ← experimental setup
-/src/agent_hypervisor/
-    models.py                        ← ValueRef, ToolCall, Decision
-    provenance.py                    ← resolve_chain, mixed_provenance
-    firewall.py                      ← ProvenanceFirewall
-    policy_engine.py                 ← PolicyEngine, PolicyRule
-    gateway_client.py                ← GatewayClient (stdlib, zero deps)
-    gateway/
-        gateway_server.py            ← FastAPI app, all HTTP endpoints
-        execution_router.py          ← enforcement pipeline, approval store
-        tool_registry.py             ← ToolRegistry, built-in adapters
-        config_loader.py             ← GatewayConfig, StorageConfig, load_config()
-    storage/
-        trace_store.py               ← JSONL append-only trace log
-        approval_store.py            ← per-file JSON approval store
-        policy_store.py              ← JSONL policy version history
-/tests/
-    test_provenance_firewall.py      ← unit tests for core provenance logic
-    test_gateway_layer.py            ← unit tests for gateway components
-    test_approval_workflow.py        ← unit tests for approval lifecycle
+core runtime
+  src/agent_hypervisor/
+    models.py           ValueRef, ToolCall, Decision (provenance data model)
+    provenance.py       resolve_chain(), mixed_provenance() (chain utilities)
+    firewall.py         ProvenanceFirewall (RULE-01 through RULE-05)
+    policy_engine.py    PolicyEngine, PolicyRule (declarative YAML evaluator)
+
+gateway
+  src/agent_hypervisor/gateway/
+    gateway_server.py   FastAPI app, all HTTP endpoints
+    execution_router.py enforcement pipeline, approval workflow
+    tool_registry.py    ToolRegistry, built-in adapters
+    config_loader.py    GatewayConfig, StorageConfig
+  gateway_config.yaml   server and storage configuration
+  scripts/run_gateway.py  CLI entrypoint
+
+storage
+  src/agent_hypervisor/storage/
+    trace_store.py      JSONL append-only trace log
+    approval_store.py   per-file JSON approval records
+    policy_store.py     JSONL policy version history
+  .data/                runtime storage (gitignored)
+
+integrations
+  src/agent_hypervisor/gateway_client.py  Python client (stdlib only)
+  examples/integrations/
+    langchain_gateway_example.py   framework-agnostic decorator pattern
+    approval_flow_example.py       full approval lifecycle demo
+    mcp_gateway_adapter_example.py MCP JSON-RPC adapter shim
+
+examples
+  examples/showcase/showcase_demo.py      end-to-end governance demo
+  examples/provenance_firewall/demo.py    firewall-only scenario demos
+
+docs
+  docs/benchmark_brief.md        attack surface and defense comparison
+  docs/gateway_architecture.md   HTTP API, enforcement pipeline, diagrams
+  docs/audit_model.md            trace / approval / policy version schema
+  docs/integrations.md           GatewayClient, MCP adapter, curl examples
+  docs/threat_model.md           attacks in scope and explicit non-goals
+  docs/provenance_model.md       ValueRef, chains, mixed provenance
+  docs/policy_engine.md          declarative rule evaluation
+  docs/architecture.md           component map and data flow
+
+policies / manifests
+  policies/default_policy.yaml   baseline rules
+  manifests/                     example task manifests for ProvenanceFirewall
 ```
 
 ---
 
 ## Documentation
 
-- [Gateway Architecture](docs/gateway_architecture.md) — HTTP API, enforcement pipeline, persistence, policy versioning
-- [Audit Model](docs/audit_model.md) — trace / approval / policy version field reference
-- [Integrations](docs/integrations.md) — GatewayClient, MCP adapter, curl examples
-- [Architecture](docs/architecture.md) — component map and data flow
-- [Threat Model](docs/threat_model.md) — attacks addressed and explicit non-goals
-- [Provenance Model](docs/provenance_model.md) — ValueRef, chains, mixed provenance
-- [Policy Engine](docs/policy_engine.md) — declarative rule evaluation
-- [Roadmap](docs/roadmap.md) — development phases from PoC to production
-- [Scenario Guide](examples/provenance_firewall/scenarios.md) — demo walkthrough
+| Document | What it covers |
+|---|---|
+| [benchmark_brief.md](docs/benchmark_brief.md) | Attack surface, defense comparison, why execution governance |
+| [gateway_architecture.md](docs/gateway_architecture.md) | Full architecture, HTTP API, approval flow, persistence |
+| [audit_model.md](docs/audit_model.md) | Trace / approval / policy version field reference |
+| [integrations.md](docs/integrations.md) | GatewayClient, MCP adapter, curl examples |
+| [threat_model.md](docs/threat_model.md) | Attacks in scope and explicit non-goals |
+| [provenance_model.md](docs/provenance_model.md) | ValueRef, chains, mixed provenance |
+| [policy_engine.md](docs/policy_engine.md) | Declarative rule evaluation |
 
 ---
 
 ## Status
 
-Research-grade prototype. The core ideas are demonstrated and tested.
-The implementation is intentionally minimal — the goal is to show the concept
-clearly, not to provide a production-ready SDK.
+Research-grade prototype demonstrating the execution governance pattern.
+The implementation is intentionally minimal to keep the concept clear.
 
-Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) if it exists,
-or open an issue to discuss.
+Core capabilities:
+- Provenance-aware tool call evaluation (deterministic, structural)
+- Three-way verdict: allow / deny / ask
+- Human approval workflow with persistent records
+- Policy hot-reload with version history
+- Persisted audit trail (traces survive restarts)
+- MCP adapter, Python client, framework-agnostic integration examples
+- 365 tests
+
+See [docs/benchmark_brief.md](docs/benchmark_brief.md) for scope,
+limitations, and evaluation methodology.
