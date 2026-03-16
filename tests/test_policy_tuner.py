@@ -26,10 +26,12 @@ from agent_hypervisor.policy_tuner import (
 )
 from agent_hypervisor.policy_tuner.analyzer import MIN_REPEAT_COUNT
 from agent_hypervisor.policy_tuner.models import (
+    RuleMetrics,
     Severity,
     SignalCategory,
     SmellType,
     SuggestionType,
+    TunerReport,
 )
 
 
@@ -573,6 +575,97 @@ class TestReportFormatting:
         report = SuggestionGenerator().generate(report)
         output = TunerReporter().render(report, format="markdown")
         assert "Tuning Signals" in output
+
+
+# ---------------------------------------------------------------------------
+# 8. Rule metrics (risk score, usage count, scope reduction)
+# ---------------------------------------------------------------------------
+
+class TestRuleMetrics:
+    """Tests for the new per-rule governance metrics in TunerReport."""
+
+    def test_rule_metrics_populated_from_traces(self):
+        traces = [
+            _trace(verdict="allow", rule="allow-read", trace_id=f"t{i}")
+            for i in range(3)
+        ]
+        report = PolicyAnalyzer().analyze(traces, [], [])
+        assert "allow-read" in report.rule_metrics
+        m = report.rule_metrics["allow-read"]
+        assert m.usage_count == 3
+        assert m.verdict_counts.get("allow", 0) == 3
+
+    def test_rule_metrics_usage_count_matches_verdict_counts(self):
+        traces = (
+            [_trace(verdict="allow", rule="r1", trace_id=f"a{i}") for i in range(4)]
+            + [_trace(verdict="deny", rule="r1", trace_id=f"d{i}") for i in range(2)]
+        )
+        report = PolicyAnalyzer().analyze(traces, [], [])
+        m = report.rule_metrics["r1"]
+        assert m.usage_count == 6
+        assert m.verdict_counts["allow"] == 4
+        assert m.verdict_counts["deny"] == 2
+
+    def test_rule_metrics_risk_score_bounded(self):
+        traces = [_trace(verdict="allow", rule="test-rule", trace_id=f"t{i}") for i in range(3)]
+        report = PolicyAnalyzer().analyze(traces, [], [])
+        m = report.rule_metrics["test-rule"]
+        assert 0 <= m.risk_score <= 10
+
+    def test_side_effect_allow_rule_gets_higher_risk(self):
+        """Allows on side-effect tools should score higher than read-only allows."""
+        traces_read = [
+            _trace(tool="read_file", verdict="allow", rule="allow-read",
+                   trace_id=f"r{i}", arg_provenance={"path": "system"})
+            for i in range(5)
+        ]
+        traces_email = [
+            _trace(tool="send_email", verdict="allow", rule="allow-email",
+                   trace_id=f"e{i}", arg_provenance={"to": "user_declared"})
+            for i in range(5)
+        ]
+        report = PolicyAnalyzer().analyze(traces_read + traces_email, [], [])
+        read_score = report.rule_metrics["allow-read"].risk_score
+        email_score = report.rule_metrics["allow-email"].risk_score
+        assert email_score >= read_score
+
+    def test_rule_metrics_included_in_json_output(self):
+        traces = [_trace(verdict="allow", rule="allow-read", trace_id=f"t{i}") for i in range(3)]
+        report = PolicyAnalyzer().analyze(traces, [], [])
+        reporter = TunerReporter()
+        data = json.loads(reporter.render(report, format="json"))
+        assert "rule_metrics" in data
+        assert "allow-read" in data["rule_metrics"]
+        m = data["rule_metrics"]["allow-read"]
+        assert "usage_count" in m
+        assert "risk_score" in m
+        assert "scope_reduction" in m
+
+    def test_rule_metrics_section_in_markdown(self):
+        traces = [
+            _trace(tool="send_email", verdict="allow", rule="allow-email",
+                   trace_id=f"t{i}", arg_provenance={"to": "user_declared"})
+            for i in range(3)
+        ]
+        report = PolicyAnalyzer().analyze(traces, [], [])
+        output = TunerReporter().render(report, format="markdown")
+        assert "Per-Rule Governance Metrics" in output
+        assert "allow-email" in output
+        assert "Risk Score" in output
+
+    def test_rule_metrics_to_dict_has_required_fields(self):
+        m = RuleMetrics(
+            rule_id="test-rule",
+            usage_count=5,
+            verdict_counts={"allow": 5},
+            risk_score=3,
+            scope_reduction="No reduction suggested.",
+        )
+        d = m.to_dict()
+        assert d["rule_id"] == "test-rule"
+        assert d["usage_count"] == 5
+        assert d["risk_score"] == 3
+        assert "scope_reduction" in d
 
 
 # ---------------------------------------------------------------------------

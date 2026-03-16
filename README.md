@@ -262,6 +262,10 @@ src/agent_hypervisor/           core runtime
     analyzer.py                 signal and smell detection from trace data
     suggestions.py              candidate policy improvements
     reporter.py                 JSON and Markdown report formatting
+    models.py                   TunerReport, RuleMetrics, TuningSignal, Suggestion
+  policy_editor/
+    policy_editor.py            load, validate, list, preview, risk score, scope hints
+    policy_models.py            PolicyFile, PolicyRuleSpec, RuleImpact
 
 scripts/
   run_gateway.py                start the gateway server
@@ -274,6 +278,7 @@ examples/
     mcp_gateway_full_example.py     MCP integration with canonical scenario
     approval_flow_example.py        approval workflow pattern
     langchain_gateway_example.py    LangChain integration
+    ide_agent_governance_demo.py    self-contained governance demo (3 scenarios)
 
 policies/default_policy.yaml    baseline rules (10 rules)
 gateway_config.yaml             gateway server configuration
@@ -298,3 +303,126 @@ tests/                          399 tests
 | [integrations.md](docs/integrations.md) | GatewayClient, MCP, curl examples |
 | [threat_model.md](docs/threat_model.md) | Attacks in scope and explicit non-goals |
 | [benchmark_brief.md](docs/benchmark_brief.md) | Attack surface and defense comparison |
+| [execution_governance_diagram.md](docs/execution_governance_diagram.md) | Architecture diagram — full governance flow |
+
+---
+
+## 9. Execution Governance
+
+### Prompt Filtering vs. Execution Governance
+
+Most AI safety tooling today operates at the **prompt layer** — classifying
+whether user input or model output _looks_ malicious before it reaches the
+model. This is useful, but insufficient for agentic systems.
+
+**Prompt filtering** asks: _"Does this text look dangerous?"_
+
+- Operates on text before (or after) the model
+- Probabilistic: can be bypassed by rephrasing, encoding, or indirect injection
+- Acts at the wrong boundary: a prompt filter cannot stop a tool call that the
+  model has already decided to make
+- Cannot enforce structural constraints on data provenance
+
+**Execution governance** asks: _"Where did this data come from, and is it safe
+to act on it now?"_
+
+- Operates at the tool execution boundary — after reasoning, before action
+- Deterministic: checks are structural (provenance chain walks), not classifiers
+- Enforces the right boundary: every tool call is evaluated before it runs
+- Cannot be bypassed by rephrasing — the provenance label travels with the data
+
+```
+  Prompt Filtering        Execution Governance
+  ────────────────        ────────────────────
+  User input              Tool call arguments
+       │                        │
+       ▼                        ▼
+  [classifier]            [provenance check]
+  "looks safe?"           "where did this come from?"
+       │                        │
+       ▼                        ▼
+  Model reasoning         Tool execution (or block)
+       │
+       ▼
+  Tool execution    ← prompt filtering stops here
+```
+
+The two approaches are complementary. Prompt filtering reduces the volume of
+malicious instructions reaching the model. Execution governance ensures that
+even if the model is manipulated, the resulting tool calls are still evaluated
+structurally before any side effect occurs.
+
+### The Governance Lifecycle
+
+Every tool call in a governed agent goes through five steps:
+
+```
+  1. Agent proposes a tool call with provenance labels per argument
+  2. Provenance chain resolution — walk the full derivation DAG
+  3. Policy Engine evaluates declarative YAML rules → verdict
+  4. Provenance Firewall checks structural invariants → verdict
+  5. Merge verdicts (deny > ask > allow) → execute or block
+```
+
+All decisions are traced regardless of verdict, linking to the exact policy
+version active at decision time. The Policy Tuner analyzes trace data offline
+to detect patterns, compute rule risk scores, and suggest improvements.
+
+### Running the Governance Demo
+
+```bash
+# Self-contained, no gateway required:
+python examples/integrations/ide_agent_governance_demo.py
+```
+
+This runs three scenarios inline:
+
+1. **Safe read** — `read_file` with system provenance → allowed automatically
+2. **Prompt injection** — `send_email` with `external_document` recipient → denied
+3. **Risky with approval** — `shell_exec` destructive command → ask → simulated approval → executed
+
+### Policy Editor
+
+The policy editor provides a read-only interface for inspecting policy files:
+
+```python
+from agent_hypervisor.policy_editor import PolicyEditor
+
+editor = PolicyEditor()
+policy = editor.load_policy("policies/default_policy.yaml")
+
+# Validate all rules
+errors = editor.validate(policy)  # {} means valid
+
+# List rules as a table
+print(editor.list_rules(policy))
+
+# Preview rule impact (dry-run)
+impact = editor.preview_rule(policy, "deny-email-external-recipient")
+print(impact.summary())
+# → Rule 'deny-email-external-recipient' → DENY: matches ~2 case(s). Targeted deny on low-trust provenance.
+
+# Risk score for a rule (0–10)
+rule = policy.get_rule("ask-email-declared-recipient")
+score = editor.rule_risk_score(rule)  # e.g. 3
+
+# Scope reduction hint
+print(editor.scope_reduction_hint(rule))
+```
+
+### Policy Tuner Reports
+
+Policy tuner reports now include per-rule governance metrics:
+
+```bash
+python scripts/run_policy_tuner.py
+```
+
+Report sections:
+- **Summary** — total traces, approvals, verdict breakdown
+- **Per-Rule Governance Metrics** — risk score (0–10), usage count, scope reduction hints
+- **Rule Verdict Breakdown** — per-rule allow/ask/deny counts
+- **Tuning Signals** — friction, risk, scope drift patterns
+- **Policy Smells** — structural quality issues
+- **Candidate Suggestions** — conservative improvement actions for human review
+

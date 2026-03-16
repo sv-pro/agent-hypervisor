@@ -176,11 +176,46 @@ class Suggestion:
 
 
 @dataclass
+class RuleMetrics:
+    """
+    Per-rule governance metrics derived from runtime trace data.
+
+    These metrics enrich policy review sessions with concrete usage data,
+    risk context, and scope improvement hints.
+
+    Fields:
+        rule_id           — the rule this metric set refers to
+        usage_count       — total number of traces that matched this rule
+        verdict_counts    — per-verdict usage breakdown {"allow": n, "ask": n, "deny": n}
+        risk_score        — 0–10 score; higher means more review warranted
+                            (see PolicyEditor.rule_risk_score for scoring details)
+        scope_reduction   — human-readable hint suggesting a narrower rule scope,
+                            or a note that the scope is already appropriate
+    """
+
+    rule_id: str
+    usage_count: int = 0
+    verdict_counts: dict[str, int] = field(default_factory=dict)
+    risk_score: int = 0
+    scope_reduction: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "rule_id": self.rule_id,
+            "usage_count": self.usage_count,
+            "verdict_counts": self.verdict_counts,
+            "risk_score": self.risk_score,
+            "scope_reduction": self.scope_reduction,
+        }
+
+
+@dataclass
 class TunerReport:
     """
     The full output of one policy tuner analysis run.
 
-    Contains summary metrics, all detected signals, smells, and suggestions.
+    Contains summary metrics, all detected signals, smells, suggestions,
+    and per-rule metrics (risk score, usage count, scope reduction hints).
     """
     # Summary
     total_traces: int = 0
@@ -193,6 +228,9 @@ class TunerReport:
 
     # Top repeated approval actors: {actor: count}
     approval_actor_counts: dict[str, int] = field(default_factory=dict)
+
+    # Per-rule governance metrics (risk score, usage count, scope reduction)
+    rule_metrics: dict[str, RuleMetrics] = field(default_factory=dict)
 
     # Detected outputs
     signals: list[TuningSignal] = field(default_factory=list)
@@ -208,6 +246,9 @@ class TunerReport:
                 "verdict_counts": self.verdict_counts,
                 "rule_verdict_counts": self.rule_verdict_counts,
                 "approval_actor_counts": self.approval_actor_counts,
+            },
+            "rule_metrics": {
+                rule_id: m.to_dict() for rule_id, m in self.rule_metrics.items()
             },
             "signals": [s.to_dict() for s in self.signals],
             "smells": [s.to_dict() for s in self.smells],

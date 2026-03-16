@@ -46,6 +46,12 @@ class TunerReporter:
     # -----------------------------------------------------------------------
 
     def _render_json(self, report: TunerReport) -> str:
+        """
+        Render the report as a machine-readable JSON string.
+
+        Includes all summary metrics, rule_metrics (with risk scores, usage
+        counts, and scope reduction hints), signals, smells, and suggestions.
+        """
         data = report.to_dict()
         data["generated_at"] = datetime.now(timezone.utc).isoformat()
         return json.dumps(data, indent=2)
@@ -69,6 +75,9 @@ class TunerReporter:
 
         # Top rules
         lines += self._section_top_rules(report)
+
+        # Per-rule governance metrics
+        lines += self._section_rule_metrics(report)
 
         # Tuning signals
         lines += self._section_signals(report)
@@ -162,6 +171,46 @@ class TunerReporter:
                 lines.append(f"| {actor} | {count} |")
             lines.append("")
 
+        return lines
+
+    def _section_rule_metrics(self, report: TunerReport) -> list[str]:
+        """
+        Render the per-rule governance metrics section.
+
+        Includes risk score, total usage count, verdict breakdown, and
+        scope reduction hints for each rule observed in the trace data.
+        """
+        if not report.rule_metrics:
+            return []
+
+        lines = ["## Per-Rule Governance Metrics", ""]
+        lines.append(
+            "_Risk score 0–10: higher means more review warranted. "
+            "Scope reduction hints are heuristic suggestions only._"
+        )
+        lines.append("")
+
+        # Sort by risk score descending, then by usage descending
+        sorted_metrics = sorted(
+            report.rule_metrics.values(),
+            key=lambda m: (-m.risk_score, -m.usage_count),
+        )
+
+        lines.append("| Rule | Usage | Allow | Ask | Deny | Risk Score | Scope Hint |")
+        lines.append("|------|-------|-------|-----|------|------------|------------|")
+
+        for m in sorted_metrics:
+            allow = m.verdict_counts.get("allow", 0)
+            ask   = m.verdict_counts.get("ask",   0)
+            deny  = m.verdict_counts.get("deny",  0)
+            risk_badge = _risk_badge(m.risk_score)
+            scope = (m.scope_reduction[:60] + "…") if len(m.scope_reduction) > 60 else m.scope_reduction
+            lines.append(
+                f"| `{m.rule_id}` | {m.usage_count} | {allow} | {ask} | {deny} "
+                f"| {risk_badge} | {scope} |"
+            )
+
+        lines.append("")
         return lines
 
     def _section_signals(self, report: TunerReport) -> list[str]:
@@ -266,3 +315,19 @@ def _severity_badge(severity: Severity) -> str:
         Severity.low:    "🟢 low",
     }
     return badges.get(severity, severity.value)
+
+
+def _risk_badge(score: int) -> str:
+    """
+    Return a human-readable risk badge for a numeric 0–10 risk score.
+
+    Ranges:
+        8–10 → high (warrants prompt review)
+        4–7  → medium (warrants review)
+        0–3  → low (informational)
+    """
+    if score >= 8:
+        return f"🔴 {score}/10"
+    if score >= 4:
+        return f"🟡 {score}/10"
+    return f"🟢 {score}/10"

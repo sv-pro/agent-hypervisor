@@ -23,6 +23,7 @@ from typing import Any
 
 from .models import (
     PolicySmell,
+    RuleMetrics,
     Severity,
     SignalCategory,
     SmellType,
@@ -145,6 +146,167 @@ class PolicyAnalyzer:
             if actor:
                 actor_counts[actor] += 1
         report.approval_actor_counts = dict(actor_counts)
+
+        # Populate per-rule metrics
+        self._collect_rule_metrics(report, traces)
+
+    # -----------------------------------------------------------------------
+    # Pass 0b: Per-rule governance metrics
+    # -----------------------------------------------------------------------
+
+    def _collect_rule_metrics(
+        self,
+        report: TunerReport,
+        traces: list[dict],
+    ) -> None:
+        """
+        Populate report.rule_metrics with per-rule risk scores, usage counts,
+        and scope reduction hints derived from trace data.
+
+        Risk score (0–10) reflects how much a rule warrants review:
+          - High scores indicate broad allow rules on side-effect tools.
+          - Low scores indicate targeted deny rules on untrusted provenance.
+
+        Scope reduction hints are generated heuristically from trace evidence.
+        """
+        for rule_id, verdict_counts in report.rule_verdict_counts.items():
+            usage = sum(verdict_counts.values())
+            risk = self._compute_risk_score(rule_id, verdict_counts, traces)
+            scope_hint = self._compute_scope_hint(rule_id, verdict_counts, traces)
+
+            report.rule_metrics[rule_id] = RuleMetrics(
+                rule_id=rule_id,
+                usage_count=usage,
+                verdict_counts=dict(verdict_counts),
+                risk_score=risk,
+                scope_reduction=scope_hint,
+            )
+
+    def _compute_risk_score(
+        self,
+        rule_id: str,
+        verdict_counts: dict[str, int],
+        traces: list[dict],
+    ) -> int:
+        """
+        Compute a 0–10 risk score for a rule from trace evidence.
+
+        Scoring factors:
+          +4  allow rule touches a side-effect tool
+          +3  allow rule observed with external_document or derived provenance
+          +2  allow count is high (top quartile observed)
+          +1  ask count is high relative to total
+          -2  deny rule on external_document provenance
+          -1  rule has an argument constraint (targeted)
+        """
+        score = 0
+
+        allow_count = verdict_counts.get("allow", 0)
+        ask_count   = verdict_counts.get("ask", 0)
+        deny_count  = verdict_counts.get("deny", 0)
+        total       = allow_count + ask_count + deny_count
+
+        if allow_count > 0:
+            # Check if the rule touched a side-effect tool
+            rule_tools = {
+                t.get("tool", "")
+                for t in traces
+                if t.get("matched_rule") == rule_id and t.get("final_verdict") == "allow"
+            }
+            if rule_tools & SIDE_EFFECT_TOOLS:
+                score += 4
+
+            # Check if any allows had risky provenance
+            risky = any(
+                _has_risky_provenance(t.get("arg_provenance", {}))
+                for t in traces
+                if t.get("matched_rule") == rule_id and t.get("final_verdict") == "allow"
+            )
+            if risky:
+                score += 3
+
+            # High allow volume
+            if allow_count >= 10:
+                score += 2
+
+        if total > 0 and ask_count / total > 0.5:
+            score += 1
+
+        if deny_count > 0:
+            # Check if deny was on external_document (good hygiene)
+            deny_prov = {
+                p
+                for t in traces
+                if t.get("matched_rule") == rule_id and t.get("final_verdict") == "deny"
+                for p in _extract_provenances(t.get("arg_provenance", {}))
+            }
+            if "external_document" in deny_prov:
+                score -= 2
+
+        # Check for argument constraints (a targeted rule is less risky)
+        has_arg_constraint = any(
+            t.get("arg_name", "") != ""
+            for t in traces
+            if t.get("matched_rule") == rule_id
+        )
+        # We infer from rule_id naming conventions as a proxy
+        if any(kw in rule_id for kw in ("-to", "-body", "-content", "-path", "-url")):
+            score -= 1
+
+        return max(0, min(10, score))
+
+    def _compute_scope_hint(
+        self,
+        rule_id: str,
+        verdict_counts: dict[str, int],
+        traces: list[dict],
+    ) -> str:
+        """
+        Generate a scope reduction hint for a rule based on trace evidence.
+
+        Returns a human-readable suggestion or an empty string if no narrowing
+        is warranted.
+        """
+        allow_count = verdict_counts.get("allow", 0)
+
+        if allow_count == 0:
+            return ""
+
+        # Check tools covered
+        rule_tools = {
+            t.get("tool", "")
+            for t in traces
+            if t.get("matched_rule") == rule_id and t.get("final_verdict") == "allow"
+        }
+        side_effects = rule_tools & SIDE_EFFECT_TOOLS
+
+        if side_effects:
+            # Check provenance diversity
+            prov_shapes = {
+                _provenance_summary(t.get("arg_provenance", {}))
+                for t in traces
+                if t.get("matched_rule") == rule_id and t.get("final_verdict") == "allow"
+            }
+            if len(prov_shapes) > 2:
+                return (
+                    f"Rule matches {len(prov_shapes)} distinct provenance shapes on "
+                    f"side-effect tool(s) {sorted(side_effects)}. Consider splitting into "
+                    "one rule per provenance class to make intent explicit."
+                )
+            if _has_risky_provenance(
+                next(
+                    (t.get("arg_provenance", {})
+                     for t in traces
+                     if t.get("matched_rule") == rule_id and t.get("final_verdict") == "allow"),
+                    {},
+                )
+            ):
+                return (
+                    f"Rule allows a side-effect tool with low-trust provenance. "
+                    "Consider adding a provenance constraint (e.g. user_declared or system)."
+                )
+
+        return ""
 
     # -----------------------------------------------------------------------
     # Pass 1: Friction signals
