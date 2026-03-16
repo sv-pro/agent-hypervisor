@@ -1,0 +1,544 @@
+{
+  "summary": {
+    "total_traces": 40,
+    "total_approvals": 16,
+    "total_policy_versions": 2,
+    "verdict_counts": {
+      "ask": 12,
+      "deny": 9,
+      "allow": 19
+    },
+    "rule_verdict_counts": {
+      "ask-email-declared-recipient": {
+        "ask": 12
+      },
+      "deny-email-external-recipient": {
+        "deny": 5
+      },
+      "allow-read-file": {
+        "allow": 12
+      },
+      "allow-http-post-declared": {
+        "allow": 7
+      },
+      "deny-write-untrusted": {
+        "deny": 4
+      }
+    },
+    "approval_actor_counts": {
+      "alice": 10,
+      "bob": 4
+    }
+  },
+  "signals": [
+    {
+      "id": "sig-001",
+      "category": "friction",
+      "severity": "medium",
+      "title": "Repeated ask on rule 'ask-email-declared-recipient'",
+      "description": "Rule 'ask-email-declared-recipient' has triggered an 'ask' verdict 12 times. Frequent asks on the same rule suggest the policy may need narrowing (to allow a known-safe pattern) or explicit scoped approval promotion.",
+      "evidence": [
+        {
+          "rule": "ask-email-declared-recipient",
+          "ask_count": 12
+        }
+      ],
+      "related_rule": "ask-email-declared-recipient",
+      "related_tools": [],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-002",
+      "category": "friction",
+      "severity": "low",
+      "title": "Repeated deny on rule 'deny-email-external-recipient'",
+      "description": "Rule 'deny-email-external-recipient' has denied 5 requests. High deny counts may indicate legitimate use cases being blocked \u2014 review whether the rule is too broad or if a safe sub-pattern should be allowed.",
+      "evidence": [
+        {
+          "rule": "deny-email-external-recipient",
+          "deny_count": 5
+        }
+      ],
+      "related_rule": "deny-email-external-recipient",
+      "related_tools": [],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-003",
+      "category": "friction",
+      "severity": "low",
+      "title": "Repeated deny on rule 'deny-write-untrusted'",
+      "description": "Rule 'deny-write-untrusted' has denied 4 requests. High deny counts may indicate legitimate use cases being blocked \u2014 review whether the rule is too broad or if a safe sub-pattern should be allowed.",
+      "evidence": [
+        {
+          "rule": "deny-write-untrusted",
+          "deny_count": 4
+        }
+      ],
+      "related_rule": "deny-write-untrusted",
+      "related_tools": [],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-004",
+      "category": "friction",
+      "severity": "medium",
+      "title": "Repeated manual approvals for 'send_email'",
+      "description": "The same request shape for 'send_email' has been manually approved 7 times. Repeated approvals on the same shape suggest the exception has become routine \u2014 consider promoting it to explicit scoped policy.",
+      "evidence": [
+        {
+          "shape": "send_email|subject=system:hardcoded|to=user_declared:task_manifest",
+          "approval_count": 7,
+          "approval_ids": [
+            "ap-alice-000",
+            "ap-alice-001",
+            "ap-alice-002",
+            "ap-alice-003",
+            "ap-alice-004"
+          ]
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "send_email"
+      ],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-005",
+      "category": "friction",
+      "severity": "medium",
+      "title": "Repeated manual approvals for 'http_post'",
+      "description": "The same request shape for 'http_post' has been manually approved 4 times. Repeated approvals on the same shape suggest the exception has become routine \u2014 consider promoting it to explicit scoped policy.",
+      "evidence": [
+        {
+          "shape": "http_post|body=derived:report|url=user_declared:task_manifest",
+          "approval_count": 4,
+          "approval_ids": [
+            "ap-http-000",
+            "ap-http-001",
+            "ap-http-002",
+            "ap-http-003"
+          ]
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "http_post"
+      ],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-006",
+      "category": "friction",
+      "severity": "medium",
+      "title": "Repeated manual rejections for 'send_email'",
+      "description": "The same request shape for 'send_email' has been manually rejected 3 times. This pattern should be encoded as an explicit deny rule rather than relying on repeated human rejection.",
+      "evidence": [
+        {
+          "shape": "send_email|body=external_document:report.txt|to=user_declared:task_manifest",
+          "rejection_count": 3
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "send_email"
+      ],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-007",
+      "category": "risk",
+      "severity": "high",
+      "title": "Repeated allow on side-effect tool 'http_post'",
+      "description": "Tool 'http_post' (a side-effect tool) has been allowed 7 times. Review whether all of these executions were intentional and confirm the provenance constraints are sufficient.",
+      "evidence": [
+        {
+          "tool": "http_post",
+          "allow_count": 7,
+          "sample_trace_ids": [
+            "t-allow-http-000",
+            "t-allow-http-001",
+            "t-allow-http-002"
+          ]
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "http_post"
+      ],
+      "related_policy_versions": [
+        "v2"
+      ]
+    },
+    {
+      "id": "sig-008",
+      "category": "risk",
+      "severity": "high",
+      "title": "Allow on side-effect tool 'http_post' with external/derived provenance",
+      "description": "Tool 'http_post' was allowed 7 time(s) with arguments derived from external_document or derived provenance. This may indicate insufficient provenance constraints or an overly broad allow rule.",
+      "evidence": [
+        {
+          "tool": "http_post",
+          "count": 7,
+          "provenance_shapes": [
+            "body=derived:compute0|url=user_declared:task_manifest",
+            "body=derived:compute4|url=user_declared:task_manifest",
+            "body=derived:compute3|url=user_declared:task_manifest",
+            "body=system:template|url=external_document:prompt_injection.html",
+            "body=derived:compute5|url=user_declared:task_manifest"
+          ]
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "http_post"
+      ],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-009",
+      "category": "risk",
+      "severity": "medium",
+      "title": "Broad allow rule 'allow-http-post-declared' matches heterogeneous provenance",
+      "description": "Rule 'allow-http-post-declared' has allowed requests with 7 distinct provenance shapes. A single rule covering many different provenance patterns may be too permissive \u2014 consider splitting into narrower rules.",
+      "evidence": [
+        {
+          "rule": "allow-http-post-declared",
+          "distinct_provenance_shapes": 7,
+          "sample_shapes": [
+            "body=derived:compute0|url=user_declared:task_manifest",
+            "body=derived:compute4|url=user_declared:task_manifest",
+            "body=derived:compute3|url=user_declared:task_manifest"
+          ]
+        }
+      ],
+      "related_rule": "allow-http-post-declared",
+      "related_tools": [],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-010",
+      "category": "scope_drift",
+      "severity": "low",
+      "title": "Rule 'ask-email-declared-recipient' spans all observed policy versions",
+      "description": "Rule 'ask-email-declared-recipient' appears in traces across all 2 observed policy versions. A rule that survives every policy update may encode long-lived scope that should be reviewed \u2014 especially if it was originally intended as temporary.",
+      "evidence": [
+        {
+          "rule": "ask-email-declared-recipient",
+          "versions_seen": [
+            "v1",
+            "v2"
+          ],
+          "total_policy_versions": 2
+        }
+      ],
+      "related_rule": "ask-email-declared-recipient",
+      "related_tools": [],
+      "related_policy_versions": [
+        "v1",
+        "v2"
+      ]
+    },
+    {
+      "id": "sig-011",
+      "category": "scope_drift",
+      "severity": "low",
+      "title": "Actor 'alice' repeatedly approves same shape for 'send_email'",
+      "description": "Actor 'alice' has approved the same request shape for 'send_email' 7 times. Repeated approvals by the same reviewer on the same shape may indicate approval fatigue or normalization \u2014 consider explicit policy encoding.",
+      "evidence": [
+        {
+          "actor": "alice",
+          "shape": "send_email|subject=system:hardcoded|to=user_declared:task_manifest",
+          "approval_count": 7
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "send_email"
+      ],
+      "related_policy_versions": []
+    },
+    {
+      "id": "sig-012",
+      "category": "scope_drift",
+      "severity": "low",
+      "title": "Actor 'bob' repeatedly approves same shape for 'http_post'",
+      "description": "Actor 'bob' has approved the same request shape for 'http_post' 4 times. Repeated approvals by the same reviewer on the same shape may indicate approval fatigue or normalization \u2014 consider explicit policy encoding.",
+      "evidence": [
+        {
+          "actor": "bob",
+          "shape": "http_post|body=derived:report|url=user_declared:task_manifest",
+          "approval_count": 4
+        }
+      ],
+      "related_rule": "",
+      "related_tools": [
+        "http_post"
+      ],
+      "related_policy_versions": []
+    }
+  ],
+  "smells": [
+    {
+      "id": "smell-001",
+      "smell_type": "broad_allow_dangerous_sink",
+      "severity": "high",
+      "description": "Rule 'allow-http-post-declared' has allowed 7 executions on side-effect tool(s) {'http_post'}. Broad allow on a dangerous sink warrants review \u2014 scope may be too wide.",
+      "evidence": [
+        {
+          "rule": "allow-http-post-declared",
+          "allow_count": 7,
+          "side_effect_tools": [
+            "http_post"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smell-002",
+      "smell_type": "catch_all_deny_heterogeneous",
+      "severity": "medium",
+      "description": "Rule 'deny-email-external-recipient' denies 5 requests across 5 distinct provenance shapes. A single deny rule matching many different patterns may be a catch-all \u2014 consider whether distinct sub-patterns need different handling.",
+      "evidence": [
+        {
+          "rule": "deny-email-external-recipient",
+          "deny_count": 5,
+          "distinct_shapes": 5
+        }
+      ]
+    },
+    {
+      "id": "smell-003",
+      "smell_type": "catch_all_deny_heterogeneous",
+      "severity": "medium",
+      "description": "Rule 'deny-write-untrusted' denies 4 requests across 4 distinct provenance shapes. A single deny rule matching many different patterns may be a catch-all \u2014 consider whether distinct sub-patterns need different handling.",
+      "evidence": [
+        {
+          "rule": "deny-write-untrusted",
+          "deny_count": 4,
+          "distinct_shapes": 4
+        }
+      ]
+    },
+    {
+      "id": "smell-004",
+      "smell_type": "approval_heavy_rule",
+      "severity": "medium",
+      "description": "Rule 'ask-email-declared-recipient' routes 12/12 (100%) of its verdicts to 'ask'. A rule that almost always asks may need narrowing (to allow safe sub-patterns) or splitting to reduce approval load.",
+      "evidence": [
+        {
+          "rule": "ask-email-declared-recipient",
+          "ask_count": 12,
+          "total": 12,
+          "ask_ratio": 1.0
+        }
+      ]
+    },
+    {
+      "id": "smell-005",
+      "smell_type": "one_rule_many_provenance_shapes",
+      "severity": "medium",
+      "description": "Rule 'allow-http-post-declared' matches 7 distinct provenance shapes in allow verdicts. One rule covering many different provenance patterns may be encoding unrelated use cases \u2014 consider splitting.",
+      "evidence": [
+        {
+          "rule": "allow-http-post-declared",
+          "distinct_allow_shapes": 7,
+          "sample_shapes": [
+            "body=derived:compute0|url=user_declared:task_manifest",
+            "body=derived:compute4|url=user_declared:task_manifest",
+            "body=derived:compute3|url=user_declared:task_manifest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smell-006",
+      "smell_type": "allow_side_effect_weak_provenance",
+      "severity": "high",
+      "description": "A 'http_post' execution was allowed with external_document provenance in its arguments. This is a high-risk pattern \u2014 arguments from external documents reaching side-effect tools may indicate prompt injection risk.",
+      "evidence": [
+        {
+          "trace_id": "t-risky-allow-001",
+          "tool": "http_post",
+          "arg_provenance": {
+            "url": "external_document:prompt_injection.html",
+            "body": "system:template"
+          },
+          "rule": "allow-http-post-declared"
+        }
+      ]
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "sug-001",
+      "suggestion_type": "narrow_rule_scope",
+      "rationale": "Rule 'ask-email-declared-recipient' has triggered an 'ask' verdict 12 times. Frequent asks on the same rule suggest the policy may need narrowing (to allow a known-safe pattern) or explicit scoped approval promotion.",
+      "candidate_action": "Review rule 'ask-email-declared-recipient'. If a specific provenance+tool pattern is consistently approved, consider adding a narrower allow rule for that pattern to reduce approval friction.",
+      "related_rule": "ask-email-declared-recipient",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-002",
+      "suggestion_type": "promote_approval_to_policy",
+      "rationale": "Rule 'ask-email-declared-recipient' triggers repeated asks. If the approved pattern is consistently safe, promote it to an explicit allow in a scoped task overlay.",
+      "candidate_action": "Audit approvals linked to rule 'ask-email-declared-recipient'. If all share the same provenance pattern, encode that pattern as an explicit allow in a task-scoped overlay policy.",
+      "related_rule": "ask-email-declared-recipient",
+      "confidence": "low"
+    },
+    {
+      "id": "sug-003",
+      "suggestion_type": "split_broad_rule",
+      "rationale": "Rule 'deny-email-external-recipient' has denied 5 requests. High deny counts may indicate legitimate use cases being blocked \u2014 review whether the rule is too broad or if a safe sub-pattern should be allowed.",
+      "candidate_action": "Review rule 'deny-email-external-recipient'. If some denied cases are legitimate use, split the rule into a narrower deny and a separate allow for the safe sub-pattern.",
+      "related_rule": "deny-email-external-recipient",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-004",
+      "suggestion_type": "split_broad_rule",
+      "rationale": "Rule 'deny-write-untrusted' has denied 4 requests. High deny counts may indicate legitimate use cases being blocked \u2014 review whether the rule is too broad or if a safe sub-pattern should be allowed.",
+      "candidate_action": "Review rule 'deny-write-untrusted'. If some denied cases are legitimate use, split the rule into a narrower deny and a separate allow for the safe sub-pattern.",
+      "related_rule": "deny-write-untrusted",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-005",
+      "suggestion_type": "promote_approval_to_policy",
+      "rationale": "The same request shape for 'send_email' has been manually approved 7 times. Repeated approvals on the same shape suggest the exception has become routine \u2014 consider promoting it to explicit scoped policy.",
+      "candidate_action": "The repeated approval pattern for 'send_email' has become routine. Consider encoding the approved shape as explicit policy in a task-scoped overlay to reduce manual approval load.",
+      "related_rule": "",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-006",
+      "suggestion_type": "promote_approval_to_policy",
+      "rationale": "The same request shape for 'http_post' has been manually approved 4 times. Repeated approvals on the same shape suggest the exception has become routine \u2014 consider promoting it to explicit scoped policy.",
+      "candidate_action": "The repeated approval pattern for 'http_post' has become routine. Consider encoding the approved shape as explicit policy in a task-scoped overlay to reduce manual approval load.",
+      "related_rule": "",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-007",
+      "suggestion_type": "narrow_rule_scope",
+      "rationale": "The same request shape for 'send_email' has been manually rejected 3 times. This pattern should be encoded as an explicit deny rule rather than relying on repeated human rejection.",
+      "candidate_action": "The rejected pattern for 'send_email' should be encoded as an explicit deny rule. This removes reliance on repeated human rejection and makes the policy intent clear.",
+      "related_rule": "",
+      "confidence": "high"
+    },
+    {
+      "id": "sug-008",
+      "suggestion_type": "add_approval_requirement",
+      "rationale": "Tool 'http_post' (a side-effect tool) has been allowed 7 times. Review whether all of these executions were intentional and confirm the provenance constraints are sufficient.",
+      "candidate_action": "Add an approval requirement to the rule(s) allowing 'http_post'. Repeated side-effect executions warrant human oversight unless the provenance constraints are very tight.",
+      "related_rule": "",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-009",
+      "suggestion_type": "reduce_allow_constrain_provenance",
+      "rationale": "Tool 'http_post' was allowed 7 time(s) with arguments derived from external_document or derived provenance. This may indicate insufficient provenance constraints or an overly broad allow rule.",
+      "candidate_action": "Tighten the provenance constraint for 'http_post' allows. Require user_declared or system provenance on sensitive arguments. Reject or escalate requests where arguments trace to external_document.",
+      "related_rule": "",
+      "confidence": "high"
+    },
+    {
+      "id": "sug-010",
+      "suggestion_type": "split_broad_rule",
+      "rationale": "Rule 'allow-http-post-declared' has allowed requests with 7 distinct provenance shapes. A single rule covering many different provenance patterns may be too permissive \u2014 consider splitting into narrower rules.",
+      "candidate_action": "Split rule 'allow-http-post-declared' into multiple narrower rules, one per provenance class or role combination. This makes the policy intent explicit and reduces unintended coverage.",
+      "related_rule": "allow-http-post-declared",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-011",
+      "suggestion_type": "add_review_metadata",
+      "rationale": "Rule 'ask-email-declared-recipient' appears in traces across all 2 observed policy versions. A rule that survives every policy update may encode long-lived scope that should be reviewed \u2014 especially if it was originally intended as temporary.",
+      "candidate_action": "Add a review comment or metadata tag to rule 'ask-email-declared-recipient' explaining why it is long-lived and what use cases it is intended to cover. If it was originally temporary, mark it as temporary.",
+      "related_rule": "ask-email-declared-recipient",
+      "confidence": "low"
+    },
+    {
+      "id": "sug-012",
+      "suggestion_type": "promote_approval_to_policy",
+      "rationale": "Actor 'alice' has approved the same request shape for 'send_email' 7 times. Repeated approvals by the same reviewer on the same shape may indicate approval fatigue or normalization \u2014 consider explicit policy encoding.",
+      "candidate_action": "Encode the repeatedly approved 'send_email' pattern as explicit policy to reduce approval fatigue. Review the actor's approvals to confirm the pattern is consistently safe before encoding.",
+      "related_rule": "",
+      "confidence": "low"
+    },
+    {
+      "id": "sug-013",
+      "suggestion_type": "promote_approval_to_policy",
+      "rationale": "Actor 'bob' has approved the same request shape for 'http_post' 4 times. Repeated approvals by the same reviewer on the same shape may indicate approval fatigue or normalization \u2014 consider explicit policy encoding.",
+      "candidate_action": "Encode the repeatedly approved 'http_post' pattern as explicit policy to reduce approval fatigue. Review the actor's approvals to confirm the pattern is consistently safe before encoding.",
+      "related_rule": "",
+      "confidence": "low"
+    },
+    {
+      "id": "sug-014",
+      "suggestion_type": "narrow_rule_scope",
+      "rationale": "Rule 'allow-http-post-declared' has allowed 7 executions on side-effect tool(s) {'http_post'}. Broad allow on a dangerous sink warrants review \u2014 scope may be too wide.",
+      "candidate_action": "Narrow the scope of rule 'allow-http-post-declared' by tightening provenance, role, or argument constraints. Ensure it only covers the minimum necessary pattern for the intended use case.",
+      "related_rule": "allow-http-post-declared",
+      "confidence": "high"
+    },
+    {
+      "id": "sug-015",
+      "suggestion_type": "split_broad_rule",
+      "rationale": "Rule 'deny-email-external-recipient' denies 5 requests across 5 distinct provenance shapes. A single deny rule matching many different patterns may be a catch-all \u2014 consider whether distinct sub-patterns need different handling.",
+      "candidate_action": "Review deny rule 'deny-email-external-recipient'. If it catches heterogeneous patterns, split into distinct deny rules with explanatory comments for each sub-pattern. This improves policy clarity and auditability.",
+      "related_rule": "deny-email-external-recipient",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-016",
+      "suggestion_type": "improve_rule_explanation",
+      "rationale": "Rule 'deny-email-external-recipient' denies 5 requests across 5 distinct provenance shapes. A single deny rule matching many different patterns may be a catch-all \u2014 consider whether distinct sub-patterns need different handling.",
+      "candidate_action": "Add a description or rationale comment to rule 'deny-email-external-recipient' explaining what threat or use case it is blocking. This aids future review.",
+      "related_rule": "deny-email-external-recipient",
+      "confidence": "low"
+    },
+    {
+      "id": "sug-017",
+      "suggestion_type": "split_broad_rule",
+      "rationale": "Rule 'deny-write-untrusted' denies 4 requests across 4 distinct provenance shapes. A single deny rule matching many different patterns may be a catch-all \u2014 consider whether distinct sub-patterns need different handling.",
+      "candidate_action": "Review deny rule 'deny-write-untrusted'. If it catches heterogeneous patterns, split into distinct deny rules with explanatory comments for each sub-pattern. This improves policy clarity and auditability.",
+      "related_rule": "deny-write-untrusted",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-018",
+      "suggestion_type": "improve_rule_explanation",
+      "rationale": "Rule 'deny-write-untrusted' denies 4 requests across 4 distinct provenance shapes. A single deny rule matching many different patterns may be a catch-all \u2014 consider whether distinct sub-patterns need different handling.",
+      "candidate_action": "Add a description or rationale comment to rule 'deny-write-untrusted' explaining what threat or use case it is blocking. This aids future review.",
+      "related_rule": "deny-write-untrusted",
+      "confidence": "low"
+    },
+    {
+      "id": "sug-019",
+      "suggestion_type": "narrow_rule_scope",
+      "rationale": "Rule 'ask-email-declared-recipient' routes 12/12 (100%) of its verdicts to 'ask'. A rule that almost always asks may need narrowing (to allow safe sub-patterns) or splitting to reduce approval load.",
+      "candidate_action": "Rule 'ask-email-declared-recipient' triggers approval for most requests. Identify provenance patterns that are consistently safe and add a narrower allow rule for those patterns. Keep the ask for genuinely ambiguous cases.",
+      "related_rule": "ask-email-declared-recipient",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-020",
+      "suggestion_type": "split_broad_rule",
+      "rationale": "Rule 'allow-http-post-declared' matches 7 distinct provenance shapes in allow verdicts. One rule covering many different provenance patterns may be encoding unrelated use cases \u2014 consider splitting.",
+      "candidate_action": "Rule 'allow-http-post-declared' covers many distinct provenance patterns. Split it into one rule per provenance class or role combination, with explicit descriptions of the intended use case for each.",
+      "related_rule": "allow-http-post-declared",
+      "confidence": "medium"
+    },
+    {
+      "id": "sug-021",
+      "suggestion_type": "reduce_allow_constrain_provenance",
+      "rationale": "A 'http_post' execution was allowed with external_document provenance in its arguments. This is a high-risk pattern \u2014 arguments from external documents reaching side-effect tools may indicate prompt injection risk.",
+      "candidate_action": "Review how 'http_post' is allowed with external_document provenance. If this is a policy error, tighten the provenance constraint on rule 'allow-http-post-declared' to require user_declared or system provenance. If intentional, add a documented exception with review metadata.",
+      "related_rule": "allow-http-post-declared",
+      "confidence": "high"
+    }
+  ],
+  "generated_at": "2026-03-16T00:29:40.046691+00:00"
+}
