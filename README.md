@@ -1,6 +1,6 @@
 # Agent Hypervisor
 
-![Tests](https://img.shields.io/badge/tests-365%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-399%20passing-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
@@ -220,6 +220,44 @@ curl http://localhost:8080/approvals
 curl http://localhost:8080/policy/history
 ```
 
+---
+
+## Policy Tuner
+
+The **policy tuner** is a governance-analysis layer that reads persisted
+runtime data and produces structured observations about policy behavior
+over time.
+
+It answers questions like:
+- Which rules are causing friction (repeated asks or denies)?
+- Which allows may be too permissive?
+- Which temporary exceptions have become routine?
+- Which rules cover too many different provenance patterns?
+
+```bash
+# Print a Markdown governance report
+python scripts/run_policy_tuner.py
+
+# Write a JSON report to a file
+python scripts/run_policy_tuner.py --format json --output reports/tuner.json
+```
+
+The tuner never changes policy.  It produces observations and candidate
+suggestions that a human policy operator reviews before taking any action.
+
+See [docs/policy_tuner.md](docs/policy_tuner.md) for the full design and
+signal/suggestion reference.
+
+The policy operations loop:
+
+```
+runtime execution
+    → traces / approvals / policy history
+    → tuner analysis  (signals, smells, suggestions)
+    → human policy operator review
+    → (optional) policy update
+```
+
 ### MCP integration
 
 The MCP adapter shim exposes the gateway as a Model Context Protocol
@@ -248,10 +286,16 @@ src/agent_hypervisor/           core runtime
     trace_store.py              JSONL append-only trace log
     approval_store.py           per-file JSON approval records
     policy_store.py             JSONL policy version history
+  policy_tuner/                 governance-analysis layer
+    analyzer.py                 heuristic signal and smell detection
+    suggestions.py              candidate suggestion generation
+    reporter.py                 JSON and Markdown report formatting
+    models.py                   TuningSignal, PolicySmell, Suggestion
 
 gateway
   scripts/run_gateway.py        CLI entrypoint — start the gateway server
   scripts/run_showcase_demo.py  CLI entrypoint — run the showcase demo
+  scripts/run_policy_tuner.py   CLI entrypoint — governance analysis report
   gateway_config.yaml           server and storage configuration
   policies/default_policy.yaml  baseline rules
 
@@ -272,7 +316,7 @@ docs
   docs/policy_engine.md         declarative rule evaluation
 
 tests
-  tests/                        365 tests — provenance, policy, gateway, persistence
+  tests/                        399 tests — provenance, policy, gateway, persistence, policy tuner
 ```
 
 ---
@@ -290,6 +334,7 @@ tests
 | [threat_model.md](docs/threat_model.md) | Attacks in scope and explicit non-goals |
 | [provenance_model.md](docs/provenance_model.md) | ValueRef, chains, mixed provenance |
 | [policy_engine.md](docs/policy_engine.md) | Declarative rule evaluation |
+| [policy_tuner.md](docs/policy_tuner.md) | Policy tuner — governance-time analysis and candidate suggestions |
 
 ---
 
