@@ -1,21 +1,34 @@
 """
 showcase_demo.py — End-to-end governance flow demonstration.
 
-Shows the complete Agent Hypervisor lifecycle in one runnable script:
+Canonical scenario:
 
-  Scenario 1 — Safe read      agent reads a file            → allow
-  Scenario 2 — Injection      agent emails attacker address → deny
-  Scenario 3 — Governance     agent emails declared contact → ask → approve → execute
+  external_document
+    → agent reads document, extracts content
+    → agent proposes send_email tool call
+    → gateway detects provenance (user_declared recipient, derived body)
+    → policy verdict = ask
+    → approval granted by reviewer
+    → tool executed
+    → trace stored
+    → policy tuner suggests improvement
 
-Each scenario is annotated with the full governance lifecycle:
+The demo runs three scenarios that collectively cover the full lifecycle:
+
+  Scenario 1 — Safe read      agent reads a file                    → allow
+  Scenario 2 — Injection      agent emails attacker from ext doc     → deny
+  Scenario 3 — Governance     agent emails declared contact          → ask → approve → execute
+
+Scenario 3 is the canonical flow and demonstrates all 8 governance steps:
 
   STEP 1 — agent proposes tool call
-  STEP 2 — gateway evaluates provenance
-  STEP 3 — policy verdict  (allow / deny / ask)
-  STEP 4 — approval workflow  (scenario 3 only)
-  STEP 5 — tool execution      (allow outcomes only)
-  STEP 6 — trace stored
-  STEP 7 — policy version used
+  STEP 2 — provenance analysis
+  STEP 3 — policy evaluation
+  STEP 4 — ask verdict
+  STEP 5 — approval granted
+  STEP 6 — tool execution
+  STEP 7 — trace recorded
+  STEP 8 — policy tuner analysis
 
 Runs a gateway in a background thread on port 8099.
 No external services required.
@@ -45,6 +58,10 @@ from agent_hypervisor.gateway.config_loader import (
 )
 from agent_hypervisor.gateway.gateway_server import create_app
 from agent_hypervisor.gateway_client import GatewayClient, arg
+from agent_hypervisor.policy_tuner import PolicyAnalyzer, SuggestionGenerator, TunerReporter
+from agent_hypervisor.storage.trace_store import TraceStore
+from agent_hypervisor.storage.approval_store import ApprovalStore
+from agent_hypervisor.storage.policy_store import PolicyStore
 
 # ---------------------------------------------------------------------------
 # Formatting helpers
@@ -187,32 +204,28 @@ def scenario_read_file(client: GatewayClient) -> None:
     )
 
     # ── STEP 2 ──────────────────────────────────────────────────────────────
-    _step(2, "Gateway evaluates provenance")
+    _step(2, "Provenance analysis")
     print("          path  ←  system")
     print("          derivation chain contains no external_document")
     print("          no provenance-based escalation triggered")
 
     # ── STEP 3 ──────────────────────────────────────────────────────────────
-    _step(3, "Policy verdict")
+    _step(3, "Policy evaluation")
     _print_verdict(resp, show_result=False)
 
-    # ── STEP 5 ──────────────────────────────────────────────────────────────
-    _step(5, "Tool execution")
+    # ── STEP 6 ──────────────────────────────────────────────────────────────
+    _step(6, "Tool execution")
     if resp["verdict"] == "allow":
         result_str = json.dumps(resp.get("result", {}))[:65]
         _ok(f"read_file executed — result: {result_str}")
     else:
         _blocked(f"Unexpected verdict: {resp['verdict']}")
 
-    # ── STEP 6 ──────────────────────────────────────────────────────────────
-    _step(6, "Trace stored")
-    _info("TraceEntry written to .data/traces.jsonl")
-    _info(f"trace_id: {resp.get('trace_id', '—')}")
-
     # ── STEP 7 ──────────────────────────────────────────────────────────────
-    _step(7, "Policy version used")
+    _step(7, "Trace recorded")
+    _info("TraceEntry written to store/traces.jsonl")
+    _info(f"trace_id: {resp.get('trace_id', '—')}")
     _detail("policy_version:", resp.get("policy_version", "—"))
-    _info("All future decisions remain linkable to this exact policy snapshot")
 
 
 # ---------------------------------------------------------------------------
@@ -245,45 +258,48 @@ def scenario_injection_blocked(client: GatewayClient) -> None:
     )
 
     # ── STEP 2 ──────────────────────────────────────────────────────────────
-    _step(2, "Gateway evaluates provenance")
+    _step(2, "Provenance analysis")
     print("          to  ←  external_document : injected_doc.txt")
     print("          derivation chain contains external_document")
     print("          send_email + external_document recipient → RULE-01 fires")
 
     # ── STEP 3 ──────────────────────────────────────────────────────────────
-    _step(3, "Policy verdict")
+    _step(3, "Policy evaluation")
     _print_verdict(resp)
 
     if resp["verdict"] == "deny":
         _blocked("Request blocked — recipient traces to external_document")
 
-    # ── STEP 5 ──────────────────────────────────────────────────────────────
-    _step(5, "Tool execution")
+    # ── STEP 6 ──────────────────────────────────────────────────────────────
+    _step(6, "Tool execution")
     _blocked("Tool NOT executed — verdict=deny prevents adapter from running")
     print()
     print("  The attack fails regardless of the text used in the injection.")
     print("  The gateway checks provenance structure, not string patterns.")
     print("  There are no keywords to evade.")
 
-    # ── STEP 6 ──────────────────────────────────────────────────────────────
-    _step(6, "Trace stored")
-    _info("TraceEntry written to .data/traces.jsonl  (verdict=deny)")
-    _info(f"trace_id: {resp.get('trace_id', '—')}")
-
     # ── STEP 7 ──────────────────────────────────────────────────────────────
-    _step(7, "Policy version used")
+    _step(7, "Trace recorded")
+    _info("TraceEntry written to store/traces.jsonl  (verdict=deny)")
+    _info(f"trace_id: {resp.get('trace_id', '—')}")
     _detail("policy_version:", resp.get("policy_version", "—"))
 
 
 # ---------------------------------------------------------------------------
-# Scenario 3 — Full governance flow (ask → approve → execute)
+# Scenario 3 — Canonical governance flow (ask → approve → execute → tuner)
 # ---------------------------------------------------------------------------
 
-def scenario_governance_flow(client: GatewayClient) -> str:
-    _h2("SCENARIO 3 — Full governance flow  (ask → approve → execute)")
+def scenario_governance_flow(client: GatewayClient, store_dir: Path) -> str:
+    _h2("SCENARIO 3 — Canonical governance flow  (ask → approve → execute → tuner)")
     print()
-    print("  The agent sends email to a contact declared in the task by the operator.")
-    print("  This is legitimate but requires human confirmation (RULE-05).")
+    print("  The agent processed an external document and wants to send a report")
+    print("  to a contact declared in the task by the operator.")
+    print()
+    print("    external_document  →  agent  →  send_email")
+    print("    → gateway detects provenance  →  verdict = ask")
+    print("    → approval granted  →  tool executed  →  trace stored")
+    print("    → policy tuner analysis")
+    print()
     print("  Expected outcome: ask → reviewer approves → allow.")
 
     # ── STEP 1 ──────────────────────────────────────────────────────────────
@@ -291,6 +307,8 @@ def scenario_governance_flow(client: GatewayClient) -> str:
     _detail("tool:", "send_email")
     _detail("argument to:", '"alice@company.com"')
     _detail("provenance:", "user_declared  (operator-declared recipient)")
+    _detail("argument body:", '"Q3 report summary..."')
+    _detail("body provenance:", "derived  (from external_document)")
     _detail("subject:", '"Q3 Report"')
 
     resp = client.execute_tool(
@@ -298,17 +316,25 @@ def scenario_governance_flow(client: GatewayClient) -> str:
         arguments={
             "to":      arg("alice@company.com", "user_declared", role="recipient_source"),
             "subject": arg("Q3 Report", "system"),
-            "body":    arg("Please review the attached Q3 summary.", "system"),
+            "body":    arg("Q3 report summary: revenue up 12%.", "derived",
+                          label="q3_report.pdf"),
         },
     )
 
     # ── STEP 2 ──────────────────────────────────────────────────────────────
-    _step(2, "Gateway evaluates provenance")
-    print("          to  ←  user_declared : gateway_trusted")
-    print("          require_confirmation = true → RULE-05 → verdict=ask")
+    _step(2, "Provenance analysis")
+    print("          to    ←  user_declared  (gateway_trusted)")
+    print("          body  ←  derived  ←  external_document : q3_report.pdf")
+    print("          mixed provenance detected: user_declared + derived")
 
     # ── STEP 3 ──────────────────────────────────────────────────────────────
-    _step(3, "Policy verdict")
+    _step(3, "Policy evaluation")
+    print("          rule: ask-email-declared-recipient")
+    print("          condition: send_email + argument=to + provenance=user_declared")
+    print("          require_confirmation = true")
+
+    # ── STEP 4 ──────────────────────────────────────────────────────────────
+    _step(4, "Ask verdict — tool held for approval")
     _print_verdict(resp)
 
     approval_id = resp.get("approval_id")
@@ -316,24 +342,28 @@ def scenario_governance_flow(client: GatewayClient) -> str:
         print(f"  Unexpected: expected ask, got {resp['verdict']}")
         return ""
 
-    # ── STEP 4 ──────────────────────────────────────────────────────────────
-    _step(4, "Approval workflow")
-    _info(f"approval_id:   {approval_id}")
-    _info("Tool is held.  Approval record written to .data/approvals/")
-    _info("Survives process restarts.")
+    _info(f"approval_id:  {approval_id}")
+    _info("Tool is held.  Approval record written to store/approvals/")
+    _info("Pending approvals survive process restarts.")
+
+    # ── STEP 5 ──────────────────────────────────────────────────────────────
+    _step(5, "Approval granted")
     print()
     _detail("  Reviewer action:", "GET /approvals/{id}  — inspect the request")
     _detail("  Reviewer action:", "POST /approvals/{id} — approve or deny")
     print()
     _detail("  actor:", "alice-security")
     _detail("  decision:", "approved=true")
+    print()
 
     result_resp = client.submit_approval(
         approval_id, approved=True, actor="alice-security"
     )
 
-    # ── STEP 5 ──────────────────────────────────────────────────────────────
-    _step(5, "Tool execution")
+    _ok("Approval submitted — gateway proceeds to execution")
+
+    # ── STEP 6 ──────────────────────────────────────────────────────────────
+    _step(6, "Tool execution")
     _print_verdict(result_resp, show_result=True)
 
     if result_resp["verdict"] == "allow":
@@ -341,26 +371,73 @@ def scenario_governance_flow(client: GatewayClient) -> str:
     else:
         _blocked(f"Unexpected: {result_resp['verdict']}")
 
-    # ── STEP 6 ──────────────────────────────────────────────────────────────
-    _step(6, "Trace stored")
-    _info("TraceEntry written to .data/traces.jsonl  (verdict=allow)")
-    _info(f"trace_id:         {result_resp.get('trace_id', '—')}")
-    _info(f"approved_by:      alice-security")
-    _info(f"original_verdict: ask")
-
     # ── STEP 7 ──────────────────────────────────────────────────────────────
-    _step(7, "Policy version used")
+    _step(7, "Trace recorded")
+    _info("TraceEntry written to store/traces.jsonl  (verdict=allow)")
+    _info(f"trace_id:         {result_resp.get('trace_id', '—')}")
+    _info("approved_by:      alice-security")
+    _info("original_verdict: ask")
     _detail("policy_version:", result_resp.get("policy_version", "—"))
-    _info("Trace links to the exact policy version active at decision time")
+
+    # ── STEP 8 ──────────────────────────────────────────────────────────────
+    _step(8, "Policy tuner analysis")
+    _run_policy_tuner(store_dir)
 
     return approval_id
+
+
+def _run_policy_tuner(store_dir: Path) -> None:
+    """Run the policy tuner against the session's trace data and show findings."""
+    trace_path   = store_dir / "traces.jsonl"
+    approval_dir = store_dir / "approvals"
+    policy_path  = store_dir / "policy_history.jsonl"
+
+    trace_store    = TraceStore(trace_path)
+    approval_store = ApprovalStore(approval_dir)
+    policy_store   = PolicyStore(policy_path)
+
+    traces         = trace_store.list_recent(limit=100)
+    approvals      = approval_store.list_recent(limit=100)
+    policy_history = policy_store.get_history(limit=10)
+
+    analyzer = PolicyAnalyzer()
+    report   = analyzer.analyze(traces, approvals, policy_history)
+
+    gen    = SuggestionGenerator()
+    report = gen.generate(report)
+
+    print()
+    print(f"          Analyzed {len(traces)} traces,  "
+          f"{len(approvals)} approvals,  "
+          f"{len(policy_history)} policy versions")
+    print()
+
+    if report.signals:
+        print("          Signals detected:")
+        for sig in report.signals[:3]:
+            print(f"            • [{sig.severity.value}] {sig.description[:60]}")
+    else:
+        print("          No friction signals detected in this session.")
+
+    if report.suggestions:
+        print()
+        print("          Suggestions for policy operator review:")
+        for sug in report.suggestions[:3]:
+            print(f"            • {sug.candidate_action[:65]}")
+    else:
+        print("          No policy changes suggested.")
+
+    print()
+    _info("Tuner never modifies policy automatically.")
+    _info("All suggestions require human review before any policy change.")
+    _info("Run:  python scripts/run_policy_tuner.py  for a full report.")
 
 
 # ---------------------------------------------------------------------------
 # Audit trail summary
 # ---------------------------------------------------------------------------
 
-def show_audit_trail(client: GatewayClient, approval_id: str) -> None:
+def show_audit_trail(client: GatewayClient) -> None:
     _h2("AUDIT TRAIL — All decisions from this session")
 
     traces = client.get_traces(limit=10)
@@ -392,31 +469,40 @@ def main() -> None:
     _h1("AGENT HYPERVISOR — Execution Governance Demo")
 
     print("""
-  The problem:
-    AI agents use tools that cause real-world side effects.
-    Malicious content (prompt injection) can hijack these actions.
-    Sensitive data can be exfiltrated through legitimate-looking calls.
+  Canonical scenario:
 
-  The approach:
-    Enforce security at the execution boundary, not the input boundary.
-    Every tool argument carries provenance — where it came from.
-    The gateway checks provenance structure before every execution.
+    An agent reads an external document and proposes to send a report
+    by email to a contact declared in the task.
 
-  Lifecycle for every tool call:
+    external_document
+      → agent processes document
+      → agent proposes: send_email(to=alice@company.com, body=<report>)
+      → gateway detects provenance: to=user_declared, body=derived
+      → policy verdict = ask
+      → reviewer approves
+      → send_email executes
+      → trace stored with policy version link
+      → policy tuner analyzes the decision pattern
+
+  Governance lifecycle (all 8 steps):
 
     STEP 1 — agent proposes tool call  {tool, args with provenance labels}
-    STEP 2 — gateway evaluates provenance chains
-    STEP 3 — policy verdict:  allow / deny / ask
-    STEP 4 — approval workflow  (ask verdicts only)
-    STEP 5 — tool execution  (allow only)
-    STEP 6 — trace stored  (always, all verdicts)
-    STEP 7 — policy version linked  (always)
+    STEP 2 — provenance analysis  (resolve derivation chains)
+    STEP 3 — policy evaluation  (rule matching, verdict precedence)
+    STEP 4 — ask verdict  (tool held, approval_id returned)
+    STEP 5 — approval granted  (reviewer inspects and approves)
+    STEP 6 — tool execution  (adapter runs, result returned)
+    STEP 7 — trace recorded  (always, all verdicts, persisted)
+    STEP 8 — policy tuner analysis  (governance observations)
     """)
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir  = Path(tmpdir)
+        store_dir = data_dir / "store"
+
         print("  Starting gateway...", end=" ", flush=True)
         try:
-            _launch_gateway(Path(tmpdir))
+            _launch_gateway(data_dir)
         except RuntimeError as e:
             print(f"\n  ERROR: {e}")
             print("  Is port 8099 already in use?")
@@ -428,10 +514,10 @@ def main() -> None:
         # Run three scenarios
         scenario_read_file(client)
         scenario_injection_blocked(client)
-        approval_id = scenario_governance_flow(client)
+        approval_id = scenario_governance_flow(client, store_dir)
 
-        # Show the audit trail
-        show_audit_trail(client, approval_id)
+        # Show the full audit trail
+        show_audit_trail(client)
 
     _h1("Demo complete")
     print("""
@@ -440,22 +526,24 @@ def main() -> None:
     2. A prompt injection attempt is blocked by provenance structure       (deny)
        — the check is deterministic, not probabilistic
     3. A legitimate but sensitive action triggers human approval           (ask)
-       — the request is held, inspected, then executed
+       — the request is held, inspected, then executed after approval
     4. Every decision is traced and linked to the active policy version
+    5. The policy tuner analyzes the session and surfaces observations
 
   Next steps:
-    python scripts/run_showcase_demo.py     ← re-run the demo
+    python scripts/run_showcase_demo.py       ← re-run the demo
+    python scripts/run_policy_tuner.py        ← full governance report
 
-    curl http://localhost:8080/traces        ← inspect audit trail
-    curl http://localhost:8080/approvals     ← inspect approval records
-    curl http://localhost:8080/policy/history ← inspect policy versions
+    curl http://localhost:8080/traces         ← audit trail
+    curl http://localhost:8080/approvals      ← approval records
+    curl http://localhost:8080/policy/history ← policy versions
 
   Documentation:
-    docs/one_pager.md            — project overview (start here)
-    docs/demo_guide.md           — demo walkthrough and inspection guide
-    docs/benchmark_brief.md      — why execution governance beats prompt filters
-    docs/gateway_architecture.md — full component map and API reference
-    docs/audit_model.md          — trace / approval / policy version schema
+    docs/execution_governance.md ← architecture and canonical scenario
+    docs/mcp_integration.md      ← MCP integration guide
+    docs/gateway_architecture.md ← full component map and API reference
+    docs/audit_model.md          ← trace / approval / policy version schema
+    docs/policy_tuner.md         ← governance-time analysis reference
     """)
 
 
