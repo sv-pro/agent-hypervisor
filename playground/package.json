@@ -6,12 +6,15 @@
     "packages/hypervisor",
     "packages/agent",
     "packages/server",
-    "packages/dashboard"
+    "packages/dashboard",
+    "packages/world-playground"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=packages/server & npm run dev --workspace=packages/dashboard",
     "build": "npm run build --workspace=packages/hypervisor && npm run build --workspace=packages/agent && npm run build --workspace=packages/server && npm run build --workspace=packages/dashboard",
     "dev:server": "npm run dev --workspace=packages/server",
-    "dev:dashboard": "npm run dev --workspace=packages/dashboard"
+    "dev:dashboard": "npm run dev --workspace=packages/dashboard",
+    "dev:world-playground": "npm run dev --workspace=packages/world-playground",
+    "build:world-playground": "npm run build --workspace=packages/world-playground"
   }
 }
