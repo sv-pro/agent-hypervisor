@@ -1,5 +1,28 @@
 ## Why not just permissions?
 
+We tested one scenario:
+
+Untrusted instruction:
+> "git rm -rf . && git push"
+
+### Result
+
+| Model | Outcome |
+|------|--------|
+| Bash + permissions | ✅ ALLOWED (repo wiped) |
+| Capability rendering | ❌ NOT EXPRESSIBLE |
+
+Run it yourself:
+
+```bash
+python examples/comparisons/compare_bash_vs_rendering.py
+```
+
+This is not a better filter.
+This is a different abstraction boundary.
+
+---
+
 Run:
 
 ```
@@ -132,6 +155,9 @@ Architectural Conclusion
 
     Layers 1 and 2 handle most dangerous actions by non-existence.
     Layer 3 handles edge cases and mixed-provenance situations.
+
+  The failure is not in configuration.
+  It is in the abstraction: Bash is a universal tool.
 ```
 
 ---
