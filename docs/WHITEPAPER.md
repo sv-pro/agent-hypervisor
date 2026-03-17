@@ -63,7 +63,7 @@ Agent Hypervisor proposes a fundamentally different question:
 
 > **"Does action Y exist in agent X's universe?"**
 
-This is **ontological security** — not permission-based, but construction-based. Dangerous actions are not prohibited by rules; they are **absent from the world the agent inhabits**.
+This is **ontological security** — not permission-based, but construction-based. Dangerous actions are not prohibited by rules; they are **absent from the world the agent inhabits**. This answer emerges from Layers 0–2 working together: Layer 0 (Execution Physics) removes physical impossibilities at the infrastructure level; Layer 1 (Base Ontology) defines what actions exist in the design-time vocabulary; Layer 2 (Dynamic Ontology Projection) projects the actor-visible subset of those actions at runtime. Governance (Layer 3) handles what ontology alone cannot cover — contextual risk at runtime, where the action exists but circumstances make it unsafe.
 
 The classical hypervisor analogy holds precisely:
 
@@ -85,6 +85,9 @@ Boundaries matter. Agent Hypervisor is not:
 - An LLM-based security agent
 - A workflow engine
 - A policy-only wrapper over tools
+- Just a runtime gateway
+
+It is a **four-layer system**: Execution Physics (Layer 0), Base Ontology (Layer 1), Dynamic Ontology Projection (Layer 2), and Execution Governance (Layer 3). The execution governance gateway is its runtime component — one layer of four, not the whole system.
 
 It is a **compiler for secure semantic worlds**.
 
@@ -100,43 +103,86 @@ Comparable to: Infrastructure-as-Code compilers, type systems, capability-based 
 [ Agent (LLM / Planner) — Virtualized World ]
 ```
 
-The hypervisor intercepts all perception, intercepts all actions, and defines the physics of the agent's world.
+The system intercepts all perception, intercepts all actions, and defines the physics of the agent's world across four layers.
 
-#### 4.1 Five-Layer Model
+#### 4.1 Four-Layer Architecture
 
 ```text
-Layer 1: Input Boundary      — all external signals enter here; Semantic Event construction, trust classification, taint assignment
-Layer 2: Universe Definition — what exists in the agent's world; object schema registry, capability set, World Physics
-Layer 3: Agent Interface     — agent's perceived reality; Semantic Events, virtualized memory, available intent types
-Layer 4: World Policy        — deterministic decision layer; no LLM; policy evaluation, reversibility classification, budget enforcement
-Layer 5: Execution Boundary  — only validated intents reach here; tool invocation, external API calls, immutable audit log
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Layer 0: Execution Physics                                  │
+  │  Sandbox, container, network/filesystem isolation            │
+  │  Makes certain actions physically impossible at the          │
+  │  infrastructure level — not by rule, but by absence          │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │
+                             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Layer 1: Base Ontology (design-time)                        │
+  │  The vocabulary of actions the agent may ever propose.       │
+  │  Capability construction: tool specialization, parameter     │
+  │  validation, schema enforcement. Actions not defined here    │
+  │  do not exist — the agent cannot formulate intent for them.  │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │
+                             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Layer 2: Dynamic Ontology Projection (runtime context)      │
+  │  Projects the base ontology to a context-dependent subset    │
+  │  visible to the actor. Semantic Event construction, trust    │
+  │  classification, taint assignment. Role, task, environment,  │
+  │  and approvals determine what the actor can propose now.     │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │  proposed action
+                             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Layer 3: Execution Governance Gateway                       │
+  │  Evaluates proposed actions deterministically — no LLM.      │
+  │  Provenance chains, policy rules, taint checks,              │
+  │  reversibility classification, budget enforcement.           │
+  │  Decisions: allow | deny | require_approval | simulate       │
+  └──────────────────────────────────────────────────────────────┘
 ```
+
+| Agent Hypervisor                     | Operating System                    |
+| ------------------------------------ | ----------------------------------- |
+| Layer 0: Execution Physics           | Hardware isolation (MMU, rings)     |
+| Layer 1: Base Ontology               | Syscall interface                   |
+| Layer 2: Dynamic Ontology Projection | File descriptors, capabilities      |
+| Layer 3: Execution Governance        | ACL, SELinux, sandbox policies      |
+| Actor                                | Process                             |
+| Action                               | System call                         |
 
 #### 4.2 Core Mechanisms
 
-**Semantic Events (Perception)**
+**Semantic Events (Perception) — Layer 2**
 
-The agent never receives raw input. It receives structured events:
+Layer 2 (Dynamic Ontology Projection) constructs structured events from raw input before the actor perceives anything. The actor never receives raw input. It receives structured events:
 
 - `source` — email, web, file, MCP, user
 - `trust_level` — trusted / untrusted / tainted
 - `capabilities` — what is permitted in this context
 - `sanitized_payload` — stripped of hidden instructions
 
-For the agent, "just text" does not exist.
+For the actor, "just text" does not exist.
 
-**Intent Proposals (Action)**
+**Intent Proposals (Action) — Layer 2**
 
-The agent cannot act directly. It can only propose an intent:
+The actor cannot act directly. Working within its Layer 2 projected tool set, it can only propose an intent:
 
 - `send_email(...)`, `write_file(diff=...)`, `run_tool(...)`, `query_resource(...)`
 
-This is a proposal, not an execution.
+This is a proposal, not an execution. Only actions present in the actor's projected tool set can be proposed — the rest are unrepresentable.
 
-**Deterministic World Policy (Physics)**
+**Governance Policy (Layer 3) and Base Ontology (Layer 1)**
 
-The Deterministic World Policy is:
+Two distinct concerns, two distinct layers:
 
+*Base Ontology (Layer 1)* defines what actions exist at all. Its rules are:
+- Deterministic — same manifest, same vocabulary, always
+- Design-time — compiled before deployment
+- Testable — "action not in ontology → cannot be proposed"
+
+*Governance Policy (Layer 3)* evaluates whether a proposed action may execute at runtime:
 - Deterministic — same input, same decision, always
 - Reproducible — fully auditable
 - Testable — unit tests for security properties
@@ -152,18 +198,18 @@ Data carries its origin and contamination status as physical properties:
 - Tainted data **cannot** cross external boundaries — not by rule, but by construction
 - Every object knows its provenance chain
 
-These are not restrictions. They are **physics laws** of the agent's world.
+Provenance tracking is a Layer 3 (governance) mechanism. Some taint containment — such as network-level exfiltration blocking — operates at Layer 0 (Execution Physics). These are not restrictions. They are **physics laws** of the agent's world, enforced at different layers of the stack.
 
 #### 4.3 Tool Integration (MCP Model)
 
-Tools connect to the hypervisor, not to the agent:
+Raw tools are transformed by Layer 1 (Base Ontology) into specialized capabilities with typed schemas and constrained parameter sets. Capabilities are projected by Layer 2 (Dynamic Ontology Projection) to the actor, presenting only the subset relevant to its current role and context. The execution governance gateway (Layer 3) evaluates whether a proposed action may execute, applying provenance, taint, and policy rules.
 
-- MCP tool = virtualized device
-- Schema = device descriptor
-- Capability = permission model
-- Policy = access control + physics
+- MCP tool = raw device registered with the system
+- Layer 1 capability = specialized, schema-constrained form visible to the ontology
+- Layer 2 projection = context-dependent subset visible to the actor now
+- Layer 3 governance = access control + runtime policy evaluation
 
-Adding a tool does not change the agent, does not complicate the architecture, does not reduce determinism.
+Adding a tool does not change the actor, does not complicate the architecture, does not reduce determinism.
 
 #### 4.4 The Acid Test
 
@@ -173,9 +219,11 @@ If you can write a unit test:
 untrusted input → propose external action → denied
 tainted data    → attempt export          → impossible
 trusted intent  → execution               → allowed
+action not in ontology → cannot be proposed (Layer 1)
+actor lacks projection → cannot be proposed now (Layer 2)
 ```
 
-…then the hypervisor is deterministic, not an agent, and architecturally sound.
+…then the system is deterministic, not an agent, and architecturally sound.
 
 ### 5. The Canonical Formula
 
@@ -199,7 +247,7 @@ Three specific manifestations:
 
 **6.2 Taint propagation breaks on transformations.** An agent reads a tainted document, draws a conclusion, formulates a new thought based on that conclusion. Is the thought tainted? If the agent mixes data from three sources — two trusted, one tainted — is the result fully tainted? Conservative approaches (everything tainted) render the system useless; liberal approaches break safety. This is the classic overtainting/undertainting problem from information flow control research (Denning, 1976), unresolved for fifty years.
 
-**6.3 Defining the "world" is policy, not physics.** The hypervisor claims actions don't exist rather than being forbidden. But the set of "existing" actions must be designed by someone. Too narrow — the agent is useless. Too wide — security is nominal. This is a design problem inheriting all challenges of policy design — merely disguised as "physics."
+**6.3 Defining the ontology is a design problem; defining governance is a policy problem.** The four-layer model makes this separation explicit. Defining the base ontology (Layer 1) — what actions exist at all — is a design-time engineering decision. Too narrow and the actor is useless; too wide and security is nominal. Separately, designing governance rules (Layer 3) — when existing actions may execute — is a policy problem with all the challenges of policy design. These are distinct concerns requiring distinct solutions. Conflating them (as older single-layer approaches do) produces systems where the same mechanism tries to handle both structural risk and contextual risk — and does neither well.
 
 ### 7. The Implication
 
@@ -219,7 +267,7 @@ This honesty is not a weakness. It is the foundation for everything that follows
 
 The paradox stated in Section 6 has an elegant resolution if we separate **when** intelligence operates from **where** it enforces.
 
-**AI Aikido** is the principle of using LLM capabilities to generate deterministic artifacts rather than to provide runtime decisions. The stochastic system builds the deterministic system. Intelligence works at **design-time**; only its products operate at **runtime**.
+**AI Aikido** is the principle of using LLM capabilities to generate deterministic artifacts rather than to provide runtime decisions. The stochastic system builds the deterministic system. Intelligence works at **design-time**; only its products operate at **runtime**. Concretely, AI Aikido primarily generates Layer 1 artifacts (ontology definitions, capability specifications, action schemas) and Layer 3 artifacts (governance rules, taint policies, escalation conditions). Layer 0 is infrastructure configuration; Layer 2 projection rules emerge from the combination of Layer 1 definitions and role/context assignments.
 
 This breaks the paradox along the time axis:
 
@@ -242,7 +290,7 @@ Each generated artifact is deterministic, testable, and verifiable. The LLM does
 
 #### 9.2 Automated World Manifest Creation
 
-Given a description of a business process, an LLM generates the set of permitted actions and their schemas, trust relationships between input channels, capability presets per trust level, taint propagation rules, and escalation conditions.
+Given a description of a business process, an LLM generates the set of permitted actions and their schemas, trust relationships between input channels, capability presets per trust level, taint propagation rules, and escalation conditions. This process explicitly constructs the **base ontology (Layer 1)**: the design-time vocabulary of actions, their typed schemas, and the capability specifications that bound what actors can ever propose.
 
 A human reviews, modifies, and commits. The manifest becomes the constitution of the agent's world — written with AI assistance, executed deterministically.
 
@@ -256,7 +304,7 @@ The cycle: **generate → attack → patch → re-attack** — all in design-tim
 
 An LLM analyzes the data flow of a specific application and proposes taint propagation rules: "If source is email and transformation is `summarize`, taint is preserved." "If transformation is `count_words`, taint is cleared." "If three sources are mixed and any is tainted, result is tainted unless transformation is `aggregate_statistics`."
 
-A human approves each rule. The rule becomes a deterministic physics law. The LLM's understanding of semantic transformations informs the rule; the rule itself contains no stochasticity.
+A human approves each rule. The rule becomes a deterministic physics law — specifically, a **Layer 3 governance rule**: runtime policy encoding the LLM's semantic understanding of data transformations as a deterministic enforcement artifact. The LLM's understanding of semantic transformations informs the rule; the rule itself contains no stochasticity.
 
 ### 10. What AI Aikido Does Not Solve
 
@@ -292,30 +340,33 @@ Human intent + LLM semantic modeling
 
 The World Manifest is a formal, structured document (YAML / DSL) that defines everything that exists in the agent's universe:
 
-**Action Ontology** — the complete set of actions the agent can propose, with typed schemas. Actions not in the ontology do not exist. The agent cannot formulate intent for them because they are absent from its world definition.
+**Base Ontology (Layer 1)** — the complete set of actions the actor can ever propose, with typed schemas. Actions not in the ontology do not exist. The actor cannot formulate intent for them because they are absent from its world definition. This is the design-time vocabulary compiled before deployment.
 
-**Trust Model** — trust channels (user, email, web, file, MCP), trust levels per channel, and rules for trust propagation through transformations. Trust is a property of the channel, not the content.
+**Trust Model** — trust channel definitions (user, email, web, file, MCP) and their design-time trust levels belong to Layer 1. Runtime trust assignment — applying those channel definitions to incoming data — is a Layer 3 governance mechanism. Trust is a property of the channel, not the content.
 
-**Capability Matrix** — which capabilities are available at which trust levels. A matrix, not a list of rules. Capabilities define what is physically possible, not what is permitted.
+**Capability Matrix (Layer 2)** — projection rules specifying which capabilities are available at which trust levels and context. A matrix, not a list of rules. Capabilities define what is physically possible for the actor right now, projecting the base ontology to its current context.
 
-**Taint Propagation Rules** — deterministic rules for how contamination spreads through data transformations. Each rule specifies: source trust level × transformation type → output taint status. These are the thermodynamic laws of the agent's world.
+**Taint Propagation Rules (Layer 3)** — deterministic rules for how contamination spreads through data transformations, evaluated by the execution governance gateway. Each rule specifies: source trust level × transformation type → output taint status. These are the thermodynamic laws of the agent's world.
 
-**Escalation Conditions** — explicit boundaries where the system transitions from deterministic decision to human review. Defined narrowly: the goal is to minimize runtime escalation through comprehensive design-time coverage.
+**Escalation Conditions (Layer 3)** — explicit boundaries where the governance gateway transitions from deterministic decision to human review. Defined narrowly: the goal is to minimize runtime escalation through comprehensive design-time coverage.
 
-**Provenance Schema** — how origin metadata propagates through the system. Every object carries its lineage. Critical for continuous learning safety: only data with verified provenance enters the learning loop.
+**Provenance Schema (Layer 3)** — how origin metadata propagates through the system, tracked and enforced by the governance gateway. Every object carries its lineage. Critical for continuous learning safety: only data with verified provenance enters the learning loop.
 
 ### 13. The Compilation Phase
 
 The compiler transforms the World Manifest into executable runtime artifacts:
 
-| Manifest Element        | Compiled Artifact                      |
-| ----------------------- | -------------------------------------- |
-| Action ontology         | Validated JSON Schemas + intent parser |
-| Trust model             | Deterministic trust assignment tables  |
-| Capability matrix       | Static capability lookup engine        |
-| Taint propagation rules | Taint propagation matrices             |
-| Escalation conditions   | Threshold evaluators                   |
-| Provenance schema       | Provenance chain validators            |
+| Manifest Element        | Layer | Compiled Artifact                      |
+| ----------------------- | ----- | -------------------------------------- |
+| Base ontology           | L1    | Validated JSON Schemas + intent parser |
+| Trust channel defs      | L1    | Trust channel registry                 |
+| Capability matrix       | L2    | Static capability lookup / projection engine |
+| Runtime trust assignment| L3    | Deterministic trust assignment tables  |
+| Taint propagation rules | L3    | Taint propagation matrices             |
+| Escalation conditions   | L3    | Threshold evaluators                   |
+| Provenance schema       | L3    | Provenance chain validators            |
+
+Layer 0 (Execution Physics) is infrastructure configuration — not compiler output.
 
 **No LLM survives this phase.** The output is pure deterministic code — lookup tables, state machines, validators. Every compiled artifact is unit-testable. Every decision is reproducible.
 
@@ -323,14 +374,14 @@ The compiler transforms the World Manifest into executable runtime artifacts:
 
 At runtime, the compiled artifacts execute without stochasticity:
 
-1. Raw input arrives at the virtualization boundary
-2. Compiled canonicalizer strips known attack patterns
-3. Trust assignment table maps source → trust level
-4. Taint propagation matrix computes contamination status
-5. Capability lookup determines available actions
-6. Agent proposes an intent (structured JSON only)
-7. Deterministic World Policy evaluates: `allow` | `deny` | `require_approval` | `simulate`
-8. Decision is logged with full provenance for audit
+1. Raw input arrives at the virtualization boundary *(Layer 0/1 boundary)*
+2. Compiled canonicalizer strips known attack patterns *(Layer 0/1 boundary)*
+3. Trust assignment applies channel definitions to incoming data *(Layer 2)*
+4. Taint propagation matrix computes contamination status *(Layer 3)*
+5. Capability lookup projects available actions for this actor context *(Layer 2)*
+6. Actor proposes an intent (structured JSON only, from within its Layer 2 projected tool set)
+7. Governance policy evaluates: `allow` | `deny` | `require_approval` | `simulate` *(Layer 3)*
+8. Decision is logged with full provenance for audit *(Layer 3)*
 
 All decisions are reproducible. Same manifest + same input = same decision, always.
 
@@ -352,17 +403,16 @@ This is not a compromise. It is the only architecture that is simultaneously **h
 
 The human reviews and approves:
 
-- World Manifests defining the agent's universe
-- Taint propagation rules
-- Capability matrices per trust level
-- LLM-generated parsers and canonicalizers
-- Escalation thresholds
+- Base Ontology definitions (Layer 1) — action schemas, capability specifications, trust channel definitions
+- Governance rules (Layer 3) — taint propagation rules, escalation thresholds, provenance requirements
+- Capability projection matrices (Layer 2) — which capabilities are available at which trust levels
+- LLM-generated parsers and canonicalizers (Layer 1/2 boundary)
 
 **One design-time decision amortizes across thousands of runtime decisions.** This is analogous to writing a constitution: expensive to draft, but its cost is amortized across every citizen and every moment of governance.
 
 #### 16.2 Runtime Human — Exception, Not Rule
 
-The `require_approval` decision is an **escape hatch** for cases that design-time did not fully cover. It is not the primary path; it is the pressure relief valve.
+The `require_approval` decision is a **Layer 3 only** escape hatch — the `ask` verdict from the execution governance gateway for cases that design-time did not fully cover. It is not the primary path; it is the pressure relief valve.
 
 **Critical signal:** If `require_approval` fires frequently, it means the World Manifest is underdefined. This is not a failure — it is a feedback signal that triggers a design-time iteration.
 
@@ -417,15 +467,15 @@ This is precisely the model that made classical hypervisors viable: VMware engin
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Design:** Human + LLM co-create the World Manifest. LLM generates action schemas, trust policies, taint rules, canonicalization logic. Human reviews and commits.
+**Design:** Human + LLM co-create the World Manifest. LLM generates action schemas (Layer 1), trust policies and capability projections (Layer 2), taint rules and governance conditions (Layer 3), canonicalization logic (Layer 1/2 boundary). Human reviews and commits. The cycle produces artifacts for Layers 1, 2, and 3; Layer 0 is infrastructure configuration, not cycle output.
 
-**Compile:** The World Manifest Compiler transforms the manifest into deterministic artifacts — policy tables, JSON schemas, taint matrices, capability graphs. No LLM survives this phase. All artifacts are unit-testable.
+**Compile:** The World Manifest Compiler transforms the manifest into deterministic artifacts — policy tables (L3), JSON schemas (L1), taint matrices (L3), capability projection engine (L2). No LLM survives this phase. All artifacts are unit-testable.
 
-**Deploy:** Runtime executes purely deterministic compiled artifacts. No LLM on the critical path. No human in the loop. Decisions are reproducible and auditable.
+**Deploy:** Runtime executes purely deterministic compiled artifacts across all four layers. No LLM on the critical path. No human in the loop. Decisions are reproducible and auditable.
 
-**Learn:** Runtime logs accumulate. Escalation patterns emerge. Coverage gaps become visible. Metrics quantify deterministic coverage vs. exception rate.
+**Learn:** Runtime logs accumulate. Escalation patterns (Layer 3) emerge. Coverage gaps in the base ontology (Layer 1) become visible. Metrics quantify deterministic coverage vs. exception rate.
 
-**Redesign:** Human reviews patterns. LLM generates updated manifest elements — new parsers, refined rules, expanded action ontologies. Adversarial testing validates. The manifest is recompiled. The cycle repeats with higher coverage.
+**Redesign:** Human reviews patterns. LLM generates updated manifest elements — new parsers (Layer 1), refined governance rules (Layer 3), expanded action ontologies (Layer 1). Adversarial testing validates. The manifest is recompiled. The cycle repeats with higher coverage.
 
 ---
 
@@ -468,6 +518,7 @@ A YAML-based manifest defining:
 version: "1.0"
 name: "email-assistant-world"
 
+# Layer 1: Base Ontology — the design-time vocabulary of all possible actions
 actions:
   read_email:
     type: read
@@ -480,11 +531,13 @@ actions:
     type: internal_write
     schema: { content: string, format: string }
 
+# Layer 1 (design-time defs) + Layer 3 (runtime trust assignment)
 trust_channels:
   user:    { level: trusted,   default_caps: [read, internal_write, external_side_effects] }
   email:   { level: untrusted, default_caps: [read] }
   web:     { level: untrusted, default_caps: [read] }
 
+# Layer 3: Governance Policy — taint propagation rules evaluated at runtime
 taint_rules:
   - source: untrusted
     transform: summarize
@@ -497,10 +550,12 @@ taint_rules:
     decision: deny
     rule: TaintContainmentLaw
 
+# Layer 3: Governance Policy — escalation conditions
 escalation:
   - condition: "action.type == external_side_effect AND trust < trusted"
     decision: require_approval
 
+# Layer 3: Governance Policy — provenance tracking
 provenance:
   track: true
   learning_gate: "provenance.verified == true"
@@ -508,12 +563,12 @@ provenance:
 
 **20.2 Compiler**
 
-A compiler that transforms the manifest into:
+A compiler that transforms the manifest into artifacts for Layers 1, 2, and 3. Layer 0 is infrastructure configuration, not compiler output.
 
-- Deterministic policy lookup tables
-- JSON Schema validators for each action
-- Taint propagation state machine
-- Capability resolution engine
+- Deterministic policy lookup tables *(Layer 3)*
+- JSON Schema validators for each action *(Layer 1)*
+- Taint propagation state machine *(Layer 3)*
+- Capability projection engine *(Layer 2)*
 - Unit-testable rule set
 
 **20.3 Runtime Engine**
@@ -530,11 +585,13 @@ A deterministic engine that:
 Unit tests proving invariant enforcement (see [`examples/basic/01_simple_demo.py`](../examples/basic/01_simple_demo.py) for a runnable demonstration):
 
 ```text
-TEST: untrusted input → external action → DENIED (TaintContainmentLaw)
-TEST: tainted data → export attempt → IMPOSSIBLE (physics)
-TEST: trusted user intent → allowed action → ALLOWED
-TEST: same manifest + same input → same decision (determinism)
-TEST: action not in ontology → cannot be proposed (ontological security)
+TEST: untrusted input → external action → DENIED (TaintContainmentLaw)           [Layer 3]
+TEST: tainted data → export attempt → IMPOSSIBLE (physics)                        [Layer 3]
+TEST: trusted user intent → allowed action → ALLOWED                              [Layer 3]
+TEST: same manifest + same input → same decision (determinism)                    [all layers]
+TEST: action not in ontology → cannot be proposed (ontological security)          [Layer 1]
+TEST: actor with role X → sees only tools A, B, C (projection)                   [Layer 2]
+TEST: action in ontology but not in actor's projection → cannot be proposed now   [Layer 2]
 ```
 
 **20.5 Success Criteria**
@@ -629,6 +686,7 @@ The architecture presented here evolved through a specific intellectual trajecto
 6. **Human-in-the-loop architecture** — Human judgment is necessary but must be amortized at design-time. Three modes: design, exception, iteration.
 7. **Compiler formalization (World Manifest Compiler)** — The design-time process is not ad hoc; it is a compilation pipeline with a formal input (manifest), a compilation phase (no LLM survives), and deterministic output.
 8. **Honest constraints** — Bounded, measurable security. Not perfect. Not probabilistic. Tractable.
+9. **Four-layer architecture (current)** — The runtime model is organized as four distinct layers: Layer 0 (Execution Physics — infrastructure impossibility), Layer 1 (Base Ontology — design-time vocabulary), Layer 2 (Dynamic Ontology Projection — runtime context-dependent capability set), Layer 3 (Execution Governance — policy evaluation gateway). This replaces an earlier five-layer formulation and cleanly separates infrastructure constraints from ontology design, from runtime projection, from governance policy. The execution governance gateway is Layer 3 — one component of a four-layer system, not the whole system.
 
 Each step addressed the strongest objection to the previous step. The result is an architecture that is honest about its limitations and specific about its mechanisms.
 
