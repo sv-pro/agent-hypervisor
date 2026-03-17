@@ -3,7 +3,7 @@ name: Publish World Playground
 on:
   push:
     branches:
-      - main
+      - dev
     paths:
       - 'playground/packages/world-playground/**'
       - '.github/workflows/publish-world-playground.yml'
