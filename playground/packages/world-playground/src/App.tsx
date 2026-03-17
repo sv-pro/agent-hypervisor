@@ -168,18 +168,6 @@ export function App() {
       <div className="flex-1 min-h-0 flex gap-0 overflow-hidden px-4 py-3">
         <div className="flex items-stretch gap-0 w-full overflow-x-auto">
 
-          {/* Scenario hint banner */}
-          {isPermissionModel && (
-            <AnimatePresence>
-              <motion.div
-                initial={{ opacity: 0, scaleX: 0.95 }}
-                animate={{ opacity: 1, scaleX: 1 }}
-                className="absolute top-0 left-0 right-0 bg-amber/5 border-b border-amber/15 px-6 py-1.5 text-[10px] text-amber/70 font-mono"
-              >
-                Scenario 01 — Permission Model: raw tools are fully accessible, prefix matching is the only gate
-              </motion.div>
-            </AnimatePresence>
-          )}
 
           {/* Panel 1: Raw Reality */}
           <PanelCard>
