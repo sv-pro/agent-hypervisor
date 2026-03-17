@@ -172,6 +172,63 @@ expressed.  The principle generalises beyond Git.
 
 ---
 
+## Executable FAQ
+
+The demo includes an interactive objection layer.  After the main scenarios
+run, a menu appears:
+
+```
+==============================================================
+What would you like to challenge?
+==============================================================
+
+  [1] Isn't this just better permissions?
+  [2] What if the agent tries to bypass this?
+  [3] Why not just remove git_rm?
+  [4] Where is the real control point here?
+  [5] Show me a case where permissions fail
+  [6] Let me try my own attack
+  [q] Quit
+```
+
+Each option executes a deterministic scenario.  The answer is not an
+explanation — it is the output of running the scenario.
+
+This is intentional: the FAQ is executable.  Every objection is answered
+by behavior, not by prose.
+
+### What each option demonstrates
+
+| Option | Claim tested | Key output |
+|--------|--------------|------------|
+| 1 | "This is just better permissions" | Permissions → ALLOWED; Rendering → NO SUCH ACTION IN THIS WORLD |
+| 2 | "Agent can bypass with a different string" | rm -rf / git clean / git reset all → NO MATCHING CAPABILITY |
+| 3 | "Just remove git_rm from the list" | All string variants still absent from rendered world |
+| 4 | "Where is the real control point?" | Control BEFORE action exists vs. control AFTER |
+| 5 | "Show a real permissions failure" | Compound plan — each step individually permitted → ALLOWED |
+| 6 | Custom user input | Evaluated live against code-update rendered world |
+
+### 30-second demo script
+
+```
+1.  Run the demo:
+    python examples/integrations/copilot_git_governance_demo.py
+
+2.  Main scenarios play automatically.
+    Point to: "NO MATCHING CAPABILITY" in the output.
+
+3.  Ask the audience: "What feels wrong about this?"
+    Common objection: "Isn't this just a permission list?"
+
+4.  Select option [1] from the menu.
+    Output shows Model A (permissions) → ALLOWED,
+    then Model B (rendering) → NO SUCH ACTION IN THIS WORLD.
+
+5.  Point to the contrast:
+    "Same action.  Model A allowed it.  Model B removed it from the world.
+     This is not a better guardrail — this is a different control point."
+```
+
 ## Running the Demo
 
 ```bash
