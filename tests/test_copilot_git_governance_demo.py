@@ -36,6 +36,14 @@ from copilot_git_governance_demo import (
     build_reporting_world,
     evaluate_action,
     extract_semantic_candidates,
+    run_faq_option_1,
+    run_faq_option_2,
+    run_faq_option_3,
+    run_faq_option_4,
+    run_faq_option_5,
+    run_faq_option_6,
+    _PERMISSIONS_ALLOWLIST,
+    _permissions_check_fragments,
 )
 
 
@@ -458,3 +466,191 @@ class TestSemanticMatcher:
         candidates = extract_semantic_candidates('send_email("x@y.com", body)')
         names = [c.name for c in candidates]
         assert "send_email" in names
+
+    def test_rm_rf_maps_to_destructive_delete(self):
+        """rm -rf (without git) also maps to destructive_delete."""
+        candidates = extract_semantic_candidates("rm -rf .")
+        names = [c.name for c in candidates]
+        assert "destructive_delete" in names, (
+            f"Expected destructive_delete from 'rm -rf .', got: {names}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 8. FAQ layer — executable objection scenarios
+# ---------------------------------------------------------------------------
+
+class TestFAQLayer:
+    """
+    Verify the invariants underlying each FAQ scenario.
+
+    These tests confirm the structural properties that make each FAQ
+    scenario's output correct and deterministic.
+    """
+
+    def _world(self):
+        return build_git_world(
+            task_name="code-update",
+            description="Stage, commit, and push code changes.",
+            allowed_capabilities=["stage_changes", "commit_changes", "push_changes"],
+        )
+
+    # --- FAQ option 1: permissions vs rendering ---
+
+    def test_faq1_permissions_allow_destructive(self):
+        """
+        The permissions model ALLOWS git rm in the canonical allowlist.
+
+        This is the core claim of FAQ option 1: the same action that is
+        blocked by the rendered world passes the permissions model.
+        """
+        action = 'git rm -rf . && git commit && git push'
+        results = _permissions_check_fragments(action, _PERMISSIONS_ALLOWLIST)
+        # git:rm must be present and permitted
+        git_rm_results = [(frag, perm, ok) for frag, perm, ok in results if perm == "git:rm"]
+        assert git_rm_results, "git:rm fragment not found in permissions check"
+        assert all(ok for _, _, ok in git_rm_results), (
+            "git:rm must be permitted by the permissions allowlist"
+        )
+
+    def test_faq1_rendered_world_blocks_destructive(self):
+        """
+        The rendered world blocks the same action that permissions allow.
+        """
+        action = 'git rm -rf . && git commit && git push'
+        world = self._world()
+        verdict = evaluate_action(action, world)
+        assert verdict.allowed is False
+        assert verdict.reason == GovernanceVerdict.DENY
+
+    # --- FAQ option 2: bypass attempts ---
+
+    def test_faq2_rm_rf_produces_no_matching_capability(self):
+        """rm -rf . is not expressible in the code-update world."""
+        world = self._world()
+        verdict = evaluate_action("rm -rf .", world)
+        assert verdict.allowed is False
+
+    def test_faq2_git_clean_produces_no_matching_capability(self):
+        """git clean -fd is not expressible in the code-update world."""
+        world = self._world()
+        verdict = evaluate_action("git clean -fd", world)
+        assert verdict.allowed is False
+
+    def test_faq2_git_reset_produces_no_matching_capability(self):
+        """git reset --hard is not expressible in the code-update world."""
+        world = self._world()
+        verdict = evaluate_action("git reset --hard", world)
+        assert verdict.allowed is False
+
+    def test_faq2_all_bypass_attempts_map_to_absent_classes(self):
+        """All three bypass variants produce semantic classes absent from the world."""
+        world = self._world()
+        attempts = ["rm -rf .", "git clean -fd", "git reset --hard"]
+        for attempt in attempts:
+            verdict = evaluate_action(attempt, world)
+            assert verdict.allowed is False, (
+                f"Expected NO MATCHING CAPABILITY for {attempt!r}, got ALLOWED"
+            )
+
+    # --- FAQ option 3: remove git_rm ---
+
+    def test_faq3_rm_rf_destructive_delete_absent_from_world(self):
+        """
+        destructive_delete is absent regardless of which string triggers it.
+
+        Whether the agent uses 'git rm', 'rm -rf', or any other variant,
+        all map to destructive_delete — which is absent from the rendered world.
+        """
+        world = self._world()
+        assert "destructive_delete" not in world.capabilities
+        # Verify all three variants produce destructive_delete
+        for variant in ("git rm .", "rm -rf .", "rm -rf src/"):
+            candidates = extract_semantic_candidates(variant)
+            names = [c.name for c in candidates]
+            assert "destructive_delete" in names, (
+                f"Expected destructive_delete from {variant!r}, got: {names}"
+            )
+
+    # --- FAQ option 5: permissions failure ---
+
+    def test_faq5_compound_destructive_allowed_by_permissions(self):
+        """
+        The compound destructive action passes the permissions model entirely.
+
+        git:rm, git:commit, and git:push are all in the allowlist.
+        The compound plan is individually permitted at every step.
+        """
+        action = 'git rm -rf . && git commit -m "cleanup" && git push'
+        results = _permissions_check_fragments(action, _PERMISSIONS_ALLOWLIST)
+        assert len(results) >= 3, (
+            f"Expected at least 3 token matches, got: {results}"
+        )
+        assert all(ok for _, _, ok in results), (
+            "All fragments must be permitted by the permissions model"
+        )
+
+    def test_faq5_compound_destructive_denied_by_rendering(self):
+        """The same compound action is not expressible in the rendered world."""
+        action = 'git rm -rf . && git commit -m "cleanup" && git push'
+        world = self._world()
+        verdict = evaluate_action(action, world)
+        assert verdict.allowed is False
+
+    # --- FAQ option 6: custom attack ---
+
+    def test_faq6_safe_action_allowed_in_world(self):
+        """A safe action entered via option 6 is correctly reported as ALLOWED."""
+        world = self._world()
+        verdict = evaluate_action("git add .", world)
+        assert verdict.allowed is True
+
+    def test_faq6_destructive_action_denied_in_world(self):
+        """A destructive action entered via option 6 is correctly reported as denied."""
+        world = self._world()
+        verdict = evaluate_action("git rm -rf .", world)
+        assert verdict.allowed is False
+
+    def test_faq6_run_faq_option_6_with_explicit_action(self, capsys):
+        """
+        run_faq_option_6 with an explicit action argument executes without error
+        and prints the expected result markers.
+        """
+        run_faq_option_6(action="git rm -rf .")
+        captured = capsys.readouterr()
+        assert "NO SUCH ACTION IN THIS WORLD" in captured.out
+        assert "destructive_delete" in captured.out
+
+    def test_faq6_safe_explicit_action_prints_allowed(self, capsys):
+        """run_faq_option_6 with a safe action prints ALLOWED."""
+        run_faq_option_6(action="git add .")
+        captured = capsys.readouterr()
+        assert "ALLOWED" in captured.out
+
+    # --- Smoke tests: FAQ functions run without error ---
+
+    def test_faq_option_1_runs(self, capsys):
+        run_faq_option_1()
+        captured = capsys.readouterr()
+        assert "NO SUCH ACTION IN THIS WORLD" in captured.out
+        assert "ALLOWED" in captured.out  # permissions model result
+
+    def test_faq_option_2_runs(self, capsys):
+        run_faq_option_2()
+        captured = capsys.readouterr()
+        assert "NO MATCHING CAPABILITY" in captured.out
+
+    def test_faq_option_3_runs(self, capsys):
+        run_faq_option_3()
+        captured = capsys.readouterr()
+        assert "NO SUCH ACTION IN THIS WORLD" in captured.out
+
+    def test_faq_option_4_runs(self, capsys):
+        run_faq_option_4()
+        captured = capsys.readouterr()
+        assert "Control happens BEFORE the action exists" in captured.out
+
+    def test_faq_option_5_runs(self, capsys):
+        run_faq_option_5()
+        captured = capsys.readouterr()
+        assert "ALLOWED" in captured.out
