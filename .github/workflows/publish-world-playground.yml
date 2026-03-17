@@ -1,0 +1,74 @@
+name: Publish World Playground
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'playground/packages/world-playground/**'
+      - '.github/workflows/publish-world-playground.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment target'
+        required: false
+        default: 'github-pages'
+        type: choice
+        options:
+          - github-pages
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: playground/packages/world-playground
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: playground/package-lock.json
+
+      - name: Install dependencies
+        working-directory: playground
+        run: npm ci --workspace=packages/world-playground
+
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: playground/packages/world-playground/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
