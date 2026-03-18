@@ -552,7 +552,229 @@ tests/                          test suite
 
 ---
 
-## 10. Documentation
+## 10. Examples, Demos & Playgrounds
+
+A guided tour of all runnable demonstrations, from a 30-second CLI run to a
+full interactive web app.
+
+### Table of Contents
+
+- [Basic Demos](#basic-demos) — core four-layer mechanics, two scripts
+- [Workaround Patterns](#workaround-patterns) — six tactical patterns for existing systems
+- [Comparisons](#comparisons) — Bash + permissions vs. capability rendering, side-by-side
+- [Provenance Firewall MVP](#provenance-firewall-mvp) — self-contained, runnable MVP of the core idea
+- [Integration Examples](#integration-examples) — MCP, LangChain, approval workflows, GitHub Copilot
+- [Showcase](#showcase) — end-to-end eight-step governance lifecycle
+- [Interactive Playground](#interactive-playground) — full-stack TypeScript/React web demo
+- [Presentation](#presentation) — 13-slide Reveal.js deck ready for stakeholders
+
+---
+
+### Basic Demos
+
+`examples/basic/`
+
+Two focused scripts that illustrate the foundational mechanics without
+requiring the gateway server to be running.
+
+| Script | What it shows |
+|---|---|
+| `01_simple_demo.py` | Seven scenarios covering safe reads, dangerous deletion, unknown tools, file-limit enforcement, and forbidden pattern detection across Layers 0–2. |
+| `02_hypervisor_demo.py` | Three end-to-end scenarios: email injection (hypervisor strips and taints), poisoned tool output (taint propagates through the chain), and a legitimate trusted workflow (list inbox → reply). |
+
+```bash
+python examples/basic/01_simple_demo.py
+python examples/basic/02_hypervisor_demo.py
+```
+
+---
+
+### Workaround Patterns
+
+`examples/workarounds/`
+
+Six self-contained patterns you can drop into an existing agent stack
+today while the full Hypervisor matures. Each file header lists an
+estimated implementation time and the protection percentage it adds.
+
+| Script | Pattern | Protection |
+|---|---|---|
+| `01_input_classification.py` | Tag every input with source and trust level — the foundation all other workarounds build on. | 20–30 % |
+| `02_memory_provenance.py` | Track the source of every memory write; addresses ZombieAgent attacks. | 40–50 % + forensics |
+| `03_readonly_tools.py` | Wrap tools as read-only; eliminates accidental side-effects. | Prevents accidents |
+| `04_segregated_memory.py` | Separate memory by trust zone; critical for agents that learn continuously. | 60–70 % |
+| `05_taint_tracking.py` | Track data contamination through transformations; addresses ShadowLeak exfiltration. | 50–60 % |
+| `06_audit_logging.py` | Append-only, immutable action log; evidence trail for incident response. | Reactive / forensics |
+
+```bash
+python examples/workarounds/01_input_classification.py
+# … repeat for each numbered script
+```
+
+---
+
+### Comparisons
+
+`examples/comparisons/`
+
+Direct, side-by-side experiments showing why Bash + string permissions
+fails against the same scenario that capability rendering defeats.
+
+| Script | What it shows |
+|---|---|
+| `compare_bash_vs_rendering.py` | Full side-by-side run: `git rm -rf . && git push` is **ALLOWED** by the Bash model and **NOT EXPRESSIBLE** in the rendering model. This output is reproduced verbatim at the top of this README. |
+| `bash_permissions_demo.py` | Isolated demonstration of the string-permission weakness. |
+| `capability_rendering_demo.py` | Isolated demonstration of capability construction. |
+
+```bash
+python examples/comparisons/compare_bash_vs_rendering.py
+```
+
+---
+
+### Provenance Firewall MVP
+
+`examples/provenance_firewall/`
+
+A self-contained, runnable MVP that implements the core security idea
+without any external dependencies. Four files; `demo.py` is the entry
+point.
+
+| File | Role |
+|---|---|
+| `demo.py` | Runs three modes: (A) unprotected baseline — injection succeeds; (B) protected, malicious recipient — DENY; (C) protected, declared recipient — ASK for confirmation. |
+| `models.py` | Data model: `ValueRef`, `ToolCall`, `Decision`, enums. |
+| `policies.py` | Firewall engine with five rules: external documents cannot authorize outbound side-effects; `send_email.to` must trace to a declared source; provenance is sticky through derivation; unknown tools denied; `require_confirmation` escalates to ask. |
+| `agent_sim.py` | Simulated agent that proposes tool calls fed into the firewall. |
+
+```bash
+python examples/provenance_firewall/demo.py
+```
+
+---
+
+### Integration Examples
+
+`examples/integrations/`
+
+Drop-in integration patterns for popular frameworks and protocols. The
+gateway server must be running for most of these (`python scripts/run_gateway.py`).
+
+| Script | What it shows |
+|---|---|
+| `mcp_gateway_full_example.py` | Canonical five-step MCP governance scenario: list tools → read file (allow) → email attacker from external doc (deny) → email declared recipient (ask) → reviewer approves and executes. |
+| `mcp_gateway_adapter_example.py` | Lighter adapter-pattern implementation of the same MCP binding. |
+| `langchain_gateway_example.py` | `gateway_tool` decorator that wraps LangChain tools and routes calls through the provenance firewall, returning allow / deny / ask verdicts. |
+| `approval_flow_example.py` | Demonstrates the full ask → approve → execute lifecycle, including how to poll for and submit human approvals. |
+| `copilot_git_governance_demo.py` | Extended GitHub Copilot Git governance scenario showing how a Copilot-style agent interacts with the Hypervisor during typical repository operations. |
+
+```bash
+# Terminal 1
+python scripts/run_gateway.py
+
+# Terminal 2 — MCP full demo
+python examples/integrations/mcp_gateway_full_example.py --demo
+
+# Terminal 2 — LangChain
+python examples/integrations/langchain_gateway_example.py
+
+# Terminal 2 — approval flow
+python examples/integrations/approval_flow_example.py
+```
+
+---
+
+### Showcase
+
+`examples/showcase/`
+
+The recommended starting point for reviewers. Runs a complete eight-step
+governance lifecycle in one command and requires no prior setup beyond
+`pip install fastapi uvicorn pyyaml`.
+
+| Script | What it shows |
+|---|---|
+| `showcase_demo.py` | Three sub-scenarios (safe read → allow; injection → deny; governance → ask → approve → execute) walking through all eight steps: propose, provenance analysis, policy evaluation, ask verdict, approval granted, tool execution, trace recorded, policy-tuner analysis. Starts an embedded gateway on port 8099. |
+
+```bash
+python scripts/run_showcase_demo.py
+# or directly:
+python examples/showcase/showcase_demo.py
+```
+
+---
+
+### Interactive Playground
+
+`playground/`
+
+A full-stack TypeScript / React web application that makes the
+"reality virtualization" concept visceral and interactive. No Python
+or external AI APIs required — runs entirely offline.
+
+**Tech stack:** TypeScript (strict), Fastify + WebSocket, React + Vite + Tailwind CSS, npm workspaces.
+
+| Package | Role |
+|---|---|
+| `packages/hypervisor/` | Policy engine in TypeScript (`policy.ts`). |
+| `packages/agent/` | Intentionally compromised mock agent (`compromised.ts`). |
+| `packages/server/` | Fastify server with four pre-built attack scenarios. |
+| `packages/dashboard/` | React frontend showing live policy decisions. |
+
+Four built-in scenarios:
+
+| ID | Name | What it demonstrates |
+|---|---|---|
+| A | ZombieAgent / OpenClaw Case | Canonicalization ≠ trust — a tainted channel looks clean. |
+| B | Trust = Channel | Capabilities are the physics of the agent's world, not a permission list. |
+| C | MCP as Virtual Device | Tools are devices the hypervisor grants, not possessions the agent owns. |
+| D | Simulate, not Execute | Simulation runs in a different world — blocking is the wrong primitive. |
+
+```bash
+cd playground
+npm install
+npm run dev
+# open http://localhost:5173
+```
+
+---
+
+### Presentation
+
+`presentation/`
+
+A browser-based Reveal.js slide deck covering the full architecture in
+13 slides. Dark, minimal design. No build step — open directly in a
+browser or serve locally for PDF export.
+
+**Slide outline:**
+
+| # | Title |
+|---|---|
+| 1 | The Missing Layer |
+| 2 | The Pattern — why every current AI defence fails the same way |
+| 3 | The Inversion — the right question vs the wrong question |
+| 4 | Bash (broken) |
+| 5 | Rendered World — the action cannot be proposed |
+| 6 | Email Example |
+| 7 | Semantic Events |
+| 8 | The Four-Layer Model |
+| 9 | The Rendering Engine |
+| 10 | Design-time vs Runtime |
+| 11 | Full System Flow |
+| 12 | Why It Matters |
+| 13 | Final Thesis |
+
+```bash
+open presentation/index.html
+# or serve for PDF export:
+cd presentation && python3 -m http.server 8000
+# then open http://localhost:8000 and print to PDF from the browser
+```
+
+---
+
+## 11. Documentation
 
 | Document | What it covers |
 |---|---|
