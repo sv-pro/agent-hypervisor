@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Hypervisor — Demo Suite</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #07070e;
+      --bg-surface:   #0d0d1e;
+      --bg-elevated:  #11112a;
+      --border:        #1a1a38;
+      --border-subtle: #0f0f22;
+      --border-accent: rgba(110, 110, 255, 0.35);
+      --border-teal:   rgba(48, 210, 210, 0.3);
+      --text:          #e2e2ef;
+      --text-secondary:#8888aa;
+      --text-muted:    #444468;
+      --accent:        #7878ff;
+      --accent-dim:    rgba(120, 120, 255, 0.08);
+      --teal:          #30d8d8;
+      --teal-dim:      rgba(48, 216, 216, 0.07);
+      --warm:          #ffcc70;
+      --lavender:      #c8a8ff;
+      --sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    }
+
+    html { height: 100%; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 24px 80px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── HEADER ── */
+
+    .site-header {
+      width: 100%;
+      max-width: 900px;
+      padding: 72px 0 60px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 64px;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--teal);
+      display: block;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: clamp(42px, 6vw, 72px);
+      font-weight: 800;
+      line-height: 0.96;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      margin-bottom: 28px;
+    }
+
+    .site-subtitle {
+      font-size: 17px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      max-width: 560px;
+    }
+
+    /* ── GRID ── */
+
+    .deck-grid {
+      width: 100%;
+      max-width: 900px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 18px;
+    }
+
+    /* ── CARD ── */
+
+    .deck-card {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 32px 36px 28px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .deck-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 10px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .deck-card.accent::before  { background: var(--accent-dim); }
+    .deck-card.teal::before    { background: var(--teal-dim); }
+    .deck-card.warm::before    { background: rgba(255, 204, 112, 0.05); }
+    .deck-card.muted::before   { background: rgba(136, 136, 170, 0.04); }
+
+    .deck-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .deck-card.accent:hover  { border-color: var(--border-accent); }
+    .deck-card.teal:hover    { border-color: var(--border-teal); }
+    .deck-card.warm:hover    { border-color: rgba(255, 204, 112, 0.35); }
+    .deck-card.muted:hover   { border-color: #2e2e5a; }
+
+    .deck-card:hover::before { opacity: 1; }
+
+    .deck-card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .card-inner { position: relative; z-index: 1; }
+
+    .card-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+      display: block;
+    }
+
+    .deck-card.accent .card-tag { color: var(--accent); }
+    .deck-card.teal   .card-tag { color: var(--teal); }
+    .deck-card.warm   .card-tag { color: var(--warm); }
+    .deck-card.muted  .card-tag { color: var(--text-muted); }
+
+    .card-title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .card-desc {
+      font-size: 14px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      flex: 1;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .card-cta {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .deck-card.accent .card-cta { color: var(--accent); }
+    .deck-card.teal   .card-cta { color: var(--teal); }
+    .deck-card.warm   .card-cta { color: var(--warm); }
+    .deck-card.muted  .card-cta { color: var(--text-muted); }
+
+    .card-arrow {
+      font-size: 14px;
+      color: var(--text-muted);
+      transition: transform 0.2s ease, color 0.2s ease;
+    }
+
+    .deck-card:hover .card-arrow { transform: translateX(4px); }
+    .deck-card.accent:hover .card-arrow { color: var(--accent); }
+    .deck-card.teal:hover   .card-arrow { color: var(--teal); }
+    .deck-card.warm:hover   .card-arrow { color: var(--warm); }
+
+    /* ── PLACEHOLDER CARD ── */
+
+    .deck-card.placeholder {
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .deck-card.placeholder .card-title,
+    .deck-card.placeholder .card-desc { opacity: 0.45; }
+
+    .card-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 4px 10px;
+    }
+
+    /* ── FOOTER ── */
+
+    .site-footer {
+      width: 100%;
+      max-width: 900px;
+      margin-top: 80px;
+      padding-top: 28px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-note {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+
+    .footer-links a {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      text-decoration: none;
+      letter-spacing: 0.06em;
+      transition: color 0.15s;
+    }
+
+    .footer-links a:hover { color: var(--text-secondary); }
+
+    /* ── RULE ── */
+
+    .rule {
+      width: 48px;
+      height: 3px;
+      background: var(--accent);
+      border-radius: 2px;
+      opacity: 0.6;
+      margin-top: 32px;
+    }
+
+    @media (max-width: 600px) {
+      .site-header { padding: 48px 0 40px; }
+      .deck-grid { grid-template-columns: 1fr; }
+      .site-footer { flex-direction: column; gap: 16px; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <span class="eyebrow">Agent Hypervisor</span>
+  <h1>Demo Suite</h1>
+  <p class="site-subtitle">
+    Architectural demonstrations for AI agent governance.
+    Each deck is independently accessible.
+  </p>
+  <div class="rule"></div>
+</header>
+
+<main class="deck-grid">
+
+  <!-- Core Narrative -->
+  <a class="deck-card accent" href="./presentation-core/">
+    <div class="card-inner">
+      <span class="card-tag">Presentation · Core</span>
+      <div class="card-title">The Missing Layer</div>
+      <p class="card-desc">
+        From behavior control to world design for AI agents.
+        The canonical conceptual deck — scaling problem, RAG vs action overload,
+        capability rendering, and final thesis.
+      </p>
+      <div class="card-footer">
+        <span class="card-cta">Open deck</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </div>
+  </a>
+
+  <!-- Enterprise -->
+  <a class="deck-card teal" href="./presentation-enterprise/">
+    <div class="card-inner">
+      <span class="card-tag">Presentation · Enterprise</span>
+      <div class="card-title">Capability Rendering for Enterprise</div>
+      <p class="card-desc">
+        Capability rendering for enterprise agent systems.
+        Risk surface, policy simplification, auditability, and
+        action-space control as infrastructure.
+      </p>
+      <div class="card-footer">
+        <span class="card-cta">Open deck</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </div>
+  </a>
+
+  <!-- FAQ -->
+  <a class="deck-card warm" href="./presentation-faq/">
+    <div class="card-inner">
+      <span class="card-tag">Presentation · FAQ</span>
+      <div class="card-title">Objections Answered</div>
+      <p class="card-desc">
+        Objections answered through executable scenarios.
+        Designed for live demo backup — handles the hardest
+        questions about the architecture.
+      </p>
+      <div class="card-footer">
+        <span class="card-cta">Open deck</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </div>
+  </a>
+
+  <!-- Playground placeholder -->
+  <a class="deck-card muted placeholder" href="./playground/">
+    <div class="card-inner">
+      <span class="card-tag">Interactive · Playground</span>
+      <div class="card-title">Capability Rendering Playground</div>
+      <p class="card-desc">
+        Interactive action-space rendering demo.
+        Step through taint propagation, policy evaluation,
+        and ontology projection live.
+      </p>
+      <div class="card-footer">
+        <span class="card-badge">Coming next</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </div>
+  </a>
+
+</main>
+
+<footer class="site-footer">
+  <span class="footer-note">agent-hypervisor</span>
+  <nav class="footer-links">
+    <a href="./presentation-core/">Core</a>
+    <a href="./presentation-enterprise/">Enterprise</a>
+    <a href="./presentation-faq/">FAQ</a>
+    <a href="./playground/">Playground</a>
+  </nav>
+</footer>
+
+</body>
+</html>

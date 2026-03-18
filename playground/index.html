@@ -1,80 +1,415 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent Hypervisor Playground</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Capability Rendering Playground — Agent Hypervisor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #07070e;
+      --bg-surface:   #0d0d1e;
+      --bg-elevated:  #11112a;
+      --border:        #1a1a38;
+      --border-subtle: #0f0f22;
+      --border-accent: rgba(110, 110, 255, 0.35);
+      --border-teal:   rgba(48, 210, 210, 0.3);
+      --text:          #e2e2ef;
+      --text-secondary:#8888aa;
+      --text-muted:    #444468;
+      --accent:        #7878ff;
+      --accent-dim:    rgba(120, 120, 255, 0.08);
+      --teal:          #30d8d8;
+      --teal-dim:      rgba(48, 216, 216, 0.07);
+      --warm:          #ffcc70;
+      --sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 24px 80px;
+    }
+
+    /* ── NAV ── */
+
+    .site-nav {
+      width: 100%;
+      max-width: 780px;
+      padding: 24px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+    }
+
+    .site-nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .site-nav a:hover { color: var(--text-secondary); }
+    .site-nav .sep { color: var(--text-dim); }
+    .site-nav .current { color: rgba(136,136,170,0.35); }
+
+    /* ── MAIN ── */
+
+    .page {
+      width: 100%;
+      max-width: 780px;
+      margin-top: 80px;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--teal);
+      display: block;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: clamp(36px, 5vw, 58px);
+      font-weight: 800;
+      line-height: 0.96;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      margin-bottom: 24px;
+    }
+
+    .subtitle {
+      font-size: 17px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      max-width: 540px;
+      margin-bottom: 48px;
+    }
+
+    .rule {
+      width: 48px;
+      height: 3px;
+      background: var(--teal);
+      border-radius: 2px;
+      opacity: 0.5;
+      margin-bottom: 48px;
+    }
+
+    /* ── STATUS BADGE ── */
+
+    .status-block {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 22px;
+      margin-bottom: 48px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warm);
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    .status-text {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--warm);
+      letter-spacing: 0.06em;
+    }
+
+    /* ── DESCRIPTION ── */
+
+    .description {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+      margin-bottom: 40px;
+      max-width: 620px;
+    }
+
+    /* ── DEMO CARDS ── */
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 48px;
+    }
+
+    .demo-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 22px 26px;
+    }
+
+    .demo-card-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .demo-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .demo-card-desc {
+      font-size: 13px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    /* ── CODE BLOCK ── */
+
+    .code-section {
+      margin-bottom: 48px;
+    }
+
+    .code-section-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      display: block;
+    }
+
+    .terminal {
+      background: #080812;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.75;
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 11px 16px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+
+    .terminal-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: 8px;
+      letter-spacing: 0.04em;
+    }
+
+    .terminal-body {
+      padding: 20px 24px;
+      color: var(--text);
+    }
+
+    .terminal-body .c  { color: var(--text-muted); }
+    .terminal-body .k  { color: var(--accent); }
+    .terminal-body .v  { color: var(--teal); }
+    .terminal-body .ok { color: var(--teal); }
+    .terminal-body .w  { color: var(--warm); }
+    .terminal-body .d  { color: #2e2e4a; }
+
+    /* ── FOOTER ── */
+
+    .page-footer {
+      padding-top: 32px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-note {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+    }
+
+    .footer-links a {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      text-decoration: none;
+      letter-spacing: 0.06em;
+      transition: color 0.15s;
+    }
+
+    .footer-links a:hover { color: var(--text-secondary); }
+
+    @media (max-width: 600px) {
+      .demo-grid { grid-template-columns: 1fr; }
+      .page-footer { flex-direction: column; gap: 16px; align-items: flex-start; }
+    }
+  </style>
 </head>
 <body>
-<div class="app">
 
-  <header>
-    <div>
-      <h1>Agent Hypervisor</h1>
-      <p>Type any input. Watch taint flow through the pipeline. See where attacks lose effect.</p>
+<nav class="site-nav">
+  <a href="../">← index</a>
+  <span class="sep">·</span>
+  <a href="../presentation-core/">core</a>
+  <span class="sep">·</span>
+  <a href="../presentation-enterprise/">enterprise</a>
+  <span class="sep">·</span>
+  <a href="../presentation-faq/">faq</a>
+  <span class="sep">·</span>
+  <span class="current">playground</span>
+</nav>
+
+<main class="page">
+
+  <span class="eyebrow">Interactive Demo</span>
+  <h1>Capability Rendering<br>Playground</h1>
+  <p class="subtitle">
+    Step through taint propagation, ontology projection, and policy evaluation live.
+    Feed arbitrary inputs. Watch which actions survive rendering and which disappear.
+  </p>
+
+  <div class="rule"></div>
+
+  <div class="status-block">
+    <div class="status-dot"></div>
+    <span class="status-text">Requires local server — run instructions below</span>
+  </div>
+
+  <p class="description">
+    The playground is a full interactive demo with a live policy engine backend.
+    It runs locally — type any agent input, choose a manifest and tool,
+    and see exactly how the hypervisor evaluates it: taint classification,
+    ontology validation, provenance check, and three-way verdict.
+  </p>
+
+  <div class="demo-grid">
+    <div class="demo-card">
+      <span class="demo-card-label">Taint Flow</span>
+      <div class="demo-card-title">Input provenance</div>
+      <p class="demo-card-desc">
+        Every input is labeled with its trust class —
+        user-declared, external document, derived, or system.
+        Watch taint propagate through the pipeline.
+      </p>
     </div>
-    <span class="badge">PLAYGROUND</span>
-  </header>
+    <div class="demo-card">
+      <span class="demo-card-label">Ontology</span>
+      <div class="demo-card-title">Manifest projection</div>
+      <p class="demo-card-desc">
+        Select a manifest. The available action space
+        narrows to what the manifest permits.
+        Out-of-manifest calls are denied before execution.
+      </p>
+    </div>
+    <div class="demo-card">
+      <span class="demo-card-label">Policy</span>
+      <div class="demo-card-title">Three-way verdict</div>
+      <p class="demo-card-desc">
+        Each action receives allow, deny, or ask.
+        Policy rules are readable — you can see exactly
+        which rule triggered and why.
+      </p>
+    </div>
+    <div class="demo-card">
+      <span class="demo-card-label">Scenarios</span>
+      <div class="demo-card-title">Preloaded attacks</div>
+      <p class="demo-card-desc">
+        Pre-built scenarios demonstrate prompt injection,
+        exfiltration attempts, and privilege escalation —
+        and how each is handled structurally.
+      </p>
+    </div>
+  </div>
 
-  <main>
-    <!-- ── Left: controls ── -->
-    <aside class="controls">
-
-      <div>
-        <h2>Presets</h2>
-        <div class="presets" id="presets"></div>
+  <div class="code-section">
+    <span class="code-section-label">Run locally</span>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot"></div>
+        <div class="terminal-dot"></div>
+        <div class="terminal-dot"></div>
+        <span class="terminal-label">bash</span>
       </div>
-
-      <div class="field">
-        <label>Raw input</label>
-        <textarea id="input-text" placeholder="Type anything the agent might receive…"></textarea>
+      <div class="terminal-body">
+        <div><span class="c"># install dependencies</span></div>
+        <div><span class="k">cd</span> <span class="v">playground</span></div>
+        <div><span class="k">npm</span> <span class="v">install</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c"># start server + open in browser</span></div>
+        <div><span class="k">npm</span> <span class="v">run dev</span></div>
+        <div><span class="d">→ </span><span class="ok">http://localhost:5173</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c"># alternatively: run the static demo</span></div>
+        <div><span class="k">npm</span> <span class="v">run server</span>   <span class="c"># starts Fastify backend on :3000</span></div>
+        <div><span class="ok">open</span> <span class="v">http://localhost:3000</span></div>
       </div>
+    </div>
+  </div>
 
-      <div class="field">
-        <label>Channel (source trust)</label>
-        <div class="channel-pills">
-          <button class="pill" data-channel="user">user</button>
-          <button class="pill" data-channel="email">email</button>
-          <button class="pill" data-channel="web">web</button>
-          <button class="pill" data-channel="file">file</button>
-          <button class="pill" data-channel="mcp">mcp</button>
-        </div>
-      </div>
+  <footer class="page-footer">
+    <span class="footer-note">agent-hypervisor / playground</span>
+    <nav class="footer-links">
+      <a href="../">Home</a>
+      <a href="../presentation-core/">Core</a>
+      <a href="../presentation-enterprise/">Enterprise</a>
+      <a href="../presentation-faq/">FAQ</a>
+    </nav>
+  </footer>
 
-      <div class="field">
-        <label>Manifest (world)</label>
-        <select id="manifest-select">
-          <option value="email-safe-assistant">email-safe-assistant</option>
-          <option value="mcp-gateway-demo">mcp-gateway-demo</option>
-          <option value="browser-agent-demo">browser-agent-demo</option>
-        </select>
-      </div>
+</main>
 
-      <div class="field">
-        <label>Tool (intended action)</label>
-        <select id="tool-select"></select>
-      </div>
-
-      <div class="field">
-        <label>Args (JSON)</label>
-        <textarea id="args-input" placeholder='{"to": ["evil@example.com"]}'></textarea>
-      </div>
-
-      <button class="run-btn" id="run-btn">Evaluate ↵</button>
-
-    </aside>
-
-    <!-- ── Right: visualization ── -->
-    <section class="viz">
-      <div id="viz-content" style="display:flex;flex-direction:column;gap:24px;flex:1"></div>
-    </section>
-  </main>
-
-</div>
-<script src="/static/app.js"></script>
 </body>
 </html>

@@ -1,0 +1,766 @@
+/* ================================================================
+   AGENT HYPERVISOR — PRESENTATION THEME
+   Dark, minimal, architectural. No red/green semantics.
+   ================================================================ */
+
+/* ----------------------------------------------------------------
+   VARIABLES
+   ---------------------------------------------------------------- */
+
+:root {
+  --bg:           #07070e;
+  --bg-surface:   #0d0d1e;
+  --bg-elevated:  #11112a;
+  --bg-code:      #080812;
+
+  --border:        #1a1a38;
+  --border-subtle: #0f0f22;
+  --border-accent: rgba(110, 110, 255, 0.35);
+  --border-teal:   rgba(48, 210, 210, 0.3);
+
+  --text:          #e2e2ef;
+  --text-secondary:#8888aa;
+  --text-muted:    #444468;
+  --text-dim:      #2e2e4a;
+
+  --accent:        #7878ff;
+  --accent-glow:   rgba(120, 120, 255, 0.18);
+  --accent-dim:    rgba(120, 120, 255, 0.08);
+
+  --teal:          #30d8d8;
+  --teal-glow:     rgba(48, 216, 216, 0.15);
+  --teal-dim:      rgba(48, 216, 216, 0.07);
+
+  --lavender:      #c8a8ff;
+  --warm:          #ffcc70;
+  --warm-dim:      rgba(255, 204, 112, 0.12);
+
+  --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+}
+
+/* ----------------------------------------------------------------
+   REVEAL BASE
+   ---------------------------------------------------------------- */
+
+.reveal-viewport {
+  background: var(--bg);
+}
+
+.reveal {
+  font-family: var(--sans);
+  font-size: 38px;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.reveal .slides {
+  text-align: left;
+}
+
+/* Remove Reveal's default heading overrides */
+.reveal h1, .reveal h2, .reveal h3, .reveal h4,
+.reveal p, .reveal ul, .reveal ol {
+  margin: 0;
+  padding: 0;
+  font-weight: inherit;
+  line-height: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.reveal .slides > section {
+  padding: 0 !important;
+  height: 100%;
+}
+
+/* ----------------------------------------------------------------
+   PROGRESS + CONTROLS
+   ---------------------------------------------------------------- */
+
+.reveal .progress {
+  height: 2px;
+  background: var(--border);
+  color: var(--accent);
+}
+
+.reveal .controls {
+  color: var(--accent);
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+
+.reveal .controls:hover {
+  opacity: 0.7;
+}
+
+/* ----------------------------------------------------------------
+   SLIDE LAYOUT WRAPPERS
+   ---------------------------------------------------------------- */
+
+.sl {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 70px 110px;
+  box-sizing: border-box;
+}
+
+.sl-wide {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 60px 90px;
+  box-sizing: border-box;
+}
+
+.sl-center {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  height: 100%;
+  padding: 70px 110px;
+  box-sizing: border-box;
+}
+
+/* ----------------------------------------------------------------
+   TYPOGRAPHY
+   ---------------------------------------------------------------- */
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.32em;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin-bottom: 0.9em;
+  display: block;
+}
+
+.reveal h1.display {
+  font-size: 3.8em;
+  font-weight: 800;
+  line-height: 0.96;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.reveal h2.h2 {
+  font-size: 2.0em;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  color: var(--text);
+  margin-bottom: 0.2em;
+}
+
+.statement {
+  font-size: 1.55em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.sub {
+  font-size: 0.5em;
+  font-weight: 300;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  letter-spacing: 0.005em;
+}
+
+.note {
+  font-size: 0.42em;
+  font-weight: 400;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.mono-text {
+  font-family: var(--mono);
+}
+
+/* ----------------------------------------------------------------
+   DECORATIVE
+   ---------------------------------------------------------------- */
+
+.rule {
+  width: 48px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+.rule-full {
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+  margin: 36px 0;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 0.34em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.tag-accent {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--border-accent);
+}
+
+.tag-teal {
+  background: var(--teal-dim);
+  color: var(--teal);
+  border: 1px solid var(--border-teal);
+}
+
+.tag-warm {
+  background: var(--warm-dim);
+  color: var(--warm);
+  border: 1px solid rgba(255, 204, 112, 0.3);
+}
+
+/* ----------------------------------------------------------------
+   SPACING HELPERS
+   ---------------------------------------------------------------- */
+
+.mt-xs { margin-top: 10px; }
+.mt-sm { margin-top: 18px; }
+.mt-md { margin-top: 32px; }
+.mt-lg { margin-top: 48px; }
+.mt-xl { margin-top: 68px; }
+
+.mb-sm { margin-bottom: 18px; }
+.mb-md { margin-bottom: 32px; }
+
+/* ----------------------------------------------------------------
+   TERMINAL / CODE PANELS
+   ---------------------------------------------------------------- */
+
+.terminal {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 0.4em;
+  line-height: 1.75;
+}
+
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.terminal-label {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-left: 8px;
+  letter-spacing: 0.04em;
+}
+
+.terminal-body {
+  padding: 22px 28px;
+  color: var(--text);
+}
+
+.terminal-body .c  { color: var(--text-muted); }        /* comment */
+.terminal-body .k  { color: var(--accent); }             /* keyword/key */
+.terminal-body .v  { color: var(--teal); }               /* value */
+.terminal-body .s  { color: var(--lavender); }           /* string */
+.terminal-body .t  { color: var(--warm); }               /* type */
+.terminal-body .d  { color: var(--text-dim); }           /* dim */
+.terminal-body .ok { color: var(--teal); }               /* ok/pass */
+.terminal-body .w  { color: var(--warm); }               /* warn */
+.terminal-body .p  { color: var(--text-secondary); }     /* punctuation */
+
+.code-panel {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 26px 32px;
+  font-family: var(--mono);
+  font-size: 0.4em;
+  line-height: 1.8;
+  color: var(--text);
+}
+
+.code-panel .c  { color: var(--text-muted); }
+.code-panel .k  { color: var(--accent); }
+.code-panel .v  { color: var(--teal); }
+.code-panel .s  { color: var(--lavender); }
+.code-panel .t  { color: var(--warm); }
+.code-panel .d  { color: var(--text-dim); }
+.code-panel .ok { color: var(--teal); }
+.code-panel .w  { color: var(--warm); }
+
+/* ----------------------------------------------------------------
+   INSET CALLOUT
+   ---------------------------------------------------------------- */
+
+.callout {
+  background: var(--accent-dim);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 18px 24px;
+  font-size: 0.48em;
+  line-height: 1.6;
+  color: var(--text);
+  font-style: italic;
+}
+
+.callout-teal {
+  background: var(--teal-dim);
+  border-left-color: var(--teal);
+}
+
+/* ----------------------------------------------------------------
+   CHAIN DIAGRAM (Slide 2)
+   ---------------------------------------------------------------- */
+
+.chain {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 36px 0;
+  flex-wrap: nowrap;
+}
+
+.chain-node {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 13px 20px;
+  font-size: 0.42em;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.chain-node.hi {
+  border-color: rgba(120, 120, 255, 0.4);
+  color: var(--text);
+}
+
+.chain-node.danger {
+  border-color: rgba(255, 180, 48, 0.5);
+  color: var(--warm);
+  background: var(--warm-dim);
+}
+
+.chain-arrow {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 0.55em;
+  padding: 0 6px;
+}
+
+/* ----------------------------------------------------------------
+   INVERSION BLOCKS (Slide 3)
+   ---------------------------------------------------------------- */
+
+.inv-block {
+  border-radius: 8px;
+  padding: 32px 38px;
+  margin: 8px 0;
+}
+
+.inv-block.old {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+
+.inv-block.new {
+  background: var(--accent-dim);
+  border: 1px solid var(--border-accent);
+}
+
+.inv-label {
+  font-family: var(--mono);
+  font-size: 0.33em;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: block;
+}
+
+.inv-label.old { color: var(--text-muted); }
+.inv-label.new { color: var(--accent); }
+
+.inv-q {
+  font-family: var(--mono);
+  font-size: 0.52em;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.inv-q.old { color: var(--text-secondary); }
+.inv-q.new { color: var(--text); }
+
+.inv-sub {
+  font-size: 0.38em;
+  color: var(--text-muted);
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+/* ----------------------------------------------------------------
+   CAPABILITY LIST (Slides 5, 9)
+   ---------------------------------------------------------------- */
+
+.cap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cap-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.42em;
+  color: var(--text);
+}
+
+.cap-item.exists {
+  border-color: var(--border-teal);
+  background: var(--teal-dim);
+}
+
+.cap-item .cap-name { color: var(--teal); }
+.cap-item .cap-param { color: var(--text-secondary); }
+
+.cap-item.no-match {
+  border-color: rgba(255, 180, 48, 0.3);
+  background: var(--warm-dim);
+  opacity: 0.7;
+}
+
+.cap-item.no-match .cap-name { color: var(--warm); }
+
+/* ----------------------------------------------------------------
+   4-LAYER ARCHITECTURE (Slide 8)
+   ---------------------------------------------------------------- */
+
+.layer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.layer {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+
+.layer:last-child {
+  border-bottom: none;
+}
+
+.layer-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 66px;
+  font-family: var(--mono);
+  font-size: 0.38em;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  letter-spacing: 0.04em;
+}
+
+.layer-body {
+  flex: 1;
+  padding: 18px 32px;
+  background: var(--bg-surface);
+}
+
+.layer-title {
+  font-size: 0.48em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.layer-desc {
+  font-size: 0.4em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Per-layer accent colors */
+.layer-0 .layer-num   { color: var(--text-dim); }
+.layer-0 .layer-title { color: var(--text-muted); }
+.layer-0 .layer-body  { background: #09090f; }
+
+.layer-1 .layer-num   { color: var(--text-secondary); }
+.layer-1 .layer-title { color: var(--text-secondary); }
+
+.layer-2 .layer-num   { color: var(--accent); }
+.layer-2 .layer-title { color: var(--accent); }
+.layer-2 .layer-body  { background: var(--accent-dim); }
+.layer-2              { border-color: var(--border-accent); }
+
+.layer-3 .layer-num   { color: var(--teal); }
+.layer-3 .layer-title { color: var(--teal); }
+.layer-3 .layer-body  { background: var(--teal-dim); }
+.layer-3              { border-color: var(--border-teal); }
+
+/* ----------------------------------------------------------------
+   COMPARISON SPLIT (Slides 6, 7, 10)
+   ---------------------------------------------------------------- */
+
+.split-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+.col-head {
+  font-family: var(--mono);
+  font-size: 0.34em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.col-head.old { color: var(--text-muted); }
+.col-head.new { color: var(--teal); }
+
+/* ----------------------------------------------------------------
+   PIPELINE FLOW (Slide 11)
+   ---------------------------------------------------------------- */
+
+.pipeline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.pipe-step {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pipe-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 13px 24px;
+  font-size: 0.44em;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 260px;
+}
+
+.pipe-box.accent {
+  border-color: var(--border-accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.pipe-box.teal {
+  border-color: var(--border-teal);
+  background: var(--teal-dim);
+  color: var(--teal);
+}
+
+.pipe-box-label {
+  font-family: var(--mono);
+  font-size: 0.34em;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+.pipe-connector {
+  padding: 6px 0 6px 26px;
+  color: var(--text-dim);
+  font-size: 0.5em;
+}
+
+/* ----------------------------------------------------------------
+   DESIGN-TIME VS RUNTIME (Slide 10)
+   ---------------------------------------------------------------- */
+
+.dt-block {
+  padding: 28px 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.dt-block.runtime {
+  border-color: var(--border-teal);
+  background: var(--teal-dim);
+}
+
+.dt-title {
+  font-family: var(--mono);
+  font-size: 0.38em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.dt-block.runtime .dt-title {
+  color: var(--teal);
+}
+
+.dt-item {
+  font-size: 0.42em;
+  color: var(--text-secondary);
+  line-height: 1.9;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+}
+
+.dt-item strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.dt-block.runtime .dt-item {
+  border-left-color: var(--border-teal);
+}
+
+.dt-block.runtime .dt-item strong {
+  color: var(--teal);
+}
+
+/* ----------------------------------------------------------------
+   WHY IT MATTERS (Slide 12)
+   ---------------------------------------------------------------- */
+
+.matters-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.matters-card {
+  padding: 20px 24px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.matters-card-title {
+  font-family: var(--mono);
+  font-size: 0.4em;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+
+.matters-card-desc {
+  font-size: 0.38em;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ----------------------------------------------------------------
+   FORMULA SLIDE (Slide 13)
+   ---------------------------------------------------------------- */
+
+.formula-text {
+  font-size: 1.45em;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.formula-accent {
+  color: var(--accent);
+}
+
+.formula-secondary {
+  font-family: var(--mono);
+  font-size: 0.44em;
+  font-weight: 400;
+  color: var(--text-secondary);
+  letter-spacing: 0.06em;
+}
+
+/* ----------------------------------------------------------------
+   COLOR UTILITIES
+   ---------------------------------------------------------------- */
+
+.c-accent    { color: var(--accent); }
+.c-teal      { color: var(--teal); }
+.c-warm      { color: var(--warm); }
+.c-secondary { color: var(--text-secondary); }
+.c-muted     { color: var(--text-muted); }
+.c-dim       { color: var(--text-dim); }
+
+/* ----------------------------------------------------------------
+   REVEAL FRAGMENT OVERRIDES
+   ---------------------------------------------------------------- */
+
+.reveal .fragment.fade-up {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.reveal .fragment.fade-up.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal .slides section .fragment {
+  transition: opacity 0.4s ease;
+}
