@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Objections Answered — Agent Hypervisor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,300&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.6.1/reveal.min.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    .site-nav {
+      position: fixed;
+      top: 18px;
+      left: 22px;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      pointer-events: none;
+    }
+    .site-nav a {
+      pointer-events: all;
+      color: rgba(136,136,170,0.55);
+      text-decoration: none;
+      transition: color 0.15s;
+      white-space: nowrap;
+    }
+    .site-nav a:hover { color: rgba(136,136,170,0.9); }
+    .site-nav .sep { color: rgba(68,68,104,0.5); }
+    .site-nav .current { color: rgba(136,136,170,0.35); cursor: default; pointer-events: none; }
+
+    /* FAQ-specific: objection + response pair */
+    .faq-pair {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .objection {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 22px 28px;
+    }
+
+    .objection-label {
+      font-family: var(--mono);
+      font-size: 0.32em;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .objection-text {
+      font-size: 0.52em;
+      font-weight: 500;
+      line-height: 1.45;
+      color: var(--text-secondary);
+      font-family: var(--mono);
+    }
+
+    .response {
+      background: var(--accent-dim);
+      border: 1px solid var(--border-accent);
+      border-radius: 8px;
+      padding: 22px 28px;
+    }
+
+    .response.teal {
+      background: var(--teal-dim);
+      border-color: var(--border-teal);
+    }
+
+    .response-label {
+      font-family: var(--mono);
+      font-size: 0.32em;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .response.teal .response-label { color: var(--teal); }
+
+    .response-text {
+      font-size: 0.46em;
+      font-weight: 400;
+      line-height: 1.65;
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <a href="../">← index</a>
+  <span class="sep">·</span>
+  <a href="../presentation-core/">core</a>
+  <span class="sep">·</span>
+  <a href="../presentation-enterprise/">enterprise</a>
+  <span class="sep">·</span>
+  <span class="current">faq</span>
+</nav>
+
+<div class="reveal">
+<div class="slides">
+
+
+<!-- ================================================================
+     SLIDE 1 — TITLE
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+  <span class="eyebrow">Agent Hypervisor · Objections</span>
+  <h1 class="display">Hard<br>Questions</h1>
+  <div class="rule" style="margin: 36px 0;"></div>
+  <p class="sub" style="max-width: 560px;">
+    The standard pushback, answered directly.
+    Designed for live demo support and appendix use.
+  </p>
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 2 — "ISN'T THIS JUST GUARDRAILS?"
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <div class="faq-pair">
+    <div class="objection">
+      <span class="objection-label">Objection 01</span>
+      <div class="objection-text">"Isn't this just guardrails with extra steps?"</div>
+    </div>
+
+    <div class="response fragment fade-up" data-fragment-index="0">
+      <span class="response-label">Answer</span>
+      <p class="response-text">
+        Guardrails observe behavior and block it after the model has proposed it.
+        Capability rendering means the model never proposes the dangerous action —
+        it is not in the ontology the model perceives.
+      </p>
+      <p class="response-text" style="margin-top: 12px;">
+        This is the difference between a locked door and a room that does not have the door.
+        One can be jailbroken. The other cannot — the action is not expressible.
+      </p>
+    </div>
+
+    <div class="fragment fade-up" data-fragment-index="1">
+      <div class="terminal">
+        <div class="terminal-body">
+          <div><span class="c"># Guardrail model:</span></div>
+          <div><span class="v">model proposes</span> <span class="w">send_email(to="attacker")</span></div>
+          <div><span class="v">classifier catches</span> <span class="d">it — sometimes</span></div>
+          <div class="d">─────────────────────────────</div>
+          <div><span class="c"># Capability rendering:</span></div>
+          <div><span class="v">model has no</span> <span class="ok">send_email(to: any)</span> <span class="v">in its world</span></div>
+          <div><span class="ok">cannot propose what does not exist</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 3 — "WHAT IF THE MODEL BYPASSES IT?"
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <div class="faq-pair">
+    <div class="objection">
+      <span class="objection-label">Objection 02</span>
+      <div class="objection-text">"What if the model finds a way to bypass the rendering layer?"</div>
+    </div>
+
+    <div class="response teal fragment fade-up" data-fragment-index="0">
+      <span class="response-label">Answer</span>
+      <p class="response-text">
+        "Bypass" requires the model to call a capability that is not in its rendered ontology.
+        The enforcement is not in the model — it is in the execution layer.
+        The model's output is validated against the manifest before any tool call executes.
+      </p>
+      <p class="response-text" style="margin-top: 12px;">
+        The model cannot "bypass" by clever prompting,
+        because the constraint is not a prompt.
+        It is enforced at the tool-call dispatch boundary — outside the model's reach.
+      </p>
+    </div>
+
+    <div class="callout fragment fade-up" data-fragment-index="1" style="font-style: normal;">
+      Structural constraints are not prompt-level.
+      Jailbreaks operate on text. This operates on dispatch.
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 4 — "WHY NOT JUST REMOVE DANGEROUS TOOLS?"
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <div class="faq-pair">
+    <div class="objection">
+      <span class="objection-label">Objection 03</span>
+      <div class="objection-text">"Why not just remove the dangerous tools from the agent?"</div>
+    </div>
+
+    <div class="response fragment fade-up" data-fragment-index="0">
+      <span class="response-label">Answer</span>
+      <p class="response-text">
+        Because the same tool is safe in one context and dangerous in another.
+        <code style="font-family: var(--mono); font-size: 0.9em; color: var(--teal);">send_email</code>
+        is a legitimate capability for a customer support agent and an exfiltration vector
+        for a document summarizer.
+      </p>
+      <p class="response-text" style="margin-top: 12px;">
+        Removing tools eliminates utility globally.
+        Capability rendering makes a tool safe by restricting how it can be invoked —
+        constraining recipients, content scope, attachment access — per workflow.
+      </p>
+    </div>
+
+    <div class="fragment fade-up" data-fragment-index="1">
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="terminal-dot"></div><div class="terminal-dot"></div><div class="terminal-dot"></div>
+          <span class="terminal-label">same tool, different manifests</span>
+        </div>
+        <div class="terminal-body">
+          <div><span class="c"># customer-support manifest</span></div>
+          <div><span class="ok">send_reply</span><span class="d">(</span><span class="v">to=thread.sender</span><span class="d">, </span><span class="v">body=str</span><span class="d">)</span>     <span class="ok">← safe</span></div>
+          <div class="mt-xs"></div>
+          <div><span class="c"># document-summarizer manifest</span></div>
+          <div><span class="d">—  </span><span class="w">send_email</span><span class="d">  not in ontology</span>             <span class="ok">← absent</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 5 — "WHERE IS THE ACTUAL CONTROL POINT?"
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <div class="faq-pair">
+    <div class="objection">
+      <span class="objection-label">Objection 04</span>
+      <div class="objection-text">"Where exactly is the control point? Who enforces it?"</div>
+    </div>
+
+    <div class="response teal fragment fade-up" data-fragment-index="0">
+      <span class="response-label">Answer</span>
+      <p class="response-text">
+        The control point is the tool-call dispatcher — the component that
+        receives the model's intended action and dispatches it to actual execution.
+      </p>
+      <p class="response-text" style="margin-top: 12px;">
+        Before dispatch, the hypervisor validates three things:
+        (1) the capability is in the active manifest,
+        (2) the arguments satisfy the manifest's parameter constraints,
+        (3) the provenance of inputs does not violate the policy.
+        Only then does execution proceed.
+      </p>
+    </div>
+
+    <div class="pipeline fragment fade-up" data-fragment-index="1" style="margin-top: 16px;">
+      <div class="pipe-step">
+        <div class="pipe-box">Model output <span class="pipe-box-label">(tool call intent)</span></div>
+      </div>
+      <div class="pipe-connector">↓ validate against manifest</div>
+      <div class="pipe-step">
+        <div class="pipe-box accent">Hypervisor dispatch <span class="pipe-box-label">(control point)</span></div>
+      </div>
+      <div class="pipe-connector">↓ allow / deny / ask</div>
+      <div class="pipe-step">
+        <div class="pipe-box teal">Tool execution <span class="pipe-box-label">(if allowed)</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 6 — "WHAT IF THE MODEL PICKS THE WRONG TASK?"
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <div class="faq-pair">
+    <div class="objection">
+      <span class="objection-label">Objection 05</span>
+      <div class="objection-text">"What if the model selects the wrong manifest / misidentifies the task?"</div>
+    </div>
+
+    <div class="response fragment fade-up" data-fragment-index="0">
+      <span class="response-label">Answer</span>
+      <p class="response-text">
+        Manifest selection is not left to the model in production deployments.
+        The orchestrator assigns the manifest based on the declared workflow — deterministically.
+        The model operates within the assigned ontology; it does not choose it.
+      </p>
+      <p class="response-text" style="margin-top: 12px;">
+        In research or open-ended modes, the model can request a manifest.
+        That request itself goes through policy — a manifest that includes
+        <code style="font-family: var(--mono); font-size: 0.9em; color: var(--teal);">request_manifest_change</code>
+        has a governance rule governing it.
+      </p>
+    </div>
+
+    <div class="callout callout-teal fragment fade-up" data-fragment-index="1" style="font-style: normal;">
+      The model is a tenant of the rendered world.
+      It does not administer it.
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 7 — "ISN'T THIS OVER-ENGINEERING?"
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <div class="faq-pair">
+    <div class="objection">
+      <span class="objection-label">Objection 06</span>
+      <div class="objection-text">"This seems over-engineered. We just need better prompts."</div>
+    </div>
+
+    <div class="response fragment fade-up" data-fragment-index="0">
+      <span class="response-label">Answer</span>
+      <p class="response-text">
+        Better prompts are stochastic.
+        For any given prompt, there exists an adversarial input
+        that causes the model to behave differently.
+        This is not a hypothesis — it has been demonstrated across every frontier model.
+      </p>
+      <p class="response-text" style="margin-top: 12px;">
+        Structural constraints are not stochastic.
+        An action that is not in the manifest cannot be proposed regardless of prompt crafting.
+        You cannot prompt your way out of a structural boundary.
+      </p>
+    </div>
+
+    <div class="split-2 fragment fade-up" data-fragment-index="1" style="margin-top: 16px;">
+      <div>
+        <div class="col-head old">Prompt-based safety</div>
+        <p class="note" style="margin-top: 8px;">
+          Brittle under adversarial inputs.<br>
+          No coverage proof.<br>
+          Behavior changes with model updates.
+        </p>
+      </div>
+      <div>
+        <div class="col-head new">Structural safety</div>
+        <p class="note" style="margin-top: 8px;">
+          Invariant to prompt crafting.<br>
+          Coverage is provable (closed set).<br>
+          Behavior survives model updates.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 8 — PATTERN SUMMARY
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl-center">
+
+  <span class="eyebrow" style="display: block; text-align: center; margin-bottom: 48px;">
+    The Pattern
+  </span>
+
+  <div class="formula-text fragment fade-in" data-fragment-index="0">
+    Every objection resolves<br>
+    to the same answer.
+  </div>
+
+  <div class="rule" style="margin: 40px auto; width: 48px;"></div>
+
+  <div class="callout callout-teal fragment fade-up" data-fragment-index="1" style="font-style: normal; max-width: 640px; text-align: left;">
+    The question is always: "what if the model does X?"<br><br>
+    The answer is always: "X is not in the model's world."<br><br>
+    <span style="color: var(--text-secondary); font-size: 0.9em;">
+    That is not a prompting strategy.<br>
+    That is an architecture.
+    </span>
+  </div>
+
+  <div class="fragment fade-up mt-xl" data-fragment-index="2" style="text-align: center;">
+    <p class="note" style="font-size: 0.38em; letter-spacing: 0.04em; color: var(--text-muted); font-family: var(--mono);">
+      github.com/agent-hypervisor
+    </p>
+  </div>
+
+</div>
+</section>
+
+
+</div><!-- /.slides -->
+</div><!-- /.reveal -->
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.6.1/reveal.min.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  transition: 'fade',
+  transitionSpeed: 'default',
+  backgroundTransition: 'fade',
+  controls: true,
+  controlsTutorial: false,
+  controlsLayout: 'bottom-right',
+  progress: true,
+  center: true,
+  slideNumber: false,
+  fragments: true,
+  fragmentInURL: false,
+  keyboard: true,
+  overview: true,
+  touch: true,
+  loop: false,
+  mouseWheel: false,
+  hideInactiveCursor: true,
+  hideCursorTime: 3000,
+  autoAnimateUnmatched: false,
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Capability Rendering for Enterprise — Agent Hypervisor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,300&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.6.1/reveal.min.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    .site-nav {
+      position: fixed;
+      top: 18px;
+      left: 22px;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      pointer-events: none;
+    }
+    .site-nav a {
+      pointer-events: all;
+      color: rgba(136,136,170,0.55);
+      text-decoration: none;
+      transition: color 0.15s;
+      white-space: nowrap;
+    }
+    .site-nav a:hover { color: rgba(136,136,170,0.9); }
+    .site-nav .sep { color: rgba(68,68,104,0.5); }
+    .site-nav .current { color: rgba(136,136,170,0.35); cursor: default; pointer-events: none; }
+  </style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <a href="../">← index</a>
+  <span class="sep">·</span>
+  <a href="../presentation-core/">core</a>
+  <span class="sep">·</span>
+  <span class="current">enterprise</span>
+  <span class="sep">·</span>
+  <a href="../presentation-faq/">faq</a>
+</nav>
+
+<div class="reveal">
+<div class="slides">
+
+
+<!-- ================================================================
+     SLIDE 1 — TITLE
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+  <span class="eyebrow">Agent Hypervisor · Enterprise</span>
+  <h1 class="display">Capability<br>Rendering</h1>
+  <div class="rule" style="margin: 36px 0;"></div>
+  <p class="sub" style="max-width: 620px;">
+    A control infrastructure for enterprise AI agent deployments.
+    Not a filter — an architectural boundary.
+  </p>
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 2 — THE ENTERPRISE PROBLEM
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">The Problem</span>
+  <h2 class="h2 fragment fade-in" data-fragment-index="0">
+    Agents inherit every risk<br>of the tools they touch.
+  </h2>
+
+  <div class="rule-full fragment fade-up" data-fragment-index="1"></div>
+
+  <div class="split-2 fragment fade-up" data-fragment-index="1" style="margin-top: 0;">
+    <div>
+      <div class="col-head old">What you deploy</div>
+      <div class="terminal" style="margin-top: 8px;">
+        <div class="terminal-body">
+          <div><span class="k">tools</span><span class="d">:</span></div>
+          <div><span class="d">  - </span><span class="v">file_system</span><span class="d"> (read/write)</span></div>
+          <div><span class="d">  - </span><span class="v">email</span><span class="d"> (send/search)</span></div>
+          <div><span class="d">  - </span><span class="v">database</span><span class="d"> (query/insert)</span></div>
+          <div><span class="d">  - </span><span class="v">api_gateway</span><span class="d"> (any endpoint)</span></div>
+          <div><span class="d">  - </span><span class="v">code_executor</span></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="col-head" style="color: var(--warm);">What you implicitly allow</div>
+      <div class="cap-list" style="margin-top: 8px;">
+        <div class="cap-item no-match"><span class="cap-name">exfiltrate</span><span class="cap-param">(any file → any email)</span></div>
+        <div class="cap-item no-match"><span class="cap-name">impersonate</span><span class="cap-param">(compose as exec)</span></div>
+        <div class="cap-item no-match"><span class="cap-name">mass_delete</span><span class="cap-param">(database truncate)</span></div>
+        <div class="cap-item no-match"><span class="cap-name">exfil_via_api</span><span class="cap-param">(any external host)</span></div>
+        <div class="cap-item no-match"><span class="cap-name">arbitrary_exec</span><span class="cap-param">(shell, subprocess)</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 3 — WHAT ACTUALLY BREAKS
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">Risk Surface</span>
+  <h2 class="h2">Three things break before you notice.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="matters-grid" style="margin-top: 4px;">
+    <div class="matters-card fragment fade-up" data-fragment-index="0">
+      <div class="matters-card-title">Compliance</div>
+      <div class="matters-card-desc">
+        Agents can compose actions your policy engine never anticipated.
+        No audit trail. No approval gate. GDPR, SOC 2, HIPAA exposure
+        surfaces at the intersection of tools, not within any single tool.
+      </div>
+    </div>
+    <div class="matters-card fragment fade-up" data-fragment-index="1">
+      <div class="matters-card-title">Predictability</div>
+      <div class="matters-card-desc">
+        The model decides at runtime. The same task description produces
+        different action sequences across runs. You cannot certify behavior
+        you cannot enumerate.
+      </div>
+    </div>
+    <div class="matters-card fragment fade-up" data-fragment-index="2">
+      <div class="matters-card-title">Blast Radius</div>
+      <div class="matters-card-desc">
+        A single injected instruction can re-task a multi-step agent.
+        Without structural limits on what the agent can express,
+        no behavioral guardrail holds under adversarial input.
+      </div>
+    </div>
+    <div class="matters-card fragment fade-up" data-fragment-index="3">
+      <div class="matters-card-title">Auditability</div>
+      <div class="matters-card-desc">
+        "The agent did it" is not a control narrative.
+        Regulators, insurers, and boards need
+        deterministic accounts of what was possible, not just what happened.
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 4 — THE WRONG FIX
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">The Standard Approach</span>
+
+  <div class="statement fragment fade-in" data-fragment-index="0">
+    Guardrails treat the symptom.<br>
+    <span class="c-secondary" style="font-weight:300;">The action space stays open.</span>
+  </div>
+
+  <div class="split-2 fragment fade-up" data-fragment-index="1" style="margin-top: 44px;">
+    <div>
+      <div class="col-head old">Current practice</div>
+      <div class="cap-list" style="margin-top: 12px;">
+        <div class="cap-item no-match"><span class="cap-name">prompt</span><span class="cap-param"> filters</span></div>
+        <div class="cap-item no-match"><span class="cap-name">output</span><span class="cap-param"> classifiers</span></div>
+        <div class="cap-item no-match"><span class="cap-name">rate</span><span class="cap-param"> limiting</span></div>
+        <div class="cap-item no-match"><span class="cap-name">post-hoc</span><span class="cap-param"> review</span></div>
+      </div>
+      <p class="note" style="margin-top: 14px;">These operate on behavior after it is proposed.</p>
+    </div>
+    <div>
+      <div class="col-head new">What we need</div>
+      <div class="cap-list" style="margin-top: 12px;">
+        <div class="cap-item exists"><span class="cap-name">action</span><span class="cap-param">-space design</span></div>
+        <div class="cap-item exists"><span class="cap-name">ontology</span><span class="cap-param"> projection</span></div>
+        <div class="cap-item exists"><span class="cap-name">capability</span><span class="cap-param"> rendering</span></div>
+        <div class="cap-item exists"><span class="cap-name">provenance</span><span class="cap-param"> firewall</span></div>
+      </div>
+      <p class="note" style="margin-top: 14px;">These prevent dangerous actions from being expressible.</p>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 5 — CAPABILITY RENDERING
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">The Architecture</span>
+  <h2 class="h2">Capability rendering eliminates<br>the gap.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="inv-block new fragment fade-in" data-fragment-index="0">
+    <span class="inv-label new">Capability Rendering</span>
+    <div class="inv-q new">
+      At design time, define exactly what the agent can express.<br>
+      At runtime, construct only those expressions.
+    </div>
+    <p class="inv-sub">
+      The agent does not pick from available tools.
+      It operates within a projected ontology — a purpose-built
+      action vocabulary for its current task context.
+    </p>
+  </div>
+
+  <div class="fragment fade-up" data-fragment-index="1" style="margin-top: 24px;">
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot"></div><div class="terminal-dot"></div><div class="terminal-dot"></div>
+        <span class="terminal-label">email-assistant manifest (rendered world)</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="k">capabilities</span><span class="d">:</span></div>
+        <div><span class="d">  </span><span class="v">reply_to_sender</span><span class="d">(draft: str)</span>          <span class="c"># NOT send_email(to: any, body: any)</span></div>
+        <div><span class="d">  </span><span class="v">summarize_thread</span><span class="d">(thread_id: str)</span>      <span class="c"># NOT read_file(path: any)</span></div>
+        <div><span class="d">  </span><span class="v">flag_for_review</span><span class="d">(reason: str)</span>         <span class="c"># NOT modify_calendar(any)</span></div>
+        <div class="d">  ─────────────────────────────────────────────</div>
+        <div><span class="c"># "send to external address" cannot be proposed — it is not in the ontology</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 6 — POLICY SIMPLIFICATION
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">Policy Architecture</span>
+  <h2 class="h2">Policy becomes tractable<br>when the space is bounded.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="split-2" style="margin-top: 4px;">
+    <div class="fragment fade-up" data-fragment-index="0">
+      <div class="col-head old">Without rendering</div>
+      <p class="note" style="margin-bottom: 14px;">
+        Every tool call is a policy decision.<br>
+        N tools × M args × K contexts = unbounded.
+      </p>
+      <div class="terminal">
+        <div class="terminal-body">
+          <div><span class="w">rules</span><span class="d">: 847 active</span></div>
+          <div><span class="w">conflicts</span><span class="d">: 23 detected</span></div>
+          <div><span class="w">coverage</span><span class="d">: unknown</span></div>
+          <div><span class="w">novel combos</span><span class="d">: unauditable</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="fragment fade-up" data-fragment-index="1">
+      <div class="col-head new">With rendering</div>
+      <p class="note" style="margin-bottom: 14px;">
+        Each manifest defines a closed set of expressions.
+        Policy governs manifests, not individual calls.
+      </p>
+      <div class="terminal">
+        <div class="terminal-body">
+          <div><span class="ok">manifests</span><span class="d">: 12 defined</span></div>
+          <div><span class="ok">capabilities</span><span class="d">: 4–8 per manifest</span></div>
+          <div><span class="ok">coverage</span><span class="d">: 100% (closed)</span></div>
+          <div><span class="ok">novel combos</span><span class="d">: structurally impossible</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 7 — AUDITABILITY
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">Compliance & Audit</span>
+  <h2 class="h2">Every action is traceable<br>to a design decision.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="pipeline fragment fade-up" data-fragment-index="0">
+    <div class="pipe-step">
+      <div class="pipe-box">
+        <strong>Manifest declaration</strong>
+        <span class="pipe-box-label">design time</span>
+      </div>
+      <p class="note" style="margin-left: 20px; max-width: 300px;">Author names allowed capabilities. This is the control record.</p>
+    </div>
+    <div class="pipe-connector">↓</div>
+    <div class="pipe-step">
+      <div class="pipe-box accent">
+        <strong>Ontology projection</strong>
+        <span class="pipe-box-label">runtime</span>
+      </div>
+      <p class="note" style="margin-left: 20px; max-width: 300px;">Task context narrows the manifest to a live subset. Every narrowing is logged.</p>
+    </div>
+    <div class="pipe-connector">↓</div>
+    <div class="pipe-step">
+      <div class="pipe-box teal">
+        <strong>Provenance trace</strong>
+        <span class="pipe-box-label">append-only</span>
+      </div>
+      <p class="note" style="margin-left: 20px; max-width: 300px;">Each execution records origin, taint level, capability used, verdict. Immutable.</p>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 8 — THE PROVENANCE FIREWALL
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">Provenance Firewall</span>
+  <h2 class="h2">Taint propagates.<br>Rendered worlds do not leak.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="fragment fade-up" data-fragment-index="0">
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot"></div><div class="terminal-dot"></div><div class="terminal-dot"></div>
+        <span class="terminal-label">provenance trace — email-assistant session</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="k">input</span><span class="d">    </span><span class="v">thread:1847</span>      <span class="t">class=external_document</span>   <span class="ok">taint=0.0</span></div>
+        <div><span class="k">derived</span><span class="d">  </span><span class="v">summary:draft</span>    <span class="t">class=derived</span>             <span class="ok">taint=0.1</span></div>
+        <div><span class="k">action</span><span class="d">   </span><span class="v">reply_to_sender</span>  <span class="t">cap=reply_to_sender</span>       <span class="ok">verdict=allow</span></div>
+        <div class="d">  ────────────────────────────────────────────────────────</div>
+        <div><span class="k">blocked</span><span class="d">  </span><span class="w">send_email(to="attacker@ext")</span>  <span class="t">not in ontology</span>   <span class="w">verdict=deny</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout callout-teal fragment fade-up" data-fragment-index="1" style="margin-top: 24px; font-style: normal;">
+    The attacker's instruction was in the email body.
+    The exfiltration action was never proposable.
+    Not blocked — never expressible.
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 9 — INTEGRATION PATH
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">Integration</span>
+  <h2 class="h2">It fits into what you already have.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="matters-grid" style="margin-top: 4px;">
+    <div class="matters-card fragment fade-up" data-fragment-index="0">
+      <div class="matters-card-title">IAM / RBAC</div>
+      <div class="matters-card-desc">
+        Manifests map to roles. Capability sets become the
+        permission boundary, not individual API scopes.
+        Existing RBAC infrastructure gains structural enforcement.
+      </div>
+    </div>
+    <div class="matters-card fragment fade-up" data-fragment-index="1">
+      <div class="matters-card-title">SIEM / Audit Logs</div>
+      <div class="matters-card-desc">
+        Provenance traces emit structured events — capability used,
+        taint level, verdict, context. Feed directly into
+        existing SIEM pipelines without instrumentation overhead.
+      </div>
+    </div>
+    <div class="matters-card fragment fade-up" data-fragment-index="2">
+      <div class="matters-card-title">Policy Engines</div>
+      <div class="matters-card-desc">
+        Governance rules operate on manifests, not tool calls.
+        12 manifests are easier to certify than 847 rules over
+        unbounded combinations. Formal coverage becomes possible.
+      </div>
+    </div>
+    <div class="matters-card fragment fade-up" data-fragment-index="3">
+      <div class="matters-card-title">Existing Tooling</div>
+      <div class="matters-card-desc">
+        No model replacement. No new runtime.
+        The rendering layer sits between your tools and the model's
+        action space — a seam, not a fork.
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 10 — THE 4-LAYER ARCHITECTURE
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl-wide">
+
+  <span class="eyebrow">Architecture</span>
+  <h2 class="h2" style="margin-bottom: 28px;">Four layers. One control surface.</h2>
+
+  <div class="layer-stack">
+    <div class="layer layer-0 fragment fade-up" data-fragment-index="0">
+      <div class="layer-num">L0</div>
+      <div class="layer-body">
+        <div class="layer-title">Execution Physics</div>
+        <div class="layer-desc">Sandbox isolation, process boundary, network egress controls. Unchanged from current practice.</div>
+      </div>
+    </div>
+    <div class="layer layer-1 fragment fade-up" data-fragment-index="1">
+      <div class="layer-num">L1</div>
+      <div class="layer-body">
+        <div class="layer-title">Base Ontology</div>
+        <div class="layer-desc">Full capability inventory — every tool, every parameter. Defined at integration time by platform engineers.</div>
+      </div>
+    </div>
+    <div class="layer layer-2 fragment fade-up" data-fragment-index="2">
+      <div class="layer-num">L2</div>
+      <div class="layer-body">
+        <div class="layer-title">Dynamic Ontology Projection  ← capability rendering lives here</div>
+        <div class="layer-desc">Task-scoped subset of L1. The model only perceives what the manifest allows. Dangerous actions are not visible.</div>
+      </div>
+    </div>
+    <div class="layer layer-3 fragment fade-up" data-fragment-index="3">
+      <div class="layer-num">L3</div>
+      <div class="layer-body">
+        <div class="layer-title">Execution Governance</div>
+        <div class="layer-desc">Policy engine + provenance firewall. Verdict (allow / deny / ask) per action. Append-only trace.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 11 — DEPLOYMENT PATTERN
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl">
+
+  <span class="eyebrow">Deployment</span>
+  <h2 class="h2">What this looks like<br>in production.</h2>
+
+  <div class="rule-full"></div>
+
+  <div class="split-2 fragment fade-up" data-fragment-index="0" style="margin-top: 4px;">
+    <div>
+      <div class="col-head" style="color: var(--text-secondary);">You define</div>
+      <div class="cap-list" style="margin-top: 12px;">
+        <div class="cap-item exists"><span class="cap-name">manifests</span><span class="cap-param"> per workflow</span></div>
+        <div class="cap-item exists"><span class="cap-name">policy</span><span class="cap-param"> rules per manifest</span></div>
+        <div class="cap-item exists"><span class="cap-name">taint</span><span class="cap-param"> classes per source</span></div>
+        <div class="cap-item exists"><span class="cap-name">governance</span><span class="cap-param"> hooks</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="col-head new">The runtime enforces</div>
+      <div class="cap-list" style="margin-top: 12px;">
+        <div class="cap-item exists"><span class="cap-name">ontology</span><span class="cap-param"> boundary</span></div>
+        <div class="cap-item exists"><span class="cap-name">taint</span><span class="cap-param"> propagation</span></div>
+        <div class="cap-item exists"><span class="cap-name">verdict</span><span class="cap-param"> on every call</span></div>
+        <div class="cap-item exists"><span class="cap-name">trace</span><span class="cap-param"> append</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout fragment fade-up" data-fragment-index="1" style="margin-top: 28px; font-style: normal;">
+    You author intent.
+    The hypervisor enforces it structurally.
+  </div>
+
+</div>
+</section>
+
+
+<!-- ================================================================
+     SLIDE 12 — SUMMARY
+     ================================================================ -->
+<section data-background-color="#07070e">
+<div class="sl-center">
+
+  <div class="fragment fade-in" data-fragment-index="0" style="width: 100%; max-width: 860px; text-align: center;">
+    <span class="eyebrow" style="display: block; text-align: center; margin-bottom: 48px;">
+      Enterprise Value Proposition
+    </span>
+
+    <div class="formula-text">
+      Make the action space safe.<br>
+      Not the model.
+    </div>
+
+    <div class="rule" style="margin: 40px auto; width: 48px;"></div>
+
+    <div class="matters-grid fragment fade-up" data-fragment-index="1" style="max-width: 720px; margin: 0 auto; text-align: left;">
+      <div class="matters-card">
+        <div class="matters-card-title">Bounded action space</div>
+        <div class="matters-card-desc">Every dangerous action is structurally absent, not filtered.</div>
+      </div>
+      <div class="matters-card">
+        <div class="matters-card-title">Auditable by design</div>
+        <div class="matters-card-desc">Traces are complete. Coverage is provable. Cert is tractable.</div>
+      </div>
+      <div class="matters-card">
+        <div class="matters-card-title">Policy that scales</div>
+        <div class="matters-card-desc">12 manifests, not 847 rules. Human-readable governance.</div>
+      </div>
+      <div class="matters-card">
+        <div class="matters-card-title">Fits existing stack</div>
+        <div class="matters-card-desc">No model replacement. No new runtime. A seam, not a fork.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+
+</div><!-- /.slides -->
+</div><!-- /.reveal -->
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.6.1/reveal.min.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  transition: 'fade',
+  transitionSpeed: 'default',
+  backgroundTransition: 'fade',
+  controls: true,
+  controlsTutorial: false,
+  controlsLayout: 'bottom-right',
+  progress: true,
+  center: true,
+  slideNumber: false,
+  fragments: true,
+  fragmentInURL: false,
+  keyboard: true,
+  overview: true,
+  touch: true,
+  loop: false,
+  mouseWheel: false,
+  hideInactiveCursor: true,
+  hideCursorTime: 3000,
+  autoAnimateUnmatched: false,
+});
+</script>
+
+</body>
+</html>

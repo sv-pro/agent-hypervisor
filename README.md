@@ -788,3 +788,52 @@ cd presentation && python3 -m http.server 8000
 | [integrations.md](docs/integrations.md) | Client, MCP, curl examples |
 | [threat_model.md](docs/threat_model.md) | Attacks in scope and non-goals |
 | [benchmark_brief.md](docs/benchmark_brief.md) | Attack surface comparison |
+
+---
+
+## Demo Site
+
+This repository serves multiple presentation and demo pages through one GitHub Pages deployment.
+
+### Available pages
+
+| Path | Content |
+|------|---------|
+| `/` | Landing page — links to all decks |
+| `/presentation-core/` | Core narrative deck — The Missing Layer |
+| `/presentation-enterprise/` | Enterprise pitch — capability rendering as infrastructure |
+| `/presentation-faq/` | Objection-handling deck — hardest questions answered |
+| `/playground/` | Interactive playground (requires local server) |
+
+### GitHub Pages setup
+
+1. Go to **Settings → Pages** in the repository
+2. Set **Source** to `Deploy from a branch`
+3. Set **Branch** to `master` (or `main`) and **Folder** to `/ (root)`
+4. Save — GitHub will serve the site from the repository root
+
+Each presentation is a standalone Reveal.js deck.
+Visiting `/presentation-core/` opens the deck directly.
+No build pipeline required.
+
+### Run locally
+
+```bash
+# Serve the whole site (any static server works)
+npx serve .
+# or
+python3 -m http.server 8080
+```
+
+Then open:
+- `http://localhost:8080/` — landing page
+- `http://localhost:8080/presentation-core/` — core deck
+- `http://localhost:8080/presentation-enterprise/` — enterprise deck
+- `http://localhost:8080/presentation-faq/` — FAQ deck
+- `http://localhost:8080/playground/` — playground info page
+
+To run the interactive playground with its full backend:
+
+```bash
+cd playground && npm install && npm run dev
+```
