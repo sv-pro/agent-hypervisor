@@ -224,7 +224,53 @@ Raw input
 
 ---
 
-## 7. Bounded Security Claim
+## 7. Probabilistic vs. Deterministic Failure
+
+### 7.1 The Delayed Failure Problem
+
+Probabilistic defenses improve the likelihood of correct behavior. They do not guarantee it. This creates a specific failure pattern:
+
+1. The system behaves correctly for an extended period
+2. Trust is established — autonomy is increased, oversight is reduced
+3. A failure occurs at maximum blast radius
+4. Remediation cost is highest because the failure was unexpected
+
+> Rare errors are expensive errors.
+
+A 99.9% success rate at 10,000 daily agent actions means one failure every 2.4 hours. Scale does not dilute the failure rate — it concentrates the impact. The system is most dangerous precisely when it appears most reliable.
+
+### 7.2 Correlated LLM Failure Modes
+
+A common mitigation: use one LLM to supervise another. This is architecturally unsound.
+
+Both models share the same architecture, training methodology, and class of failure modes. An adversarial input that bypasses one LLM is statistically likely to bypass another LLM of the same family. The supervisor is not independent — it is a correlated copy.
+
+> A stochastic system cannot reliably constrain another stochastic system with the same failure modes.
+
+Defense in depth requires independent failure modes. Two LLMs are redundant, not independent. The Agent Hypervisor addresses this by placing a deterministic system — one with fundamentally different failure modes — between the agent and external effects.
+
+| Approach | Failure mode | Independence |
+|---|---|---|
+| LLM + guardrail LLM | Correlated — same model class | None |
+| LLM + classifier | Partially independent — different architecture | Partial |
+| LLM + deterministic world policy | Independent — different computational model | Full |
+
+The deterministic world policy cannot be bypassed by adversarial prompting because it does not process natural language. Its failure modes are engineering errors in the World Manifest — a fundamentally different and auditable class of risk.
+
+### 7.3 Implications for This Architecture
+
+The Agent Hypervisor's security claim is structural, not probabilistic:
+
+- The enforcement path (Layers 1-5) contains no LLM
+- Policy evaluation is deterministic: same input, same decision, always
+- Failure modes are manifest design errors, not statistical drift
+- Failures are auditable, reproducible, and correctable
+
+This does not eliminate risk. It changes the character of risk from probabilistic and unbounded to deterministic and addressable.
+
+---
+
+## 8. Bounded Security Claim
 
 Agent Hypervisor does not claim perfect security. It claims **bounded, measurable security**:
 

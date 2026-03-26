@@ -15,7 +15,54 @@ The agent operates entirely inside a constructed world. It never touches raw rea
 
 ---
 
-## 2. The Runtime Path
+## 2. Perception-Bounded World Model
+
+The theoretical foundation of this architecture is the **perception-bounded world**: the recognition that an agent does not operate in the real world — it operates in its field of perception.
+
+### The Agent's World
+
+The agent's world W is defined by four components:
+
+```text
+W = (P, A, M, R)
+
+  P = perception set     — inputs the agent can receive
+  A = action set         — actions the agent can propose
+  M = memory set         — stored state the agent can access
+  R = representation set — abstractions the agent can use
+```
+
+Each component is finite and explicitly defined in the World Manifest. If something is not in P, the agent cannot know about it. If something is not in A, the agent cannot attempt it.
+
+### World Design vs. Guardrails
+
+| Property | Guardrails | World Design (this architecture) |
+|---|---|---|
+| World model | Open — agent sees everything, filters block selectively | Closed — only defined elements exist |
+| Failure mode | Probabilistic — some attacks pass | Deterministic — undefined actions are structurally absent |
+| Timing | Reactive — detect and block | Proactive — remove before the agent runs |
+| Improvement | Add more rules | Refine the world definition |
+
+> Safety is achieved by removing possibilities, not reducing their probability.
+
+### Connection to the Four-Layer Architecture
+
+Each layer implements progressive perception bounding:
+
+| Layer | Perception boundary |
+|---|---|
+| Layer 0: Execution Physics | Physical impossibility — what the container cannot reach |
+| Layer 1: Base Ontology | What actions exist — capability rendering from raw tool space |
+| Layer 2: Dynamic Ontology Projection | What exists *now* — role, task, and state narrow the world |
+| Layer 3: Execution Governance | What may execute within the bounded world |
+
+By the time the agent operates, its world contains only what was designed to be there. The enforcement pipeline below implements this boundary.
+
+*Full concept: [concepts/perception_bounded_world.md](concepts/perception_bounded_world.md)*
+
+---
+
+## 3. The Runtime Path
 
 Every request through the system follows this sequence:
 
@@ -61,7 +108,7 @@ Raw input (email / web / file / MCP tool output / user message)
 
 ---
 
-## 3. The Compilation Path
+## 4. The Compilation Path
 
 The runtime artifacts executed above are not written by hand — they are compiled from a World Manifest.
 
@@ -93,7 +140,7 @@ World Manifest (YAML)
 
 ---
 
-## 4. Module Map
+## 5. Module Map
 
 The repository is organized to match the five-layer architecture directly.
 
@@ -131,7 +178,7 @@ The key property: **same policy + same input = same decision**. This is unit-tes
 
 ---
 
-## 5. Reference Diagrams
+## 6. Reference Diagrams
 
 ### 5.1 Full Runtime + Compile Flow
 
@@ -178,7 +225,7 @@ agent-to-agent UNTRUSTED     yes               no (without explicit sanitization
 
 ---
 
-## 6. Conformance Test Pattern
+## 7. Conformance Test Pattern
 
 A system conforms to the Agent Hypervisor architecture if and only if these three cases are unit-testable **without mocking the agent**:
 
@@ -192,7 +239,7 @@ See `examples/basic/01_simple_demo.py` for the runnable PoC demonstration of all
 
 ---
 
-## 7. What Is Not Yet Implemented
+## 8. What Is Not Yet Implemented
 
 The following are architecturally specified but not yet present in code:
 
@@ -213,7 +260,7 @@ The PoC in `src/hypervisor.py` demonstrates the determinism and ontological boun
 
 ---
 
-## 8. Open Architectural Decisions
+## 9. Open Architectural Decisions
 
 The following decisions are unresolved. Each is tracked as an ADR in [`docs/ADR/`](ADR/README.md) with options, criteria, and a resolution trigger.
 

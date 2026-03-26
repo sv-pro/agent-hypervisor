@@ -14,6 +14,8 @@ The authoritative statements of the architecture. Start here for any deep engage
 | [WHITEPAPER.md](WHITEPAPER.md) | Full architectural argument: origin insight, AI Aikido, semantic gap, four-layer architecture, and resolution strategy | 30 min |
 | [../POSITIONING.md](../POSITIONING.md) | What this repository is and is not: four components, explicit non-claims, current objective | 10 min |
 | [../FAQ.md](../FAQ.md) | Answers to the hardest objections: guardrails, policy engines, sandboxes, semantic gap, guarantees | 10 min |
+| [concepts/perception_bounded_world.md](concepts/perception_bounded_world.md) | Foundational reframing: agents operate in perception-bounded worlds, not the real world. World design vs. guardrails, ontology fit, capability rendering | 15 min |
+| [one_pager_perception_world.md](one_pager_perception_world.md) | One-page summary: problem, reframing, solution, key principles | 3 min |
 
 ---
 
@@ -25,6 +27,7 @@ The authoritative statements of the architecture. Start here for any deep engage
 | [VULNERABILITY_CASE_STUDIES.md](VULNERABILITY_CASE_STUDIES.md) | Why current vulnerabilities (prompt injection, ZombieAgent, ShadowLeak) are architecturally predictable given raw-reality agent design |
 | [VS_EXISTING_SOLUTIONS.md](VS_EXISTING_SOLUTIONS.md) | Structural comparison to guardrails, policy engines, sandboxing, and multi-layer defense |
 | [EVALUATION_FRAMEWORK.md](EVALUATION_FRAMEWORK.md) | Crutch / Workaround / Bridge: a classification lens for AI agent security approaches |
+| [concepts/perception_bounded_world.md](concepts/perception_bounded_world.md) | Probabilistic vs. deterministic failure, correlated LLM failure modes, delayed failure problem |
 | [case_studies/MS_COPILOT_DLP_BYPASS.md](case_studies/MS_COPILOT_DLP_BYPASS.md) | Microsoft Copilot DLP bypass — analysis through the architectural lens |
 | [bash_vs_capability_rendering.md](bash_vs_capability_rendering.md) | Why Bash + string permissions fails where capability rendering succeeds: a structural comparison |
 
@@ -104,6 +107,7 @@ Documentation for the proof-of-concept codebase. Not the destination — the dem
 | [PROOF_PACKAGE.md](PROOF_PACKAGE.md) | Proof artifacts and benchmark package |
 | [benchmark_brief.md](benchmark_brief.md) | Security comparison across approach types |
 | [WORKAROUNDS.md](WORKAROUNDS.md) | Tactical patterns implementable today without the full stack |
+| [linkedin_posts_perception_world.md](linkedin_posts_perception_world.md) | Three LinkedIn posts: zombies & control illusion, flexibility myth, perception world |
 
 ---
 
