@@ -87,6 +87,25 @@ This is not a better filter. It is a different abstraction boundary.
 
 ---
 
+## Why Defining the World Is the Real Control Plane
+
+Most AI safety work assumes the agent operates in the real world and tries to filter its behavior. This is the wrong frame.
+
+An agent does not operate in the real world. It operates in its **field of perception** — the inputs it receives, the tools it can call, the memory it can access, and the abstractions it can represent. Nothing else exists for the agent. Not metaphorically — structurally.
+
+This changes where safety lives:
+
+- **Guardrails** assume an open world and try to intercept dangerous behavior. They are probabilistic, reactive, and perpetually incomplete.
+- **World design** defines a closed world where dangerous actions are absent by construction. It is deterministic, proactive, and complete by default.
+
+> Safety is achieved by removing possibilities, not reducing their probability.
+
+The Agent Hypervisor is a world design system. The World Manifest defines what exists. The compiler produces deterministic enforcement artifacts. The runtime enforces them without any LLM in the path. An action not in the manifest is not forbidden — it is non-existent.
+
+*Full concept: [docs/concepts/perception_bounded_world.md](docs/concepts/perception_bounded_world.md)*
+
+---
+
 ## Documentation Map
 
 ### Canonical Concepts
@@ -97,6 +116,7 @@ This is not a better filter. It is a different abstraction boundary.
 | [docs/WHITEPAPER.md](docs/WHITEPAPER.md) | Full architectural argument, AI Aikido, semantic gap analysis | You are writing, presenting, or evaluating deeply |
 | [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) | Evaluation standard for secure agentic systems | You are assessing a system or building to a standard |
 | [FAQ.md](FAQ.md) | Answers to the hardest objections | Someone pushed back and you need the counter-argument |
+| [docs/concepts/perception_bounded_world.md](docs/concepts/perception_bounded_world.md) | Perception-bounded world model, ontology fit, world design vs. guardrails | You want the theoretical foundation |
 | [POSITIONING.md](POSITIONING.md) | What this repo is and is not | You are confused about scope |
 
 ### Threat Model & Security Analysis

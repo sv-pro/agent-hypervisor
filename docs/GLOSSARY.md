@@ -48,6 +48,12 @@ Example: a `SEMI_TRUSTED` input can produce intents for `read` and `internal_wri
 
 ---
 
+## Capability Rendering
+
+The design-time transformation of raw, general-purpose tools into role-specific, parameter-constrained capabilities. `send_email(to, body)` becomes `send_report_to_security(body)`. The raw tool is not restricted — it is replaced. The concept of "arbitrary recipient" becomes non-representable in the agent's world.
+
+---
+
 ## Compiled Physics
 
 The deterministic runtime artifacts produced by the World Manifest Compiler — the "laws of nature" governing the agent's world.
@@ -92,6 +98,12 @@ Semantic security layer in the L∞ stack — the agent-level analogue of a WAF.
 
 ---
 
+## Ontology Fit
+
+The property that an agent's available abstractions, actions, and categories match its intended role exactly — no more, no less. Surplus capability is surplus risk. An agent with tools beyond its role has the wrong ontology. Intelligence without ontology is instability.
+
+---
+
 ## Ontological Boundary
 
 A security boundary defined by existence, not permission. Traditional security asks "are you allowed to do X?" An ontological boundary asks "does X exist in your world?" If it doesn't exist, there is nothing to bypass.
@@ -101,6 +113,12 @@ A security boundary defined by existence, not permission. Traditional security a
 ## Ontological Security
 
 Security through non-existence of dangerous actions, not through prohibition.
+
+---
+
+## Perception-Bounded World
+
+The foundational model: an agent does not operate in the real world — it operates in its field of perception. The agent's world is defined by its input channels, available tools, accessible memory, and representable abstractions. If something is not perceivable, it does not exist for the agent. If something is not actionable, it cannot happen. The World Manifest is the formal specification of the perception boundary. See [concepts/perception_bounded_world.md](concepts/perception_bounded_world.md).
 
 ---
 
