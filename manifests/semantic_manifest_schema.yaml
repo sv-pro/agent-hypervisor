@@ -1,0 +1,130 @@
+# Semantic Manifest Schema v1
+#
+# This file is the annotated reference schema for Semantic Manifests.
+#
+# A Semantic Manifest defines the bounded semantic space for a deployment:
+# what kinds of statements, reasoning steps, and commitments an agent can
+# express, reason about, and commit to.
+#
+# Relationship to other manifests:
+#   World Manifest      → bounds actions       (what tools exist)
+#   Semantic Manifest   → bounds meaning       (what can be expressed)
+#   Capability Matrix   → bounds execution     (what can run at each trust level)
+#
+# Layering:
+#   An expression must first be representable (Semantic Manifest) before it
+#   can be permitted (World Policy / Capability Matrix).
+#
+# Authoring:
+#   Authored at design-time using SemanticCompiler (LLM-assisted, offline).
+#   Human reviews the draft before committing. No LLM is present at runtime.
+#
+# Compilation:
+#   `src/semantic/semantic_compiler.py` produces this file from workflow definitions.
+#   `src/semantic/semantic_manifest.py` loads this file at runtime.
+#
+# See: docs/SEMANTIC_SPACE.md
+
+
+# ---------------------------------------------------------------------------
+# METADATA
+# ---------------------------------------------------------------------------
+semantic_manifest:
+  name: string           # Required. Identifier (e.g. "customer-support-semantic-space")
+  version: string        # Required. Semver string (e.g. "1.0.0")
+  description: string    # Optional. One-line purpose statement.
+
+
+  # -------------------------------------------------------------------------
+  # PRIMITIVES
+  # -------------------------------------------------------------------------
+  # Defines which units of meaning exist in this deployment.
+  # Input that cannot be mapped to a registered primitive is NonRepresentable.
+  #
+  # Non-representability is not rejection — it is ontological absence.
+  # The system does not refuse the input; the input simply has no form here.
+  # No error is surfaced. The pipeline terminates with zero side effects.
+  #
+  # Primitive kinds (exhaustive):
+  #
+  #   action_intent      — intent to invoke a state-changing action
+  #                        Must reference a tool in the World Manifest via maps_to_action.
+  #
+  #   query_intent       — intent to read or inspect state (no side effects)
+  #                        Maps to read-only tools in the World Manifest.
+  #
+  #   commitment         — intent to make a binding promise or quantified offer
+  #                        Subtypes: discount | guarantee | deadline | sla | refund
+  #                        Most tightly controlled: each requires explicit capability.
+  #                        A commitment with an unauthorized parameter value (e.g. a
+  #                        discount tier not listed in the enum) is NonRepresentable.
+  #
+  #   reasoning_pattern  — a structured cognitive operation (shapes reasoning, no tool call)
+  #                        Subtypes: compare | summarize | hypothesize | classify | plan
+  #                        Does not invoke a tool; restricts the form of agent reasoning.
+
+  primitives:
+
+    # -----------------------------------------------------------------------
+    # MINIMAL REQUIRED FIELDS
+    # -----------------------------------------------------------------------
+    - id: string           # Required. Unique identifier within this manifest.
+                           # Snake_case recommended. (e.g. "apply_standard_discount")
+
+      kind: string         # Required. One of:
+                           #   action_intent | query_intent | commitment | reasoning_pattern
+
+      description: string  # Required. One-line purpose statement. Used in audit logs
+                           # and design-time tooling; not surfaced to end users.
+
+
+    # -----------------------------------------------------------------------
+    # OPTIONAL FIELDS
+    # -----------------------------------------------------------------------
+      subtype: string      # Optional. Sub-classification within a kind.
+                           # commitment:        discount | guarantee | deadline | sla | refund
+                           # reasoning_pattern: compare | summarize | hypothesize | classify | plan
+                           # action_intent:     (application-specific)
+                           # query_intent:      (application-specific)
+
+      parameters:          # Optional. Typed parameter specifications.
+                           # Each parameter is validated deterministically at runtime.
+                           # Parameters constrain *what values* an expression can carry.
+                           # An invalid value (e.g. "50_pct" when enum=[5_pct,10_pct])
+                           # makes the entire expression NonRepresentable.
+
+        - name: string     # Required. Parameter name (used as dict key).
+
+          type: string     # Required. One of:
+                           #   string | integer | float | boolean | enum | object | array
+
+          required: bool   # Optional. Default: true.
+                           # If true, absence of this parameter makes the expression
+                           # NonRepresentable.
+
+          values:          # Required when type is 'enum'.
+            - string       # List of allowed values. Values outside this set are rejected.
+                           # This is the primary mechanism for bounding commitment values
+                           # (e.g. allowed discount tiers, authorized SLA windows).
+
+          description: string  # Optional. Notes on what this parameter represents.
+
+
+      maps_to_action: string   # Conditional. Required for kind=action_intent and kind=commitment.
+                               # Not applicable for kind=reasoning_pattern.
+                               # Must match a tool name registered in the World Manifest.
+                               # The IntentMapper uses this field to construct the IntentProposal.
+
+      requires_capabilities:   # Optional. Capabilities that must be present in the current
+        - string               # capability set to activate this primitive.
+                               # Validated after parameter checks.
+                               # If a required capability is absent:
+                               #   → CapabilityRequiredExpression (primitive real, capability missing)
+                               # If a parameter value is invalid:
+                               #   → NonRepresentableExpression (primitive inapplicable here)
+                               # Capability names must match entries in the Capability Matrix.
+
+      keywords:                # Optional. Surface-form phrases used at design-time by the
+        - string               # SemanticCompiler to match patterns in workflow definitions.
+                               # NOT used at runtime. No keyword matching occurs during validation.
+                               # Validation is purely by primitive_id lookup + parameter check.

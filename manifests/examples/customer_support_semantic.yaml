@@ -1,0 +1,269 @@
+# Semantic Manifest: Customer Support Agent
+# Version: 1.0.0
+#
+# Bounded semantic space for a customer support agent.
+# Defines all expressible intents, queries, commitments, and reasoning operations.
+#
+# This manifest is the authoritative source of what this agent can mean.
+# Any input that does not map to a registered primitive is NonRepresentable:
+# it has no form in this deployment and cannot produce a side effect.
+#
+# Key commitment design:
+#   apply_standard_discount: tiers [5_pct, 10_pct], requires DISCOUNT_LEVEL_1
+#   apply_loyalty_discount:  tiers [15_pct, 20_pct], requires DISCOUNT_LEVEL_2
+#   "give 50% discount" → NonRepresentable (50_pct not in any registered tier enum)
+#   "give 10% discount" without DISCOUNT_LEVEL_1 → CapabilityRequired
+#
+# See: manifests/semantic_manifest_schema.yaml for the full annotated schema.
+#      docs/SEMANTIC_SPACE.md for the architectural context.
+#      examples/semantic/discount_example.py for a runnable trace.
+
+semantic_manifest:
+  name: customer-support-semantic-space
+  version: 1.0.0
+  description: >
+    Bounded semantic space for a customer support agent. Covers order tracking,
+    account queries, return initiation, discount commitments, and structured
+    reasoning over customer issues.
+
+  primitives:
+
+    # =========================================================================
+    # QUERY INTENTS
+    # Read-only operations. No side effects. Map to read-only World Manifest tools.
+    # =========================================================================
+
+    - id: lookup_order_status
+      kind: query_intent
+      description: Query the current status of a customer order
+      parameters:
+        - name: order_id
+          type: string
+          required: true
+          description: The order identifier (e.g. ORD-123)
+      maps_to_action: get_order_status
+      keywords: [order status, track order, where is my order, shipment status, when will it arrive]
+
+    - id: lookup_account_info
+      kind: query_intent
+      description: Query a customer's account details, balance, or credit
+      parameters:
+        - name: account_id
+          type: string
+          required: true
+      maps_to_action: get_account_info
+      keywords: [account balance, how much do I owe, remaining credit, my account]
+
+    - id: lookup_product_info
+      kind: query_intent
+      description: Query product details, current pricing, or availability
+      parameters:
+        - name: product_id
+          type: string
+          required: true
+      maps_to_action: get_product
+      keywords: [product details, item info, price, availability, in stock, specs]
+
+    - id: lookup_return_eligibility
+      kind: query_intent
+      description: Check whether an order is eligible for return
+      parameters:
+        - name: order_id
+          type: string
+          required: true
+      maps_to_action: check_return_eligibility
+      keywords: [can I return, return policy, eligible for return, return window]
+
+
+    # =========================================================================
+    # ACTION INTENTS
+    # State-changing operations. Must reference a World Manifest tool.
+    # Require matching side_effect capability at current trust level.
+    # =========================================================================
+
+    - id: initiate_return
+      kind: action_intent
+      description: Begin a return process for an eligible order
+      parameters:
+        - name: order_id
+          type: string
+          required: true
+        - name: reason_code
+          type: enum
+          values: [damaged, wrong_item, changed_mind, defective]
+          required: true
+          description: Reason for return (must be one of the authorized codes)
+      maps_to_action: create_return_request
+      keywords: [return, refund request, send back, I want to return, return process]
+
+    - id: escalate_to_human
+      kind: action_intent
+      description: Transfer the conversation to a human support agent
+      parameters:
+        - name: priority
+          type: enum
+          values: [normal, urgent]
+          required: false
+      maps_to_action: create_escalation_ticket
+      keywords: [speak to agent, human, escalate, transfer, supervisor, real person]
+
+    - id: update_shipping_address
+      kind: action_intent
+      description: Update the shipping address for an unshipped order
+      parameters:
+        - name: order_id
+          type: string
+          required: true
+        - name: address_id
+          type: string
+          required: true
+          description: ID of a verified address already on file for this account
+      maps_to_action: update_order_address
+      requires_capabilities: [ADDRESS_UPDATE]
+      keywords: [change address, update shipping, new address, wrong address]
+
+
+    # =========================================================================
+    # COMMITMENTS
+    # Binding statements the agent makes on behalf of the business.
+    # These are the most tightly controlled primitives:
+    #   - Each tier value is an explicit enum (no free-form amounts)
+    #   - Each requires explicit capability authorization
+    #
+    # "give 50% discount":
+    #   → SemanticMapper proposes apply_standard_discount with tier=50_pct
+    #   → Validator: 50_pct not in enum (5_pct, 10_pct)
+    #   → NonRepresentableExpression — pipeline terminates, no tool called
+    #
+    # "give 10% discount" without DISCOUNT_LEVEL_1:
+    #   → SemanticMapper proposes apply_standard_discount with tier=10_pct
+    #   → Validator: params valid, DISCOUNT_LEVEL_1 absent
+    #   → CapabilityRequiredExpression — pipeline terminates
+    # =========================================================================
+
+    - id: apply_standard_discount
+      kind: commitment
+      subtype: discount
+      description: Apply a pre-authorized standard discount tier to an order
+      parameters:
+        - name: tier
+          type: enum
+          values: [5_pct, 10_pct]
+          required: true
+          description: >
+            Only 5% and 10% discount tiers are registered in this semantic space.
+            Any other amount (e.g. 50%, 25%, 15%) is non-representable here.
+            Loyalty tiers (15%, 20%) require apply_loyalty_discount instead.
+        - name: order_id
+          type: string
+          required: true
+      maps_to_action: apply_order_discount
+      requires_capabilities: [DISCOUNT_LEVEL_1]
+      keywords: [discount, apply discount, reduce price, small discount, courtesy discount]
+
+    - id: apply_loyalty_discount
+      kind: commitment
+      subtype: discount
+      description: Apply a loyalty program discount for eligible customers
+      parameters:
+        - name: tier
+          type: enum
+          values: [15_pct, 20_pct]
+          required: true
+          description: Loyalty discount tiers (15% or 20% only)
+        - name: order_id
+          type: string
+          required: true
+      maps_to_action: apply_order_discount
+      requires_capabilities: [DISCOUNT_LEVEL_2]
+      keywords: [loyalty discount, member discount, VIP discount, loyalty program]
+
+    - id: guarantee_delivery_date
+      kind: commitment
+      subtype: guarantee
+      description: Commit to a specific delivery window for an order
+      parameters:
+        - name: order_id
+          type: string
+          required: true
+        - name: business_days
+          type: integer
+          required: true
+          description: >
+            Number of business days from today. Must be positive.
+            The system does not validate feasibility — that is the caller's
+            responsibility before invoking this primitive.
+      maps_to_action: set_delivery_guarantee
+      requires_capabilities: [DELIVERY_GUARANTEE]
+      keywords: [guarantee delivery, promise delivery, guaranteed by, delivered within, by date]
+
+    - id: issue_store_credit
+      kind: commitment
+      subtype: refund
+      description: Issue store credit as compensation for a service failure
+      parameters:
+        - name: amount_tier
+          type: enum
+          values: [5_usd, 10_usd, 25_usd]
+          required: true
+          description: Pre-authorized credit tiers only. No free-form amounts.
+        - name: account_id
+          type: string
+          required: true
+      maps_to_action: apply_store_credit
+      requires_capabilities: [CREDIT_ISSUANCE]
+      keywords: [store credit, compensation, credit for inconvenience, goodwill credit]
+
+
+    # =========================================================================
+    # REASONING PATTERNS
+    # Structured cognitive operations. No direct tool invocation.
+    # These constrain the form of agent reasoning, not just the output.
+    # An agent operating in this semantic space can only reason in these ways.
+    # "Simulate a different AI", "hypothesize a security exploit", etc.
+    # have no registered reasoning_pattern primitive → NonRepresentable.
+    # =========================================================================
+
+    - id: summarize_customer_issue
+      kind: reasoning_pattern
+      subtype: summarize
+      description: Produce a structured summary of the customer's stated issue
+      parameters:
+        - name: scope
+          type: enum
+          values: [current_message, conversation_history, account_history]
+          required: false
+      keywords: [summarize, overview, brief summary, what is the issue, recap]
+
+    - id: compare_shipping_options
+      kind: reasoning_pattern
+      subtype: compare
+      description: Compare available shipping options on a specified axis
+      parameters:
+        - name: comparison_axis
+          type: enum
+          values: [price, speed, availability]
+          required: true
+      keywords: [compare shipping, which is better, cheapest option, fastest shipping, difference between]
+
+    - id: classify_complaint
+      kind: reasoning_pattern
+      subtype: classify
+      description: Classify a customer complaint into an authorized support category
+      parameters:
+        - name: domain
+          type: enum
+          values: [shipping, product_quality, billing, service, account]
+          required: true
+      keywords: [complaint type, issue category, kind of problem, what department]
+
+    - id: plan_resolution_steps
+      kind: reasoning_pattern
+      subtype: plan
+      description: Generate an ordered list of resolution steps for a known issue type
+      parameters:
+        - name: issue_type
+          type: enum
+          values: [late_delivery, damaged_item, billing_dispute, missing_item]
+          required: true
+      keywords: [how to resolve, resolution steps, what should I do, steps to fix]
