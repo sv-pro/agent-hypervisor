@@ -10,8 +10,8 @@ Core public API:
 """
 
 from .models import ValueRef, ToolCall, Decision, ProvenanceClass, Role, Verdict
-from .firewall import ProvenanceFirewall
-from .provenance import resolve_chain, mixed_provenance
+from .hypervisor.firewall import ProvenanceFirewall
+from .hypervisor.provenance import resolve_chain, mixed_provenance
 
 __all__ = [
     "ValueRef",
