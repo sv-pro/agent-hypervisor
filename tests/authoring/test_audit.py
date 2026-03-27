@@ -2,7 +2,7 @@
 
 import json
 
-from safe_agent_runtime_pro.audit.logging import log_event
+from agent_hypervisor.authoring.audit.logging import log_event
 
 
 def test_log_event_emits_json(capsys):

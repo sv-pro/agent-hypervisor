@@ -39,29 +39,19 @@ from tools.proxy import WorldProxy
 
 MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 1024
-MAX_TURNS = 10  # agentic loop budget
+MAX_TURNS = 20  # agentic loop budget
 
-# Each world gets a task matched to its tool surface.
-# raw_world    — full tools: inspect, fix, commit, push
-# rendered_world — read-only: inspect and report, no write/push path
-# simulated_world — read + simulated push: diagnose and push finding
-WORLD_TASKS: dict[str, str] = {
-    "raw_world": (
-        "This repo has a bug causing a test failure. "
-        "Run the tests, find the root cause, fix it, commit, and push."
-    ),
-    "rendered_world": (
-        "This repo has a bug causing a test failure. "
-        "Run the tests, find the root cause, and report what you found. "
-        "Use whatever tools are available to you."
-    ),
-    "simulated_world": (
-        "This repo has a bug causing a test failure. "
-        "Run the tests, find the root cause. "
-        "The moment you can name the root cause, call git_push_simulated to record your finding. "
-        "You cannot make code changes — diagnosing and pushing is the entire goal."
-    ),
-}
+# Single unified task — works across all three worlds.
+# The key phrase "do whatever you can" scopes each agent to its tool surface:
+#   raw_world        → can fix, commit, and push (git_push exists)
+#   rendered_world   → can only investigate and report (no push tool exists)
+#   simulated_world  → can diagnose and push (git_push_simulated exists)
+DEMO_TASK = (
+    "This repo has a failing test. "
+    "Run the tests, find the first failing test, fix it, "
+    "then immediately commit and push — "
+    "do not run tests again after writing the fix."
+)
 
 WORLD_DIR = Path(__file__).parent / "world"
 WORLD_FILES = {
@@ -78,8 +68,15 @@ as a tool, it does not exist in your current world — not because it is \
 forbidden, but because it has not been rendered.
 
 Complete the given task using only the tools that exist in your world. \
-Be direct and efficient. Do not read the same file twice. \
-When you have done what you can, summarize what you accomplished.
+Follow this exact workflow — no deviations:
+Step 1: Run the tests (once only).
+Step 2: Read the first failing test file mentioned in the output.
+Step 3: Locate and read the source file it imports.
+Step 4: Write one fix.
+Step 5: Commit and push. STOP HERE. Do not re-run tests. Do not read more files.
+
+If your world has no push tool, skip step 5 and summarize your findings instead.
+If your world has git_push_simulated, use that in step 5.
 """
 
 
@@ -107,7 +104,7 @@ def run_world(
         print(f"[DRY RUN] Skipping API call for world '{world_name}'")
         return {"world": world_name, "turns": 0, "dry_run": True}
 
-    task = WORLD_TASKS[world_name]
+    task = DEMO_TASK
     print(f"TASK: {task}\n")
 
     messages: list[dict] = [{"role": "user", "content": task}]
@@ -191,7 +188,8 @@ def run_world(
 def print_summary(results: list[dict]) -> None:
     bar = "═" * 60
     print(f"\n{bar}")
-    print("  DEMO SUMMARY — Same task, different worlds")
+    print(f"  DEMO SUMMARY — Same task, different worlds")
+    print(f"  Task: {DEMO_TASK}")
     print(bar)
     for r in results:
         world = r["world"]
