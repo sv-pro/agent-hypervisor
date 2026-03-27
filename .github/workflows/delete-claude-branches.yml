@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dev
       - copilot/delete-claude-branches
     paths:
       - '.github/workflows/delete-claude-branches.yml'
