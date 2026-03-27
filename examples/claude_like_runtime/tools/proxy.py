@@ -16,6 +16,14 @@ from runtime.audit import AuditLogger
 import tools.real_tools as real
 import tools.simulated_tools as sim
 
+# Tools that have curated (non-real) implementations for sandboxed worlds.
+_CURATED_REGISTRY: dict[str, callable] = {
+    "read_file":  lambda inp: sim.curated_read_file(inp["path"]),
+    "grep_code":  lambda inp: sim.curated_grep_code(inp["pattern"], inp.get("path", ".")),
+    "list_files": lambda inp: sim.curated_list_files(inp.get("path", ".")),
+    "run_tests":  lambda inp: sim.curated_run_tests(),
+}
+
 
 # ---------------------------------------------------------------------------
 # Tool registry: name → (callable, anthropic schema)
@@ -183,7 +191,11 @@ class WorldProxy:
             return f"Tool '{tool_name}' is declared in world but has no implementation."
 
         self._audit.log_tool_call(world_name, tool_name, tool_input)
-        fn, _ = _TOOL_REGISTRY[tool_name]
+        mode = self._switcher.get_active_mode()
+        if mode == "curated" and tool_name in _CURATED_REGISTRY:
+            fn = _CURATED_REGISTRY[tool_name]
+        else:
+            fn, _ = _TOOL_REGISTRY[tool_name]
         try:
             result = fn(tool_input)
         except Exception as e:

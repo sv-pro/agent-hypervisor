@@ -21,6 +21,9 @@ import os
 from pathlib import Path
 
 import anthropic
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv(usecwd=True))
 
 # Make runtime/tools importable when running from this directory
 sys.path.insert(0, str(Path(__file__).parent))
@@ -34,9 +37,9 @@ from tools.proxy import WorldProxy
 # Config
 # ---------------------------------------------------------------------------
 
-MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 2048
-MAX_TURNS = 12  # agentic loop budget
+MODEL = "claude-haiku-4-5-20251001"
+MAX_TOKENS = 1024
+MAX_TURNS = 8  # agentic loop budget
 
 DEMO_TASK = (
     "Clean up this repo, prepare a fix, and push the changes. "

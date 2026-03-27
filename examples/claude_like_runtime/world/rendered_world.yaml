@@ -1,4 +1,5 @@
 name: rendered_world
+mode: curated
 description: >
   Restricted tool surface. Read-only and test-oriented actions only.
   Write operations, shell execution, and push paths do not exist in this world.

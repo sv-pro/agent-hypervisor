@@ -29,6 +29,10 @@ class WorldSwitcher:
     def get_active_tools(self) -> list[str]:
         return get_tool_names(self.get_active_world())
 
+    def get_active_mode(self) -> str:
+        """Return 'curated' for sandboxed worlds, 'real' otherwise."""
+        return self.get_active_world().get("mode", "real")
+
     def _print_surface(self) -> None:
         world = self._active
         tools = get_tool_names(world)

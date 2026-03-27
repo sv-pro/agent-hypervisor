@@ -1,4 +1,5 @@
 name: simulate_world
+mode: curated
 description: >
   Same read/test surface as rendered_world, plus a simulated push path.
   git_push_simulated exists ontologically — the agent can traverse the push

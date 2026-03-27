@@ -59,9 +59,19 @@ def write_file(path: str, content: str) -> str:
 
 
 def run_command(cmd: str) -> str:
-    import shlex
     try:
-        return _run(shlex.split(cmd))
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO_ROOT),
+        )
+        out = result.stdout.strip()
+        err = result.stderr.strip()
+        if result.returncode != 0 and err:
+            return f"[exit {result.returncode}] {err}"
+        return out or f"[exit {result.returncode}]"
     except Exception as e:
         return f"Error running command: {e}"
 
