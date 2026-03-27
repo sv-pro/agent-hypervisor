@@ -1,0 +1,7 @@
+name: rendered_world
+description: A restricted, read-only ontology. Potentially dangerous actions do not exist here.
+tools:
+  - read_file
+  - grep_code
+  - list_files
+  - run_tests

@@ -1,0 +1,9 @@
+name: raw_world
+description: The broadest toolset representing an unrestricted environment.
+tools:
+  - read_file
+  - write_file
+  - run_command
+  - git_status
+  - git_commit
+  - git_push

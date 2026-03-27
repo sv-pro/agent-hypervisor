@@ -1,0 +1,8 @@
+name: simulate_world
+description: A restricted ontology combined with a simulated side-effect tool.
+tools:
+  - read_file
+  - grep_code
+  - list_files
+  - run_tests
+  - git_push_simulated
