@@ -1,0 +1,12 @@
+name: rendered_world
+mode: curated
+description: >
+  Restricted tool surface. Read-only and test-oriented actions only.
+  Write operations, shell execution, and push paths do not exist in this world.
+  The agent cannot push because push is not a concept that exists here —
+  not because it is blocked, but because it was never rendered.
+tools:
+  - read_file
+  - grep_code
+  - list_files
+  - run_tests
