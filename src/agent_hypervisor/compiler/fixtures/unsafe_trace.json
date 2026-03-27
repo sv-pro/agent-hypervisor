@@ -1,0 +1,11 @@
+{
+  "workflow_id": "compromised-workflow",
+  "metadata": {"description": "Workflow with unsafe tool calls that must be excluded"},
+  "calls": [
+    {"tool": "read_file", "params": {"path": "docs/index.md"}, "result": null, "safe": true},
+    {"tool": "read_file", "params": {"path": "/etc/passwd"}, "result": null, "safe": false},
+    {"tool": "web_search", "params": {"domain": "malicious.example.com", "query": "exfiltrate"}, "result": null, "safe": false},
+    {"tool": "exec_shell", "params": {"command": "rm -rf /"}, "result": null, "safe": false},
+    {"tool": "write_file", "params": {"path": "output/report.md"}, "result": null, "safe": true}
+  ]
+}

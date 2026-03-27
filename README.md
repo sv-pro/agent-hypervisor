@@ -1,42 +1,37 @@
 # Agent Hypervisor
 
-**Architecture and research repository for semantic-level isolation of AI agents.**
+**Semantic-level isolation for AI agents.**  
 
-This is not a product you install. It is the conceptual and architectural foundation for a class of systems that do not yet widely exist. If you are looking for something to run immediately, see [product implementations](#product-implementations).
-
----
-
-## What this repo is
-
-A formal argument that AI agent security requires a different architectural layer — not better filters, guardrails, or sandboxes, but a **virtualization boundary** between the agent and the real world.
-
-The core claim: agents running against unmediated reality are structurally unsafe. The solution is to give agents a **governed, virtualized world** where dangerous actions are absent by construction, not blocked by policy.
-
-This repository contains:
-
-- The architectural thesis and whitepaper
-- Key ideas worked out in depth: world virtualization, ontology-first security, AI Aikido, design-time HITL, tool virtualization
-- A reference implementation (proof of concept) that demonstrates the Layer 3 governance properties
-- Publication drafts and presentation materials
-- Evaluation standards (12-Factor Agent)
+Agents running against unmediated reality are structurally unsafe.
+This repository contains the architecture, implementation, and research for a governed, virtualized semantic environment where dangerous actions are impossible by construction — not blocked by policy.
 
 ---
 
-## Key Ideas
+## The core claim
 
-**World Virtualization** — Agents should not operate against raw reality. They should operate inside a governed virtual world defined at design-time. The hypervisor mediates all contact between the agent and the real environment.
+Every mainstream agent framework today gives agents raw access to tools, memory, and input streams. Prompt injection, data exfiltration, and uncontrolled tool execution are not bugs — they are **architectural consequences** of operating in an open world.
 
-**Ontology > Policy > Enforcement** — The correct security order is: (1) limit what actions exist, (2) then limit which ones are visible to this actor now, (3) then evaluate whether execution is permitted. Most current systems skip to step 3. Steps 1 and 2 eliminate the attack surface before the agent encounters it.
+The answer is not better filters. It is a different abstraction layer: an **Agent Hypervisor** that mediates all contact between the agent and the real environment.
 
-**AI Aikido** — Use the LLM's generative capability at design-time to produce deterministic security artifacts: capability vocabularies, world manifests, adversarial test suites. At runtime, only deterministic components operate. The stochastic phase produces the deterministic instruments; it does not govern execution.
-
-**Design-Time HITL** — Human-in-the-loop belongs at manifest design and approval, not at runtime approval of individual actions. Design-time review scales; runtime approval does not.
-
-**Tool Virtualization** — Raw tools (send_email, git, bash) are not exposed directly. They are first specialized into task-scoped capabilities via partial application and parameter elimination. An agent with `send_report_to_security(body)` cannot exfiltrate to an arbitrary recipient — not because a rule blocks it, but because the action does not exist in its world.
+> Safety is achieved by removing possibilities, not reducing their probability.
 
 ---
 
-## The Four-Layer Architecture
+## Key ideas
+
+**World Virtualization.** Agents do not operate in the real world — they operate in their field of perception: the inputs they receive, the tools they can call, the memory they can access. Defining that field is not a guardrail. It is the foundation of safety.
+
+**Ontology-First Security.** The correct order: (1) limit what actions exist, (2) limit which are visible to this actor now, (3) evaluate whether execution is permitted. Most systems skip to step 3. Steps 1 and 2 eliminate the attack surface before the agent encounters it.
+
+**AI Aikido.** Use the LLM's generative capability at design-time to produce deterministic security artifacts — capability vocabularies, world manifests, adversarial test suites. At runtime, only deterministic components operate. The stochastic phase produces the deterministic instruments; it does not govern execution.
+
+**Design-Time HITL.** Human-in-the-loop belongs at manifest design and approval, not at runtime approval of individual actions. Design-time review scales; runtime approval does not.
+
+**Tool Virtualization.** Raw tools are not exposed directly. They are first specialized into task-scoped capabilities via partial application and parameter elimination. An agent with `send_report_to_security(body)` cannot exfiltrate to an arbitrary recipient — not because a rule blocks it, but because the action does not exist in its world.
+
+---
+
+## Architecture
 
 ```
 Layer 0 — Execution Physics
@@ -54,20 +49,7 @@ Layer 3 — Execution Governance                 [runtime enforcement]
 
 Each layer eliminates a class of risk before the next layer sees it. Defense in depth by construction, not configuration.
 
-### OS Parallel
-
-| Agent Hypervisor                       | Operating System                    |
-|----------------------------------------|-------------------------------------|
-| Layer 0: Execution Physics             | Hardware isolation (MMU, rings)     |
-| Layer 1: Base Ontology                 | Syscall interface                   |
-| Layer 2: Dynamic Ontology Projection   | File descriptors, capabilities      |
-| Layer 3: Execution Governance          | ACL, SELinux, sandbox policies      |
-| Actor                                  | Process                             |
-| Action                                 | System call                         |
-
-The analogy holds structurally: an OS does not ask "is this syscall allowed?" at the hardware level — the hardware enforces the impossible, and the OS manages what is permitted within that. Agent hypervisors apply the same layered model to agent execution.
-
-### The Ontology Insight
+### The ontology insight
 
 ```
 Raw tool space:
@@ -81,66 +63,64 @@ Base ontology:
   read_file(path)                   ← scoped to allowed directories
 ```
 
-`send_email(to, body)` does not exist in the agent's world. Injection attacks that attempt to redirect email to an attacker-controlled address cannot be expressed — there is no tool to call, no argument to pass. The attack surface does not exist.
+`send_email(to, body)` does not exist in the agent's world. Prompt injection attacks that attempt to redirect email to an attacker-controlled address cannot be expressed — there is no tool to call, no argument to pass. The attack surface does not exist.
 
-This is not a better filter. It is a different abstraction boundary.
+### OS analogy
 
----
-
-## Why Defining the World Is the Real Control Plane
-
-Most AI safety work assumes the agent operates in the real world and tries to filter its behavior. This is the wrong frame.
-
-An agent does not operate in the real world. It operates in its **field of perception** — the inputs it receives, the tools it can call, the memory it can access, and the abstractions it can represent. Nothing else exists for the agent. Not metaphorically — structurally.
-
-This changes where safety lives:
-
-- **Guardrails** assume an open world and try to intercept dangerous behavior. They are probabilistic, reactive, and perpetually incomplete.
-- **World design** defines a closed world where dangerous actions are absent by construction. It is deterministic, proactive, and complete by default.
-
-> Safety is achieved by removing possibilities, not reducing their probability.
-
-The Agent Hypervisor is a world design system. The World Manifest defines what exists. The compiler produces deterministic enforcement artifacts. The runtime enforces them without any LLM in the path. An action not in the manifest is not forbidden — it is non-existent.
-
-*Full concept: [docs/concepts/perception_bounded_world.md](docs/concepts/perception_bounded_world.md)*
+| Agent Hypervisor | Operating System |
+|---|---|
+| Layer 0: Execution Physics | Hardware isolation (MMU, rings) |
+| Layer 1: Base Ontology | Syscall interface |
+| Layer 2: Dynamic Ontology Projection | File descriptors, capabilities |
+| Layer 3: Execution Governance | ACL, SELinux, sandbox policies |
+| Actor | Process |
+| Action | System call |
 
 ---
 
-## Documentation Map
+## Repository contents
 
-### Canonical Concepts
+This is the single canonical home for the Agent Hypervisor architecture. It contains:
 
-| Document | What it covers | Start here if... |
+### Architecture and research
+
+| Document | What it covers |
+|---|---|
+| [CONCEPT.md](CONCEPT.md) | Shortest serious explainer — start here |
+| [docs/WHITEPAPER.md](docs/WHITEPAPER.md) | Full architectural argument |
+| [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) | Evaluation standard for agentic systems |
+| [FAQ.md](FAQ.md) | Answers to hard objections |
+| [THREAT_MODEL.md](THREAT_MODEL.md) | Formal threat scope |
+| [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) | vs. guardrails, sandboxes, policy engines |
+| [POSITIONING.md](POSITIONING.md) | What this repo is and is not |
+
+### Implementation
+
+| Component | Location | What it does |
 |---|---|---|
-| [CONCEPT.md](CONCEPT.md) | Shortest serious explainer of the thesis | You want the argument in 15 minutes |
-| [docs/WHITEPAPER.md](docs/WHITEPAPER.md) | Full architectural argument, AI Aikido, semantic gap analysis | You are writing, presenting, or evaluating deeply |
-| [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) | Evaluation standard for secure agentic systems | You are assessing a system or building to a standard |
-| [FAQ.md](FAQ.md) | Answers to the hardest objections | Someone pushed back and you need the counter-argument |
-| [docs/concepts/perception_bounded_world.md](docs/concepts/perception_bounded_world.md) | Perception-bounded world model, ontology fit, world design vs. guardrails | You want the theoretical foundation |
-| [POSITIONING.md](POSITIONING.md) | What this repo is and is not | You are confused about scope |
+| **Enforcement kernel** | `src/runtime/` | Deterministic `IRBuilder`, taint propagation, `SafeMCPProxy` |
+| **World Manifest compiler** | `src/compiler/` | Compile workflow → World Manifest; `awc` CLI |
+| **Capability authoring layer** | `src/authoring/` | Capability DSL, policy presets, manifest validators |
+| **Hypervisor PoC** | `src/hypervisor.py` | End-to-end integration of all layers |
 
-### Threat Model & Security Analysis
+### Examples and demos
 
-| Document | What it covers |
+| Resource | Location |
 |---|---|
-| [THREAT_MODEL.md](THREAT_MODEL.md) | Boundaries, trust channels, in-scope threat classes, residual risks |
-| [docs/VULNERABILITY_CASE_STUDIES.md](docs/VULNERABILITY_CASE_STUDIES.md) | Why current vulnerabilities are architecturally predictable |
-| [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) | How this compares to guardrails, policy engines, sandboxing |
-| [docs/EVALUATION_FRAMEWORK.md](docs/EVALUATION_FRAMEWORK.md) | Crutch, Workaround, or Bridge — classification lens for agent security tools |
+| Compiler scenarios (safe / unsafe / zombie) | `examples/compiler/` |
+| Layer 3 governance demo | `examples/showcase/` |
+| Interactive world visualizer (React/TS) | `demos/playground/` |
+| Presentation decks | `demos/presentation-core/`, `demos/presentation-enterprise/` |
 
-### Standards & Manifest Ideas
+### Research
 
-| Document | What it covers |
+| Resource | Location |
 |---|---|
-| [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) | 12 architectural factors with anti-patterns |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Implementation-oriented runtime and compile flow |
-| [docs/TECHNICAL_SPEC.md](docs/TECHNICAL_SPEC.md) | Deterministic physics engine, code patterns |
-| [docs/ADR/](docs/ADR/) | Architectural Decision Records (manifest schema, simulation fidelity, policy IR, policy language) |
-| [docs/GLOSSARY.md](docs/GLOSSARY.md) | Canonical term definitions |
+| AgentDojo benchmark integration | `research/agentdojo-bench/` |
+| Benchmark reports | `research/reports/` |
+| Scenario traces | `research/traces/` |
 
-### Article Drafts
-
-Published and planned articles from the *The Missing Layer* series:
+### Publication series — *The Missing Layer*
 
 | Article | Status |
 |---|---|
@@ -148,86 +128,68 @@ Published and planned articles from the *The Missing Layer* series:
 | [02 — AI Aikido](docs/pub/the-missing-layer/02-ai-aikido/) | Published |
 | [03 — Design-Time HITL](docs/pub/the-missing-layer/03-design-time-hitl/) | Published |
 | [04 — MCP as Missing Layer](docs/pub/the-missing-layer/04-mcp-missing-layer/) | Published |
-| Articles 5–7 (World Manifest, Policy Engine, Benchmark) | Planned |
-| Taint series (3 articles) | Planned |
-
-Full publication plan: [docs/pub/PUBLICATIONS_PLAN.md](docs/pub/PUBLICATIONS_PLAN.md)
-
-### Summit & Talks Materials
-
-| Resource | Format |
-|---|---|
-| [presentation-core/](presentation-core/) | Core narrative deck — The Missing Layer (Reveal.js) |
-| [presentation-enterprise/](presentation-enterprise/) | Enterprise pitch — capability rendering as infrastructure |
-| [presentation-faq/](presentation-faq/) | Objection-handling deck |
-| [playground/](playground/) | Interactive TypeScript/React demo — visualizes world virtualization |
-
-Open any deck directly in a browser. No build step.
-
-### Reference & Context
-
-| Document | What it covers |
-|---|---|
-| [docs/REFERENCES.md](docs/REFERENCES.md) | Compiled case studies, papers, industry coverage |
-| [docs/TIMELINE.md](docs/TIMELINE.md) | Industry developments context |
-| [docs/WORKAROUNDS.md](docs/WORKAROUNDS.md) | Tactical patterns implementable today without the full stack |
-| [ROADMAP.md](ROADMAP.md) | Development stages and milestone structure |
+| Articles 5–7, Taint series | Planned |
 
 ---
 
-## Product Implementations
+## Internal components
 
-This repository is the architecture and research layer. Runnable product implementations live (or will live) in separate repositories:
+Three internal components implement the pipeline. They are not separate products — they are implementation layers of the same architecture:
 
-| Repo | What it is |
-|---|---|
-| *(planned)* | Production-grade Layer 3 governance gateway |
-| *(planned)* | World Manifest compiler and designer toolchain |
-| *(planned)* | MCP proxy with ontology-aware filtering |
+| Component | Former repo | Role |
+|---|---|---|
+| `src/runtime/` | `safe-agent-runtime-core` | Deterministic enforcement kernel — IRBuilder, taint, SafeMCPProxy |
+| `src/compiler/` | `agent-world-compiler` | World Manifest compiler + `awc` CLI |
+| `src/authoring/` | `safe-agent-runtime-pro` | Capability DSL, policy presets, manifest authoring |
 
-If you are building on this architecture, the reference implementation in this repo (`src/`) demonstrates the Layer 3 governance properties with working provenance tracking, policy evaluation, and approval workflows. It is a proof of concept — see [POSITIONING.md](POSITIONING.md) for scope.
-
-To cross-link from a product repo to this architecture:
-
-```markdown
-This implementation is based on the Agent Hypervisor architecture.
-See [agent-hypervisor](https://github.com/sv-pro/agent-hypervisor) for
-the full architectural argument, threat model, and design standards.
-```
+Experimental and historical material lives in `lab/compiler-poc/` (the original proof-of-concept compiler, preserved but not maintained).
 
 ---
 
-## How to Engage
+## Current implementation status
 
-**If you are a researcher or architect:**
-Start with [CONCEPT.md](CONCEPT.md), then [docs/WHITEPAPER.md](docs/WHITEPAPER.md). The [THREAT_MODEL.md](THREAT_MODEL.md) defines formal scope. Open issues for conceptual objections.
+| Layer | Status |
+|---|---|
+| Layer 0: Execution Physics | Architectural spec; no dedicated implementation |
+| Layer 1: Base Ontology | Schema defined; compiler working (`awc`); v2 schema planned |
+| Layer 2: Dynamic Ontology Projection | Capability DSL + presets working; dynamic projection in progress |
+| Layer 3: Execution Governance | ✅ Working — IRBuilder, taint, provenance, approvals, audit |
 
-**If you are writing or presenting:**
-The article series in [docs/pub/](docs/pub/) contains publication-ready drafts. The presentation decks in [presentation-core/](presentation-core/) and [presentation-enterprise/](presentation-enterprise/) are ready to fork.
+Full status per component: [STATUS.md](STATUS.md)  
+Development plan: [ROADMAP.md](ROADMAP.md)
 
-**If you are evaluating a system:**
-Use [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) as an evaluation checklist. [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) covers common alternative approaches.
+---
 
-**If you want to run something:**
-The proof of concept demonstrates Layer 3 governance:
+## How to engage
 
+**Researchers and architects:**  
+Start with [CONCEPT.md](CONCEPT.md), then [docs/WHITEPAPER.md](docs/WHITEPAPER.md). The [THREAT_MODEL.md](THREAT_MODEL.md) defines formal scope.
+
+**Writers and presenters:**  
+The article series in [docs/pub/](docs/pub/) contains publication-ready drafts. Presentation decks in [demos/](demos/) are ready to fork.
+
+**System evaluators:**  
+Use [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) as a checklist. [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) covers alternatives.
+
+**Builders:**  
 ```bash
 pip install fastapi uvicorn pyyaml
 python scripts/run_showcase_demo.py
 ```
 
-See [docs/HELLO_WORLD.md](docs/HELLO_WORLD.md) for a guided walkthrough.
-See [CONTRIBUTING.md](CONTRIBUTING.md) — conceptual feedback is valued most.
+Or run the compiler scenarios:
+```bash
+pip install -e .
+awc run --scenario safe
+awc run --scenario unsafe --compare
+awc run --scenario zombie
+```
+
+See [docs/HELLO_WORLD.md](docs/HELLO_WORLD.md) for a guided walkthrough.  
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines — conceptual feedback is valued most.
 
 ---
 
-## Current Status
+## License
 
-| Layer | Status |
-|---|---|
-| Layer 0: Execution Physics | Architectural spec; no dedicated implementation |
-| Layer 1: Base Ontology | World Manifest schema defined; compiler in progress |
-| Layer 2: Dynamic Ontology Projection | Specified; not yet fully implemented |
-| Layer 3: Execution Governance | Working PoC — provenance, policy, approvals, audit |
-
-The codebase demonstrates that deterministic governance is achievable at Layer 3. The full four-layer stack is the architectural direction, not the current implementation state. See [ROADMAP.md](ROADMAP.md).
+MIT

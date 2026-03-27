@@ -1,15 +1,23 @@
 [project]
 name = "agent-hypervisor"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.10"
-dependencies = ["pyyaml"]
+dependencies = [
+    "pyyaml",
+    "fastapi",
+    "uvicorn",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-ahc = "compiler.cli:main"
+awc = "agent_hypervisor.compiler.cli:main"
+ahc = "agent_hypervisor.compiler.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

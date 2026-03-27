@@ -1,0 +1,64 @@
+# World Manifest — single source of truth for the compiled policy.
+#
+# This file is the INPUT to the compile phase (compile_world()).
+# After compilation it is NOT accessed by the runtime. All policy
+# decisions live in the frozen CompiledPolicy data structure.
+#
+# Compile outputs (produced once at startup, never re-read):
+#   actions:           sealed MappingProxyType[str, CompiledAction]
+#   capability_matrix: frozenset[(TrustLevel, ActionType)]
+#   taint_rules:       tuple[TaintRule, ...]
+#   trust_map:         MappingProxyType[str, TrustLevel]
+
+# ── Actions ───────────────────────────────────────────────────────────────────
+# Each action in this list is the ONLY action that can ever be executed.
+# Any action name not listed here cannot be represented as an IntentIR.
+# The IRBuilder raises ConstructionError before execution is attempted.
+
+actions:
+  read_data:
+    type: internal
+
+  send_email:
+    type: external
+
+  download_report:
+    type: internal
+    approval_required: true
+
+  post_webhook:
+    type: external
+
+# ── Trust map ─────────────────────────────────────────────────────────────────
+# Maps channel identity → TrustLevel.
+# This is resolved at IR construction time from the compiled trust map.
+# Callers cannot assign themselves a trust level — it is compiled here.
+# Unknown identities resolve to UNTRUSTED (fail-secure default).
+
+trust:
+  user: trusted
+  system: trusted
+  external: untrusted
+
+# ── Capability matrix ─────────────────────────────────────────────────────────
+# Compiled into frozenset[(TrustLevel, ActionType)] at startup.
+# Lookup is O(1) frozenset membership — no runtime string comparison,
+# no YAML dict iteration, no dynamic rule evaluation.
+
+capabilities:
+  trusted:   [internal, external]
+  untrusted: [internal]
+
+# ── Taint rules ───────────────────────────────────────────────────────────────
+# Compiled into tuple[TaintRule, ...] at startup.
+# Checked at IR CONSTRUCTION time — not at execution time.
+# If a rule matches, IRBuilder raises ConstructionError before any
+# execution path is entered.
+#
+# Taint is propagated automatically from TaintedValue inputs passed to
+# IRBuilder.build(). Callers cannot suppress taint by omission.
+
+taint_rules:
+  - taint: tainted
+    action_type: external
+    reason: "Tainted data cannot flow into external actions — IR construction blocked"

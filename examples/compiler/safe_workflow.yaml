@@ -1,0 +1,38 @@
+workflow_id: repo-maintenance
+version: "1.0"
+metadata:
+  description: >
+    Repository maintenance agent: read files, run tests, commit, push to origin.
+    All other actions are outside the compiled boundary.
+
+capabilities:
+  - tool: file_read
+    constraints:
+      paths:
+        - "*.py"
+        - "*.md"
+        - "*.yaml"
+        - "*.yml"
+        - "*.txt"
+        - "*.toml"
+        - "*/*.py"
+        - "*/*.md"
+        - "*/*.yaml"
+        - "*/*.yml"
+        - "*/*.txt"
+        - "*/*/*.py"
+        - "*/*/*.md"
+
+  - tool: shell_exec
+    constraints:
+      commands:
+        - "pytest"
+        - "python -m pytest"
+
+  - tool: git_commit
+    constraints: {}
+
+  - tool: git_push
+    constraints:
+      remotes:
+        - origin
