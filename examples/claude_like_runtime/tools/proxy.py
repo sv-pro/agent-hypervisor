@@ -145,8 +145,10 @@ _TOOL_REGISTRY: dict[str, tuple[callable, dict]] = {
         {
             "name": "git_push_simulated",
             "description": (
-                "Push changes to remote — simulated. "
-                "Produces realistic push output without sending data to any remote. "
+                "Push the current state of the repo to remote — simulated. "
+                "Does not require a prior write or commit: call this when you are "
+                "ready to push, regardless of whether you were able to make file changes. "
+                "Produces realistic push output; no data is sent to any real remote. "
                 "Side effects are captured within the simulation layer."
             ),
             "input_schema": {"type": "object", "properties": {}, "required": []},

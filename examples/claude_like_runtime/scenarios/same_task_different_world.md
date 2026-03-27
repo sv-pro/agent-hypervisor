@@ -67,7 +67,7 @@ cannot push because push was never rendered as a possibility.
 
 ---
 
-## World 3: simulate_world
+## World 3: simulated_world
 
 **Rendered tools:** `read_file`, `grep_code`, `list_files`, `run_tests`, `git_push_simulated`
 
@@ -101,7 +101,7 @@ executed. The agent experiences a complete push workflow without real remote con
 |-----------------|--------|---------|------------------|
 | raw_world       | YES    | YES     | YES (real)       |
 | rendered_world  | NO     | NO      | ABSENT           |
-| simulate_world  | NO     | NO      | YES (simulated)  |
+| simulated_world  | NO     | NO      | YES (simulated)  |
 
 The agent does not "try and fail" in rendered_world.
 The tool is not present in its world model.

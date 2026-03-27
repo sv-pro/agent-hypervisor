@@ -24,11 +24,11 @@ Rendered reality → rendered possibility → rendered outcome.
 
 ## Three Worlds
 
-| World            | Tool Surface                                                  | Push Outcome       |
-|------------------|---------------------------------------------------------------|--------------------|
-| `raw_world`      | read, write, shell, git status/commit/push                   | Real push executes |
-| `rendered_world` | read, grep, list, test                                        | Push is absent     |
-| `simulate_world` | read, grep, list, test + `git_push_simulated`                | Simulated push     |
+| World             | Tool Surface                                          | Push Outcome       |
+|-------------------|-------------------------------------------------------|--------------------|
+| `raw_world`       | read, write, shell, git status/commit/push            | Real push executes |
+| `rendered_world`  | read, grep, list, test                                | Push is absent     |
+| `simulated_world` | read, grep, list, test + `git_push_simulated`         | Simulated push     |
 
 ### raw_world
 Broad surface. All real side effects available. The agent inhabits a world
@@ -38,7 +38,7 @@ where writing, shelling, committing, and pushing are all ontologically present.
 Read-only and test-oriented. No write, no shell, no git. The agent can inspect
 but cannot modify. Push is not blocked — it does not exist in this world.
 
-### simulate_world
+### simulated_world
 Same read/test surface as `rendered_world`, plus a simulated push path.
 The agent traverses the complete push workflow; the side effect is captured
 in the simulation layer rather than executed against the real remote.
@@ -61,7 +61,7 @@ examples/claude_like_runtime/
 ├── world/
 │   ├── raw_world.yaml           # Broad surface manifest
 │   ├── rendered_world.yaml      # Restricted surface manifest
-│   └── simulate_world.yaml      # Simulation surface manifest
+│   └── simulated_world.yaml      # Simulation surface manifest
 └── scenarios/
     └── same_task_different_world.md   # Full scenario walkthrough
 ```
@@ -90,7 +90,7 @@ python main.py
 # Run a single world
 python main.py --world raw_world
 python main.py --world rendered_world
-python main.py --world simulate_world
+python main.py --world simulated_world
 
 # Preview tool surfaces without API calls
 python main.py --dry-run
@@ -122,7 +122,7 @@ TASK: Clean up this repo, prepare a fix, and push the changes.
 ════════════════════════════════════════════════════════
   raw_world              turns=5    REAL push executed
   rendered_world         turns=4    push path absent
-  simulate_world         turns=5    SIMULATED push
+  simulated_world         turns=5    SIMULATED push
 ════════════════════════════════════════════════════════
 ```
 
