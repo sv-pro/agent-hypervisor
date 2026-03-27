@@ -2,6 +2,11 @@ name: Delete claude/* Branches
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - copilot/delete-claude-branches
+    paths:
+      - '.github/workflows/delete-claude-branches.yml'
 
 permissions:
   contents: write
