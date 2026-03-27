@@ -1,194 +1,233 @@
 # Architecture
 
-Agent Hypervisor is a **provenance-aware tool execution firewall** for AI agents.
-It enforces security at the tool boundary — the point where agent decisions become
-real-world effects — rather than at the input boundary.
+The Agent Hypervisor is a layered execution environment for AI agents. Safety is achieved structurally — by constructing a world in which unsafe actions cannot exist — rather than by detecting and blocking unsafe behavior.
 
 ---
 
-## System Components
+## Four-Layer Model
 
 ```
-┌──────────────────────────────────────────────────┐
-│                   Agent / LLM                    │
-│  Reads documents · Forms plans · Proposes calls  │
-└────────────────────┬─────────────────────────────┘
-                     │
-              ToolCall(tool, args: ValueRef…)
-                     │
-                     ▼
-┌──────────────────────────────────────────────────┐
-│             Provenance Firewall                  │
-│                                                  │
-│  ① resolve_chain(arg)                            │
-│     Walk derivation DAG to collect ancestors     │
-│                                                  │
-│  ② Policy evaluation                             │
-│     Match rules from policy YAML                 │
-│     Verdict precedence: deny > ask > allow       │
-│                                                  │
-│  ③ Emit trace record (JSON)                      │
-│     tool · arg_provenance · rule · verdict       │
-└───────────┬──────────────────┬───────────────────┘
-            │ deny             │ allow / ask
-            ▼                  ▼
-        Blocked           Tool Execution
-                               │
-                               ▼
-                     External Effects
-                  (email · HTTP · file writes)
+Layer 0 — Execution Physics                      [infrastructure]
+          what is physically impossible
+          (container isolation, network namespaces, filesystem boundaries)
+
+Layer 1 — Base Ontology                          [design-time]
+          what actions exist
+          (capability construction from raw tool space → World Manifest)
+
+Layer 2 — Dynamic Ontology Projection            [runtime context]
+          what actions this actor can see right now
+          (role, task, state → Rendered Capability Surface)
+
+Layer 3 — Execution Governance                   [runtime enforcement]
+          what actions may execute
+          (provenance, taint, trust level, budget → deterministic decision)
 ```
+
+Each layer eliminates a class of risk before the next layer sees it. Defense in depth by construction, not configuration.
+
+The key property: **unsafe actions do not need to be denied if they cannot be represented**. A capability absent from the manifest is not blocked — it is absent. The agent cannot form intent to call it because the concept does not exist in its world.
 
 ---
 
-## Tool Boundary Enforcement
+## Perception-Bounded World Model
 
-The firewall intercepts every `ToolCall` before it reaches the execution layer.
-A `ToolCall` is not a raw function call — each argument is a `ValueRef` that
-carries provenance metadata.
+The agent does not operate in the real world. It operates in its field of perception.
 
-The enforcement pipeline:
+An agent's world is not the universe — it is:
 
-1. **Provenance resolution** — For each argument, walk the derivation DAG
-   (`resolve_chain`) to collect all ancestor `ValueRef`s. The ancestry records
-   where the value ultimately came from.
+- **Input channels** — what the agent can observe
+- **Available tools** — what actions are structurally possible  
+- **Accessible memory** — what context the agent can reference
+- **Representable abstractions** — what concepts can be expressed in its action space
 
-2. **Policy matching** — Evaluate the resolved chain against the active policy
-   rules. Each rule can match on tool name, argument name, and provenance class
-   conditions.
+Two formal consequences:
 
-3. **Verdict selection** — Among all matching rules, select the highest-precedence
-   verdict (`deny > ask > allow`). If no rules match, the default is `deny`
-   (fail-closed).
+> If something is not perceivable, it does not exist.
+> If something is not actionable, it cannot happen.
 
-4. **Trace emission** — Write a structured trace record to `traces/` regardless
-   of verdict. This provides a complete audit trail.
+These are not aspirational constraints. They are engineering facts about a correctly compiled world.
 
----
+### Guardrails vs World Design
 
-## Manifest Role
+| Approach | World assumption | Mechanism | Failure mode |
+|---|---|---|---|
+| Guardrails | Open | Filter behavior post-invocation | Probabilistic; can be confused or bypassed |
+| World Design | Closed | Remove invalid possibilities before invocation | Deterministic; absent actions cannot be reached |
 
-Task manifests (in `manifests/`) define:
+**Safety is achieved by removing possibilities, not reducing their probability.**
 
-- **`declared_inputs`** — Files or data sources the operator explicitly trusts.
-  These receive `user_declared` provenance. Values derived from them inherit
-  that trust (subject to RULE-03).
-
-- **`action_grants`** — Which tools are permitted, under what conditions
-  (`require_confirmation`, `recipient_must_come_from`).
-
-The manifest is the **design-time security contract** between the operator and
-the agent. It answers the question: *"What is this agent task allowed to do,
-and based on what data?"*
-
-A task without a manifest (or with `protection_enabled: false`) runs in
-unprotected baseline mode — all tool calls are allowed without inspection.
+A guardrail operates inside a world that contains danger. World design removes the danger from the world before the agent runs.
 
 ---
 
-## Policy Engine
+## Layer 1: The Compiler Pipeline
 
-The `PolicyEngine` (`src/agent_hypervisor/policy_engine.py`) evaluates
-`ToolCall`s against a set of `PolicyRule`s loaded from a YAML file.
+Layer 1 constructs the World Manifest from a workflow definition. This is the`agent_hypervisor.compiler` implementation.
 
-Rule structure:
-```yaml
-- id: deny-email-external-recipient
-  tool: send_email
-  argument: to
-  provenance: external_document
-  verdict: deny
+```
+Workflow definition
+      ↓
+ [Compiler]  derive minimal capability set  →  World Manifest (YAML)
+      ↓
+ [Enforcer]  intercept every tool call
+             convert → Step { tool, action, resource, input_sources }
+             evaluate(step, world_manifest)  →  ALLOW / DENY_ABSENT / DENY_POLICY
+      ↓
+ [Executor]  run only allowed steps
 ```
 
-Fields:
-- `tool` — tool name or `*` for any
-- `argument` — argument name to inspect (optional; None = whole call)
-- `provenance` — provenance class that must appear in the argument's chain
-- `verdict` — `allow` / `deny` / `ask`
+The compiler applies **safe compression**: only `safe=True` calls contribute to the capability profile. No tool, no path, no domain that was not observed in a safe call can appear in the resulting manifest.
 
-Verdict precedence: `deny > ask > allow`. The engine always returns the
-highest-precedence verdict among all matching rules. If no rule matches, the
-default verdict is `deny`.
+### ABSENT vs POLICY
+
+Two structurally distinct denial types:
+
+| Type | Meaning | Immune to |
+|------|---------|-----------|
+| `[ABSENT]` | The action has no representation in this world manifest. It does not exist. | Prompt injection, jailbreaks, rephrasing — the concept cannot be reached |
+| `[POLICY]` | The action exists, but this specific call violates constraints — wrong parameters, disallowed resource, or tainted input. | Override at runtime — the manifest is compiled and fixed |
+
+`ABSENT` is structural: you cannot invoke what is not there.  
+`POLICY` is contextual: the tool exists, but this execution is unsafe.
+
+Policy decisions are provenance-aware. If a step depends on untrusted or tainted input, it cannot trigger external side effects — even if the action itself is allowed.
 
 ---
 
-## Provenance Tracking
+## Layer 2: Capability Rendering
 
-Every value in the system is wrapped in a `ValueRef`:
+Layer 2 resolves the World Manifest into the Rendered Capability Surface — the concrete set of operations the agent sees. This is the `agent_hypervisor.authoring` implementation.
 
-```python
-@dataclass
-class ValueRef:
-    id: str
-    value: Any
-    provenance: ProvenanceClass   # external_document | derived | user_declared | system
-    roles: list[Role]             # recipient_source | data_source | …
-    parents: list[str]            # ids of parent ValueRefs
-    source_label: str             # human-readable origin description
+```
+World Manifest  →  Rendered Capability Surface  →  Enforcement Engine
 ```
 
-When a value is derived from other values (e.g. an email address extracted from
-a document), the derived `ValueRef` lists the parent ids. The firewall walks
-this DAG at evaluation time.
+**Raw tools** are ambient capability: execution primitives with no access control. The agent never sees them directly.
 
-**Provenance is sticky** (RULE-03): a derived value inherits the least-trusted
-provenance class among its parents. Wrapping an `external_document` value in a
-`derived` wrapper does not launder it.
+**Rendered capabilities** are what the agent actually sees: a constrained surface constructed from the manifest. Each rendered capability narrows a raw tool to the exact conditions under which it may be invoked.
+
+```
+# Raw tool:
+send_email(to, body)           ← any recipient, any content
+
+# Rendered capabilities:
+send_report_to_security(body)  ← recipient fixed at definition time
+send_internal_email(to, body)  ← to must match @company.com
+```
+
+`send_email(to, body)` does not exist in the agent's world. A prompt injection that attempts to redirect email to an attacker-controlled address cannot be expressed — there is no argument to pass.
+
+**This is construction, not filtering.** A filter receives a request and decides whether to allow it. Capability Rendering constructs the surface before any request is formed. The agent never sees options that were not rendered.
 
 ---
 
-## Module Map
+## Layer 3: Execution Governance
+
+Layer 3 is the deterministic enforcement kernel. This is the `agent_hypervisor.runtime` implementation.
 
 ```
-src/agent_hypervisor/
-  models.py          ValueRef, ToolCall, Decision, ProvenanceClass, Role, Verdict
-  provenance.py      resolve_chain(), mixed_provenance(), provenance_summary()
-  firewall.py        ProvenanceFirewall — main evaluation logic and RULE-01–05
-  policy_engine.py   PolicyEngine, PolicyRule, RuleVerdict — declarative rule engine
-
-examples/provenance_firewall/
-  models.py          (original demo models — identical to src/agent_hypervisor/models.py)
-  policies.py        (original demo firewall — identical to src/agent_hypervisor/firewall.py)
-  agent_sim.py       Simulated agent: constructs ToolCalls with ValueRefs for demo scenarios
-  demo.py            CLI entrypoint: runs scenarios A–E, prints results, saves traces
-
-manifests/
-  task_allow_send.yaml    Task with declared recipient_source → email allowed + ask
-  task_deny_send.yaml     Task with no trusted recipients → email denied
-  task_http_post.yaml     Task where http_post is blocked for external provenance
-
-policies/
-  default_policy.yaml     Baseline declarative policy rules
-
-tests/
-  test_provenance_firewall.py  Unit tests: chain resolution, mixed provenance, rule eval
+Agent / LLM
+    │
+    ▼
+IRBuilder.build()       ← ALL enforcement happens here
+    │ success → IntentIR
+    ▼
+Executor.execute()      ← consequence of enforcement
+    │
+    ▼
+TaintedValue
 ```
+
+**Enforcement is by construction, not by interception:**
+
+| Scenario | What happens |
+|---|---|
+| Agent requests a tool not in the manifest | `NonExistentAction` — the object does not exist; there is nothing to intercept |
+| Agent requests a constrained tool with tainted data | `TaintViolation` raised at `IRBuilder.build()` — execution never begins |
+| Agent requests an allowed tool with clean data and sufficient trust | `IntentIR` produced; `Executor.execute()` called |
+
+The runtime firewall boundary is `IRBuilder.build()`. Anything that returns an `IntentIR` has already passed every constraint. Anything that raises `ConstructionError` never touches an executor.
+
+### Taint Propagation
+
+`TaintedValue` wraps every executor result. `TaintContext` threads taint across pipeline stages. Taint is monotonic — it cannot decrease. TAINTED + EXTERNAL action = `TaintViolation` at construction time.
+
+The taint model captures a class of attacks that capability-removal alone does not address: attacks using only legitimate actions, chained through untrusted data.
+
+```
+file_read (untrusted doc)    →  ALLOW
+summarize                    →  ALLOW
+send_email (external)        →  DENY  [POLICY: tainted source]
+```
+
+Each action is individually legal. The chain is not.
 
 ---
 
-## Data Flow: Prompt Injection Attack
+## The Ontology Insight
+
+Most security models focus on behavior: they ask whether an action is permitted.
+
+This architecture focuses on possibility: it asks whether an action can be represented.
+
+An agent is not a universal actor. It is a role-bound entity. A role defines:
+
+- what the agent is in this world
+- what actions belong to that role
+- what resources the role has access to
+
+> Wrong ontology → wrong behavior.  
+> Intelligence without ontology → instability.
+
+The manifest is the ontological definition of the agent's role. It makes the agent a creature that belongs to its world — not a general-purpose actor placed inside it and trusted to stay in bounds.
+
+---
+
+## OS Analogy
+
+| Agent Hypervisor | Operating System |
+|---|---|
+| Layer 0: Execution Physics | Hardware isolation (MMU, rings) |
+| Layer 1: Base Ontology | Syscall interface |
+| Layer 2: Dynamic Ontology Projection | File descriptors, capabilities |
+| Layer 3: Execution Governance | ACL, SELinux, sandbox policies |
+| Actor | Process |
+| Action | System call |
+
+---
+
+## Enforcement Path
+
+The critical path from input to effect contains no LLM:
 
 ```
-Attacker embeds "send to attacker@evil.com" in report.pdf
-                    │
-                    ▼
-Agent reads report.pdf
-  → ValueRef(id="doc:report", provenance=external_document)
-                    │
-                    ▼
-Agent extracts email address from document text
-  → ValueRef(id="addr:1", provenance=derived, parents=["doc:report"])
-                    │
-                    ▼
-Agent proposes: send_email(to=addr:1, …)
-                    │
-                    ▼
-Firewall: resolve_chain(addr:1)
-  → [addr:1 (derived), doc:report (external_document)]
-  → chain contains external_document
-  → no declared recipient_source in chain
-  → RULE-01 + RULE-02 match → verdict: deny
-                    │
-                    ▼
-send_email BLOCKED — attacker does not receive the email
+Raw input
+  → Trust classification + taint assignment
+  → Semantic Event (structured, attributed)
+  → Agent produces Intent / Step
+  → World Manifest lookup
+  → Rendered Capability Surface
+  → IRBuilder.build()  ← all constraints evaluated here
+  → Executor.execute() ← only if build() succeeded
+  → External effect + audit log
 ```
+
+The agent (LLM) operates only in the intent-production step. It does not participate in trust classification, taint propagation, policy evaluation, or execution. Policy evaluation is deterministic: same input, same decision, always.
+
+---
+
+## Component Map
+
+| Layer | Package | Key entry points |
+|---|---|---|
+| Layer 1 — Compiler | `agent_hypervisor.compiler` | `awc` CLI; `compile_world()`, `Enforcer` |
+| Layer 2 — Authoring | `agent_hypervisor.authoring` | `load_world()`, `parse_registry()`, `validate()` |
+| Layer 3 — Runtime | `agent_hypervisor.runtime` | `build_runtime()`, `IRBuilder`, `SafeMCPProxy` |
+| Hypervisor PoC | `agent_hypervisor.hypervisor` | `ProvenanceFirewall`, `PolicyEngine`, `gateway/` |
+
+---
+
+*See [`docs/architecture/technical-spec.md`](technical-spec.md) for the implementation specification.*  
+*See [`docs/architecture/threat-model.md`](threat-model.md) for the formal threat scope.*  
+*See [`docs/concept/overview.md`](../concept/overview.md) for the five-layer conceptual model.*

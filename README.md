@@ -86,13 +86,14 @@ This is the single canonical home for the Agent Hypervisor architecture. It cont
 
 | Document | What it covers |
 |---|---|
-| [CONCEPT.md](CONCEPT.md) | Shortest serious explainer — start here |
-| [docs/WHITEPAPER.md](docs/WHITEPAPER.md) | Full architectural argument |
-| [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) | Evaluation standard for agentic systems |
-| [FAQ.md](FAQ.md) | Answers to hard objections |
-| [THREAT_MODEL.md](THREAT_MODEL.md) | Formal threat scope |
-| [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) | vs. guardrails, sandboxes, policy engines |
-| [POSITIONING.md](POSITIONING.md) | What this repo is and is not |
+| [docs/concept/overview.md](docs/concept/overview.md) | Shortest serious explainer — start here |
+| [docs/concept/concepts.md](docs/concept/concepts.md) | Core concepts: perception, taint, ABSENT vs POLICY |
+| [docs/architecture/whitepaper.md](docs/architecture/whitepaper.md) | Full architectural argument |
+| [docs/concept/12-factor-agent.md](docs/concept/12-factor-agent.md) | Evaluation standard for agentic systems |
+| [docs/concept/faq.md](docs/concept/faq.md) | Answers to hard objections |
+| [docs/architecture/threat-model.md](docs/architecture/threat-model.md) | Formal threat scope |
+| [docs/research/vs-existing-solutions.md](docs/research/vs-existing-solutions.md) | vs. guardrails, sandboxes, policy engines |
+| [docs/concept/positioning.md](docs/concept/positioning.md) | What this repo is and is not |
 
 ### Implementation
 
@@ -101,7 +102,7 @@ This is the single canonical home for the Agent Hypervisor architecture. It cont
 | **Enforcement kernel** | `src/runtime/` | Deterministic `IRBuilder`, taint propagation, `SafeMCPProxy` |
 | **World Manifest compiler** | `src/compiler/` | Compile workflow → World Manifest; `awc` CLI |
 | **Capability authoring layer** | `src/authoring/` | Capability DSL, policy presets, manifest validators |
-| **Hypervisor PoC** | `src/hypervisor.py` | End-to-end integration of all layers |
+| **Hypervisor PoC** | `src/agent_hypervisor/hypervisor/` | Gateway, policy engine, provenance firewall |
 
 ### Examples and demos
 
@@ -142,7 +143,7 @@ Three internal components implement the pipeline. They are not separate products
 | `src/compiler/` | `agent-world-compiler` | World Manifest compiler + `awc` CLI |
 | `src/authoring/` | `safe-agent-runtime-pro` | Capability DSL, policy presets, manifest authoring |
 
-Experimental and historical material lives in `lab/compiler-poc/` (the original proof-of-concept compiler, preserved but not maintained).
+Experimental and historical material lives in `lab/` (the original proof-of-concept notebook, preserved but not maintained). Superseded source code is in `archive/experimental-poc/`.
 
 ---
 
@@ -163,21 +164,15 @@ Development plan: [ROADMAP.md](ROADMAP.md)
 ## How to engage
 
 **Researchers and architects:**  
-Start with [CONCEPT.md](CONCEPT.md), then [docs/WHITEPAPER.md](docs/WHITEPAPER.md). The [THREAT_MODEL.md](THREAT_MODEL.md) defines formal scope.
+Start with [docs/concept/overview.md](docs/concept/overview.md), then [docs/architecture/whitepaper.md](docs/architecture/whitepaper.md). The [docs/architecture/threat-model.md](docs/architecture/threat-model.md) defines formal scope.
 
 **Writers and presenters:**  
 The article series in [docs/pub/](docs/pub/) contains publication-ready drafts. Presentation decks in [demos/](demos/) are ready to fork.
 
 **System evaluators:**  
-Use [12-FACTOR-AGENT.md](12-FACTOR-AGENT.md) as a checklist. [docs/VS_EXISTING_SOLUTIONS.md](docs/VS_EXISTING_SOLUTIONS.md) covers alternatives.
+Use [docs/concept/12-factor-agent.md](docs/concept/12-factor-agent.md) as a checklist. [docs/research/vs-existing-solutions.md](docs/research/vs-existing-solutions.md) covers alternatives.
 
 **Builders:**  
-```bash
-pip install fastapi uvicorn pyyaml
-python scripts/run_showcase_demo.py
-```
-
-Or run the compiler scenarios:
 ```bash
 pip install -e .
 awc run --scenario safe
@@ -185,7 +180,12 @@ awc run --scenario unsafe --compare
 awc run --scenario zombie
 ```
 
-See [docs/HELLO_WORLD.md](docs/HELLO_WORLD.md) for a guided walkthrough.  
+Or run the Layer 3 governance demo:
+```bash
+python examples/runtime/provenance_firewall/demo.py
+```
+
+See [docs/architecture/hello-world.md](docs/architecture/hello-world.md) for a guided walkthrough.  
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines — conceptual feedback is valued most.
 
 ---
