@@ -2,6 +2,9 @@ import os
 import sys
 from pathlib import Path
 from anthropic import Anthropic
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv(usecwd=True))
 
 from runtime.world_switcher import WorldSwitcher
 from runtime.audit import RuntimeAudit
@@ -64,7 +67,7 @@ def main():
         
     client = Anthropic()
     # Use Haiku for speed, but Sonnet is fine.
-    model = "claude-3-5-sonnet-20241022" 
+    model = "claude-haiku-4-5-20251001"
 
     base_dir = Path(__file__).parent
     
