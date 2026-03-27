@@ -1,0 +1,51 @@
+name: Delete claude/* Branches
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  delete-branches:
+    name: Delete claude/* branches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete all branches starting with claude/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching all branches starting with 'claude/'..."
+          branches=$(gh api repos/${{ github.repository }}/branches \
+            --paginate \
+            --jq '.[].name' \
+            | grep '^claude/')
+
+          if [ -z "$branches" ]; then
+            echo "No branches found starting with 'claude/'."
+            exit 0
+          fi
+
+          echo "Found the following branches to delete:"
+          echo "$branches"
+          echo ""
+
+          deleted=0
+          failed=0
+
+          while IFS= read -r branch; do
+            encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$branch', safe=''))")
+            echo "Deleting: $branch"
+            if gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$encoded" 2>&1; then
+              echo "  ✓ Deleted $branch"
+              deleted=$((deleted + 1))
+            else
+              echo "  ✗ Failed to delete $branch"
+              failed=$((failed + 1))
+            fi
+          done <<< "$branches"
+
+          echo ""
+          echo "Summary: $deleted deleted, $failed failed."
+          [ "$failed" -eq 0 ] || exit 1
