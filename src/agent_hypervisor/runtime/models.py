@@ -30,6 +30,28 @@ class ProvenanceVerdict(Enum):
     ask   = "ask"
 
 
+class CalibrationPolicy(Enum):
+    """
+    Compiled expansion policy for a single action.
+
+    Controls whether a future calibration engine may consider capability
+    expansion for this action. The compiled value is the authoritative
+    ruling — future calibration code must not override it.
+
+    Values:
+        deny  — expansion is prohibited regardless of the request
+        ask   — expansion requires explicit human review
+        allow — expansion may be considered (subject to other constraints)
+
+    Fail-closed: if no CalibrationPolicy is compiled for an action
+    (i.e. calibration_constraint_for() returns None), calibration code
+    must treat the absence as deny.
+    """
+    deny  = "deny"
+    ask   = "ask"
+    allow = "allow"
+
+
 class ArgumentProvenance(Enum):
     """
     Provenance class of a value argument, ordered from least to most trusted.

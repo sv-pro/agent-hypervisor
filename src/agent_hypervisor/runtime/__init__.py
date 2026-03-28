@@ -3,6 +3,7 @@ from .models import (
     ActionType,
     ApprovalRequired,
     ArgumentProvenance,
+    CalibrationPolicy,
     ConstructionError,
     ConstraintViolation,
     NonExistentAction,
@@ -14,6 +15,7 @@ from .models import (
 )
 from .taint import TaintContext, TaintedValue
 from .compile import (
+    CompiledCalibrationConstraint,
     CompiledPolicy,
     CompiledProvenanceRule,
     CompiledSimulationBinding,
@@ -28,6 +30,7 @@ __all__ = [
     "build_runtime",
     "build_simulation_runtime",
     # Policy compilation
+    "CompiledCalibrationConstraint",
     "CompiledPolicy",
     "CompiledProvenanceRule",
     "CompiledSimulationBinding",
@@ -38,6 +41,7 @@ __all__ = [
     # Enumerations
     "ActionType",
     "ArgumentProvenance",
+    "CalibrationPolicy",
     "ProvenanceVerdict",
     "TaintState",
     "TrustLevel",

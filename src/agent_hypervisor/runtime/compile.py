@@ -50,7 +50,7 @@ from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 import yaml
 
-from .models import ActionType, ArgumentProvenance, ProvenanceVerdict, TaintState, TrustLevel
+from .models import ActionType, ArgumentProvenance, CalibrationPolicy, ProvenanceVerdict, TaintState, TrustLevel
 
 
 # ── ManifestProvenance ────────────────────────────────────────────────────────
@@ -247,6 +247,56 @@ class CompiledSimulationBinding:
         return f"CompiledSimulationBinding({self.action_name!r}, returns={dict(self.returns)!r})"
 
 
+# ── CompiledCalibrationConstraint ────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompiledCalibrationConstraint:
+    """
+    Compiled calibration constraints for one action.
+
+    Produced at compile time from the manifest's calibration_constraints section.
+    Future calibration code reads these fields to decide whether to allow, deny,
+    or escalate a capability expansion request — without re-parsing YAML or relying
+    on scattered assumptions.
+
+    Fields:
+        action_name:
+            The action this constraint governs. Matches the key in
+            CompiledPolicy.calibration_constraints.
+
+        expansion_policy:
+            CalibrationPolicy controlling whether capability expansion may
+            be considered for this action. Fail-closed: if no constraint is
+            compiled for an action (calibration_constraint_for() returns None),
+            future calibration code must treat the absence as deny.
+
+        surrogate_preferred:
+            True if a simulation surrogate is preferred over real capability
+            expansion. When True, calibration must exhaust surrogate options
+            before proposing a wider capability surface.
+
+        requires_direct_need:
+            True if derived-only need is insufficient to justify capability
+            expansion. An expansion request that can only demonstrate derived
+            need (e.g. a downstream inference chain) must be rejected when
+            this flag is set — direct need must be shown.
+
+        adversarial_provenance_stop:
+            Frozenset of ArgumentProvenance classes that unconditionally block
+            capability expansion requests for this action. Any expansion request
+            whose argument provenance chain contains one of these classes is
+            hard-stopped — no escalation, no ask, no further deliberation.
+
+    Absent calibration_constraints section → empty map → constraint_for() returns
+    None → calibration code must default to deny. Do not interpret None as allow.
+    """
+    action_name: str
+    expansion_policy: CalibrationPolicy
+    surrogate_preferred: bool
+    requires_direct_need: bool
+    adversarial_provenance_stop: FrozenSet[ArgumentProvenance]
+
+
 # ── CompiledPolicy ────────────────────────────────────────────────────────────
 
 class CompiledPolicy:
@@ -272,6 +322,7 @@ class CompiledPolicy:
         "_trust_map",
         "_provenance_rules",
         "_simulation_bindings",
+        "_calibration_constraints",
     )
 
     def __init__(
@@ -283,6 +334,7 @@ class CompiledPolicy:
         trust_map: Dict[str, TrustLevel],
         provenance_rules: Tuple["CompiledProvenanceRule", ...] = (),
         simulation_bindings: Dict[str, "CompiledSimulationBinding"] = {},
+        calibration_constraints: Dict[str, "CompiledCalibrationConstraint"] = {},
     ) -> None:
         object.__setattr__(self, "_provenance", provenance)
         object.__setattr__(self, "_action_space", frozenset(actions.keys()))
@@ -292,6 +344,7 @@ class CompiledPolicy:
         object.__setattr__(self, "_trust_map", MappingProxyType(trust_map))
         object.__setattr__(self, "_provenance_rules", provenance_rules)
         object.__setattr__(self, "_simulation_bindings", MappingProxyType(simulation_bindings))
+        object.__setattr__(self, "_calibration_constraints", MappingProxyType(calibration_constraints))
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CompiledPolicy is immutable after construction")
@@ -431,6 +484,35 @@ class CompiledPolicy:
         """
         return self._simulation_bindings.get(action_name)
 
+    # ── Calibration constraints ───────────────────────────────────────────────
+
+    @property
+    def calibration_constraints(self) -> MappingProxyType:
+        """
+        Read-only map of action name → CompiledCalibrationConstraint.
+
+        Present on every CompiledPolicy. Empty when the manifest has no
+        calibration_constraints section. Future calibration code reads this
+        map to determine expansion policy, surrogate preference, direct-need
+        requirements, and adversarial provenance hard-stops — without guessing.
+
+        Absent entry (calibration_constraint_for() returning None) must be
+        treated as deny by calibration code. Do not interpret absence as allow.
+        """
+        return self._calibration_constraints
+
+    def calibration_constraint_for(
+        self, action_name: str
+    ) -> "Optional[CompiledCalibrationConstraint]":
+        """
+        Return the CompiledCalibrationConstraint for action_name, or None.
+
+        None means no calibration constraint was compiled for this action.
+        Future calibration code must treat None as CalibrationPolicy.deny —
+        fail-closed: unknown expansion constraints are always rejected.
+        """
+        return self._calibration_constraints.get(action_name)
+
     def __repr__(self) -> str:
         return (
             f"CompiledPolicy("
@@ -519,6 +601,30 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
         for i, r in enumerate(raw_provenance_rules)
     )
 
+    # ── Compile calibration constraints → MappingProxyType[str, CompiledCalibrationConstraint] ──
+    # Source: manifest calibration_constraints section.
+    # Absent section → empty dict → calibration_constraint_for() returns None for all names.
+    # Future calibration code must interpret None as CalibrationPolicy.deny (fail-closed).
+    # Within a declared entry, individual fields also default fail-closed:
+    #   expansion_policy     : "deny"  (most restrictive)
+    #   surrogate_preferred  : False   (no assumed preference — must be explicit)
+    #   requires_direct_need : True    (derived-only need insufficient by default)
+    #   adversarial_provenance_stop: [] (empty — policy deny already blocks; add classes explicitly)
+    raw_calibration: Dict[str, Any] = raw.get("calibration_constraints", {}) or {}
+    calibration_constraints: Dict[str, CompiledCalibrationConstraint] = {
+        name: CompiledCalibrationConstraint(
+            action_name=name,
+            expansion_policy=CalibrationPolicy(cfg.get("expansion_policy", "deny")),
+            surrogate_preferred=bool(cfg.get("surrogate_preferred", False)),
+            requires_direct_need=bool(cfg.get("requires_direct_need", True)),
+            adversarial_provenance_stop=frozenset(
+                ArgumentProvenance(p)
+                for p in (cfg.get("adversarial_provenance_stop") or [])
+            ),
+        )
+        for name, cfg in raw_calibration.items()
+    }
+
     # ── Compile simulation bindings → MappingProxyType[str, CompiledSimulationBinding] ──
     # Source: manifest simulation_bindings section.
     # Absent section → empty dict → simulation_binding_for() returns None for all names.
@@ -540,4 +646,5 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
         trust_map=trust_map,
         provenance_rules=provenance_rules,
         simulation_bindings=sim_bindings,
+        calibration_constraints=calibration_constraints,
     )
