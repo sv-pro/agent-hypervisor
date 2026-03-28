@@ -87,8 +87,9 @@ request.plan_type == "program"
     → ProgramExecutor.execute(plan, context)
 ```
 
-Phase 1: `ProgramExecutor` raises `NotImplementedError`. The scaffold exists;
-the sandbox does not.
+Phase 1: `ProgramExecutor` runs the program inside `SandboxRuntime` (AST-validated
+restricted exec, daemon-thread timeout). The sandbox is intentionally narrow —
+see §6 for what remains deferred.
 
 ---
 
@@ -106,8 +107,10 @@ context (compiled policy, tool registry) into an `ExecutionPlan`. The compiler
 runs between policy enforcement and execution. It sees cleared, post-enforcement
 state only.
 
-Not invoked in Phase 1. The protocol is defined to reserve the interface and
-make the integration point explicit.
+Phase 1 ships `DeterministicTaskCompiler` which implements this protocol for
+four named workflows (count_lines, count_words, normalize_text, word_frequency).
+It is invoked from `execution_router._dispatch_execution()` when `plan_type=="program"`
+and a `workflow` name is provided.
 
 ### `Executor`
 
@@ -162,22 +165,21 @@ mirrors the design-time HITL principle already applied to World Manifests.
 
 ## 6. What Is Intentionally NOT Implemented
 
-The following are explicit non-goals for Phase 1. They are listed here so that
-reviewers can confirm the implementation is intentionally minimal.
+The following are non-goals for Phase 1 and remain deferred.
 
 | Not implemented | Reason deferred |
 |-----------------|----------------|
-| Real sandbox execution | Requires container / process isolation design (separate ADR) |
-| TaskCompiler invocation | No runtime program generation yet — interface only |
+| Process-level isolation | Requires container/seccomp design (separate ADR) |
+| Memory limits | Requires OS-level resource limits (cgroups/rlimit) |
 | ProgramRegistry persistence | No storage backend designed yet |
 | Program Ladder state machine | Requires review workflow not yet specified |
 | LLM-in-the-loop at runtime | Explicitly prohibited — no LLM on the enforcement path |
-| ProgramExecutionPlan with real source | No generator produces programs yet |
+| Multiple language runtimes | Phase 1 is Python-only |
 | ExecutionPlan in the runtime layer | Runtime's `Executor` is a subprocess boundary; plan dispatch lives in the gateway |
 
-The program layer introduces **scaffolding and extension points only**. All new
-code is isolated in `src/agent_hypervisor/program_layer/` and a single
-`_dispatch_execution()` helper in `execution_router.py`. Nothing else changed.
+Phase 1 delivers a real, working sandbox. All new code is isolated in
+`src/agent_hypervisor/program_layer/`. The gateway has minimal, opt-in changes.
+See `docs/program_layer_phase1.md` for the full implementation reference.
 
 ---
 
@@ -188,14 +190,19 @@ code is isolated in `src/agent_hypervisor/program_layer/` and a single
 | `src/agent_hypervisor/program_layer/__init__.py` | Public surface of the module |
 | `src/agent_hypervisor/program_layer/execution_plan.py` | `ExecutionPlan`, `DirectExecutionPlan`, `ProgramExecutionPlan` |
 | `src/agent_hypervisor/program_layer/interfaces.py` | `TaskCompiler`, `Executor`, `ProgramRegistry` protocols |
-| `src/agent_hypervisor/program_layer/program_executor.py` | `ProgramExecutor` stub |
+| `src/agent_hypervisor/program_layer/program_executor.py` | `ProgramExecutor` (Phase 1: real sandbox execution) |
+| `src/agent_hypervisor/program_layer/sandbox_runtime.py` | `SandboxRuntime` — AST-validated restricted exec() with daemon-thread timeout |
+| `src/agent_hypervisor/program_layer/task_compiler.py` | `DeterministicTaskCompiler` — deterministic workflow → plan compiler |
+| `tests/program_layer/test_program_layer.py` | 63 tests covering all Phase 1 requirements |
+| `examples/program_layer/dual_execution_demo.py` | Runnable two-mode demo |
 | `docs/architecture/program_layer_audit.md` | Pre-extension architectural audit |
 | `docs/architecture/program_layer.md` | This document |
+| `docs/program_layer_phase1.md` | Phase 1 implementation reference |
 | `docs/adr/ADR-005-program-layer-extension.md` | Architecture Decision Record |
 
 ## 8. Files Modified
 
 | File | Change |
 |------|--------|
-| `hypervisor/gateway/execution_router.py` | Added `plan_type` field to `ToolRequest`; added `_dispatch_execution()` helper; replaced direct adapter call with `_dispatch_execution()` call |
+| `hypervisor/gateway/execution_router.py` | Added `workflow`, `program_source` to `ToolRequest`; implemented `_dispatch_program()` with real compiler + executor dispatch |
 | `ROADMAP.md` | Added Program Layer Evolution section |
