@@ -84,20 +84,28 @@ class ToolRequest(BaseModel):
     """
     Incoming tool execution request from an agent or client.
 
-    tool:       name of the tool to execute (must be registered)
-    arguments:  map of argument name → ArgSpec
-    call_id:    optional client-supplied identifier for correlation
-    provenance: optional request-level metadata (session_id, task, etc.)
-    plan_type:  execution strategy — "direct" (default) or "program".
-                "direct" preserves the existing adapter call, unchanged.
-                "program" routes to ProgramExecutor (stub in Phase 1).
-                If omitted, behaviour is identical to before this field existed.
+    tool:           name of the tool to execute (must be registered)
+    arguments:      map of argument name → ArgSpec
+    call_id:        optional client-supplied identifier for correlation
+    provenance:     optional request-level metadata (session_id, task, etc.)
+    plan_type:      execution strategy — "direct" (default) or "program".
+                    "direct" preserves the existing adapter call, unchanged.
+                    "program" routes to ProgramExecutor (Phase 1 sandbox).
+                    If omitted, behaviour is identical to before this field existed.
+    workflow:       named workflow for the DeterministicTaskCompiler.
+                    Only consulted when plan_type == "program" and program_source
+                    is absent.  Supported: count_lines, count_words,
+                    normalize_text, word_frequency.
+    program_source: raw Python program text.  Takes precedence over workflow
+                    when both are provided and plan_type == "program".
     """
     tool: str
     arguments: dict[str, ArgSpec] = {}
     call_id: str = ""
     provenance: dict[str, Any] = {}
-    plan_type: str = "direct"  # Program Layer extension point (Phase 1: stub)
+    plan_type: str = "direct"  # Program Layer extension point
+    workflow: Optional[str] = None
+    program_source: Optional[str] = None
 
 
 class GatewayResponse(BaseModel):
@@ -495,7 +503,7 @@ class ExecutionRouter:
         result_summary = None
         if final_verdict == "allow":
             raw_args = {k: v.value for k, v in args_map.items()}
-            result = self._dispatch_execution(request.plan_type, tool_def, raw_args)
+            result = self._dispatch_execution(request.plan_type, tool_def, raw_args, request)
             result_summary = str(result)[:200] if result else None
 
         # Step 6.5: Pre-generate approval_id for ask verdicts
@@ -684,6 +692,7 @@ class ExecutionRouter:
         plan_type: str,
         tool_def: Any,
         raw_args: dict,
+        request: "ToolRequest | None" = None,
     ) -> Any:
         """
         Route execution based on plan_type.
@@ -694,8 +703,9 @@ class ExecutionRouter:
             This path is the only one exercised in normal operation.
 
         "program":
-            Delegates to ProgramExecutor (Phase 1 stub).
-            Currently raises NotImplementedError — real sandbox deferred.
+            Builds a ProgramExecutionPlan (via DeterministicTaskCompiler or
+            directly from request.program_source) and delegates to
+            ProgramExecutor.  Returns a structured result dict.
             All policy enforcement has already run before this is called;
             the World Kernel's verdict is final and is not re-evaluated here.
 
@@ -704,17 +714,77 @@ class ExecutionRouter:
         may not understand.
         """
         if plan_type == "program":
-            from ...program_layer.execution_plan import ProgramExecutionPlan
-            from ...program_layer.program_executor import ProgramExecutor
-
-            plan = ProgramExecutionPlan(
-                plan_id=f"gateway-{id(raw_args):x}",
-                program_source=None,
-            )
-            return ProgramExecutor().execute(plan, context={"args": raw_args})
+            return self._dispatch_program(raw_args, request)
 
         # Default: direct execution via registered adapter (unchanged behaviour)
         return tool_def.adapter(raw_args)
+
+    def _dispatch_program(
+        self,
+        raw_args: dict,
+        request: "ToolRequest | None",
+    ) -> Any:
+        """
+        Build and execute a ProgramExecutionPlan.
+
+        Priority:
+            1. request.program_source — use as-is if provided
+            2. request.workflow       — compile via DeterministicTaskCompiler
+            3. Neither provided       — return structured error (fail closed)
+        """
+        from ...program_layer.execution_plan import ProgramExecutionPlan
+        from ...program_layer.program_executor import ProgramExecutor
+        from ...program_layer.task_compiler import DeterministicTaskCompiler
+
+        program_source = request.program_source if request else None
+        workflow = request.workflow if request else None
+
+        if program_source:
+            # Caller supplied raw program text — use it directly.
+            # The sandbox will validate it before execution.
+            import uuid as _uuid
+            plan = ProgramExecutionPlan(
+                plan_id=f"gateway-raw-{_uuid.uuid4().hex[:8]}",
+                program_source=program_source,
+                allowed_bindings=("read_input", "emit_result", "json_dumps", "json_loads"),
+                timeout_seconds=5.0,
+                metadata={"source": "gateway_raw"},
+            )
+        elif workflow:
+            # Compile a named workflow via the deterministic compiler.
+            compiler = DeterministicTaskCompiler()
+            intent = {"workflow": workflow}
+            compiled = compiler.compile(intent)
+            if compiled.plan_type != "program":
+                # Compiler fell back to direct — workflow is not supported.
+                return {
+                    "ok": False,
+                    "error": f"workflow {workflow!r} is not supported by the task compiler",
+                    "error_type": "validation",
+                    "execution_mode": "program",
+                }
+            plan = compiled  # type: ignore[assignment]
+        else:
+            return {
+                "ok": False,
+                "error": (
+                    "plan_type='program' requires either program_source or workflow; "
+                    "neither was provided"
+                ),
+                "error_type": "validation",
+                "execution_mode": "program",
+            }
+
+        # Determine input: prefer a string arg over the full args dict
+        input_value = None
+        for v in raw_args.values():
+            if isinstance(v, str):
+                input_value = v
+                break
+
+        return ProgramExecutor().execute(
+            plan, context={"input": input_value, "args": raw_args}
+        )
 
     def _build_value_refs(
         self,

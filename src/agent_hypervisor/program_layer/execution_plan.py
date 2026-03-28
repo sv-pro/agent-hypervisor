@@ -10,7 +10,7 @@ Three concrete types:
 
     ExecutionPlan         — abstract base
     DirectExecutionPlan   — existing behavior: delegate to tool adapter
-    ProgramExecutionPlan  — future: execute a structured program in a sandbox
+    ProgramExecutionPlan  — Phase 1: execute a structured program in a sandbox
 
 Relationship to the rest of the system:
 
@@ -22,13 +22,13 @@ Relationship to the rest of the system:
     ExecutionPlan dispatch   ← this module's abstraction lives here
          │
          ├── "direct"  → tool_def.adapter(raw_args)   (current behavior)
-         └── "program" → ProgramExecutor.execute(plan) (future sandbox)
+         └── "program" → ProgramExecutor.execute(plan) (Phase 1 sandbox)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 
 @dataclass(frozen=True)
@@ -68,20 +68,35 @@ class DirectExecutionPlan(ExecutionPlan):
 @dataclass(frozen=True)
 class ProgramExecutionPlan(ExecutionPlan):
     """
-    Execution plan backed by a structured program.
+    Execution plan backed by a structured program run inside a sandbox.
 
-    Future use: the program_source (or a program_id that references a
-    registered program) drives execution inside a sandboxed environment
-    rather than delegating to a single tool adapter.
+    The program is executed in a restricted environment that exposes only
+    the bindings listed in ``allowed_bindings``.  All policy enforcement is
+    complete before this plan is ever constructed; the plan carries only the
+    execution strategy, not policy state.
 
     Fields:
-        plan_id        — unique identifier for this plan instance
-        program_source — the program text (stub: may be None in Phase 1)
-        program_id     — optional id of a registered/reviewed program
+        plan_id          — unique identifier for this plan instance
+        program_source   — the program text to execute in the sandbox
+        program_id       — optional id of a registered/reviewed program
+        language         — execution language (Phase 1: "python" only)
+        allowed_bindings — names of bindings the program may access;
+                           anything not listed here is not injected
+        timeout_seconds  — hard wall-clock limit; SandboxTimeoutError on breach
+        metadata         — optional key/value provenance or compiler annotations
+                           (not part of hash/equality — informational only)
     """
 
     program_source: Optional[str] = field(default=None)
     program_id: Optional[str] = field(default=None)
+    language: str = field(default="python")
+    allowed_bindings: tuple[str, ...] = field(default_factory=tuple)
+    timeout_seconds: float = field(default=5.0)
+    # metadata is excluded from hash/equality to keep the frozen dataclass
+    # hashable while allowing informational annotations to vary.
+    metadata: dict[str, Any] = field(
+        default_factory=dict, hash=False, compare=False
+    )
 
     @property
     def plan_type(self) -> Literal["program"]:
