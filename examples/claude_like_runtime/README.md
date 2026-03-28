@@ -162,6 +162,101 @@ No code changes required.
 
 ---
 
+## Compiling World Manifests
+
+The demo's world manifests (`world/*.yaml`) are hand-authored. In production,
+manifests are compiled from agent execution traces using `awc` — the
+agent-world-compiler included in this repo.
+
+### Demo manifest format (this example)
+
+The demo uses a minimal format understood by `runtime/world_loader.py`:
+
+```yaml
+name: my_world
+mode: curated          # optional: "curated" serves sandboxed responses; omit for real tools
+description: >
+  What this world represents.
+tools:
+  - read_file
+  - write_file
+  - git_commit
+  - git_push
+```
+
+`tools` is the only field that affects behavior — it is the complete list of
+tools the agent can see and call. Everything not listed does not exist.
+
+### Compiling a manifest from a trace with `awc`
+
+`awc` derives a least-privilege manifest by observing what tools an agent
+actually used in a prior run.
+
+```bash
+# Install
+pip install -e ".[dev]"
+
+# 1. Record a trace — a JSON log of tool calls from one agent run
+#    Format: {"workflow_id": "my-workflow", "calls": [...]}
+#    Each call: {"tool": "read_file", "params": {...}, "safe": true}
+
+# 2. Compile the trace into a manifest
+awc compile my_trace.json -o my_world_manifest.yaml
+
+# 3. Inspect what was derived
+awc profile my_trace.json
+
+# 4. (Optional) Bootstrap a skeleton manifest by hand
+awc init my-workflow -o skeleton.yaml
+```
+
+### Compiled manifest format (`awc` output)
+
+The compiler emits a richer format with per-tool constraints:
+
+```yaml
+workflow_id: my-workflow
+version: "1.0"
+capabilities:
+  - tool: read_file
+    constraints:
+      paths:
+        - "docs/**"
+        - "src/**"
+  - tool: web_search
+    constraints:
+      domains:
+        - docs.python.org
+  - tool: write_file
+    constraints: {}   # unrestricted within this workflow
+metadata:
+  description: Derived from observed trace
+```
+
+Constraints restrict *how* a tool may be used, not just whether it exists.
+A `read_file` constrained to `docs/**` cannot read `/etc/passwd` — the
+constraint is part of the rendered capability, not a runtime check.
+
+### Running the bundled compiler demo
+
+```bash
+# End-to-end: compile two fixture traces and show rendered surfaces
+awc demo
+
+# Evaluate a safe workflow against a compiled manifest
+awc run --scenario safe
+
+# Show what gets blocked in an unsafe workflow
+awc run --scenario unsafe
+
+# Show the contrast: raw tool surface vs compiled boundary
+awc run --scenario unsafe --compare
+```
+
+Fixture traces are in `src/agent_hypervisor/compiler/fixtures/`.
+
+---
+
 ## Relation to Agent Hypervisor
 
 This demo is a minimal, illustrative version of the capability rendering that
