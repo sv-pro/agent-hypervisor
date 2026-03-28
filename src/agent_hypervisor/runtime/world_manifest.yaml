@@ -188,6 +188,78 @@ calibration_constraints:
     requires_direct_need: true
     adversarial_provenance_stop: [external_document, derived]
 
+# ── Economic constraints ──────────────────────────────────────────────────────
+# Compiled into CompiledEconomicPolicy at startup.
+# NOT accessed at runtime — the compiled artifact is the enforcement surface.
+#
+# economic.budgets:
+#   Hard spending limits. Enforcement is pre-execution: cost is estimated
+#   before any tool call is made. If the estimate exceeds the limit the
+#   IRBuilder raises BudgetExceeded (a ConstructionError subclass).
+#   per_request  — limit per single intent evaluation, in USD
+#   per_session  — cumulative limit across the full session, in USD
+#
+# economic.model_pricing:
+#   Static pricing table keyed by model name.
+#   Compiled into PricingRegistry at startup; never re-read at runtime.
+#   input_per_1k  — USD per 1 000 input tokens
+#   output_per_1k — USD per 1 000 output tokens
+#
+# economic.uncertainty_multiplier:
+#   Applied to every estimate. Default 1.2 (conservative upper bound).
+#   Accounts for tokenizer imprecision and output variance.
+#
+# economic.policies:
+#   Ordered list of condition-based budget overrides.
+#   Evaluated in declaration order; first match wins.
+#   Conditions may reference: provenance class, trust_level, task type.
+#   action: allow | deny | replan
+#   budget_override overrides the global per_request / per_session limit
+#   for this condition only.
+
+economic:
+  budgets:
+    per_request: 0.05   # USD — hard ceiling per single intent evaluation
+    per_session: 1.00   # USD — cumulative ceiling for the full agent session
+
+  model_pricing:
+    # Pricing as of manifest authoring date. Update when rates change.
+    # These are compiled into a frozen registry — update requires recompile.
+    claude-haiku-4-5:
+      input_per_1k:  0.00025
+      output_per_1k: 0.00125
+
+    claude-sonnet-4-6:
+      input_per_1k:  0.003
+      output_per_1k: 0.015
+
+    claude-opus-4-6:
+      input_per_1k:  0.015
+      output_per_1k: 0.075
+
+  # Uncertainty multiplier applied to all estimates.
+  # Prefer a value ≥ 1.0. Values < 1.0 are rejected at compile time.
+  uncertainty_multiplier: 1.2
+
+  # Condition-based budget policies (evaluated before global limits).
+  # First matching policy wins. If no policy matches, global budgets apply.
+  policies:
+    # External-document provenance → strict budget (adversarial cost amplification risk)
+    - id: strict-untrusted-budget
+      condition:
+        provenance: external_document
+      budget_override:
+        per_request: 0.01
+      action: deny
+
+    # Trusted-channel origin → higher budget
+    - id: trusted-workflow-budget
+      condition:
+        trust_level: trusted
+      budget_override:
+        per_request: 0.10
+      action: allow
+
 # ── Simulation bindings ───────────────────────────────────────────────────────
 # Compiled into MappingProxyType[str, CompiledSimulationBinding] at startup.
 # Used ONLY by SimulationExecutor (build_simulation_runtime()).

@@ -49,9 +49,10 @@ class Role(str, Enum):
 
 
 class Verdict(str, Enum):
-    allow = "allow"
-    deny  = "deny"
-    ask   = "ask"
+    allow  = "allow"
+    deny   = "deny"
+    ask    = "ask"
+    replan = "replan"   # budget exceeded; a cheaper execution path may exist
 
 
 @dataclass
