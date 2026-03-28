@@ -138,12 +138,15 @@ class IRBuilder:
         """
         policy = self._policy
 
-        # ── 1. Ontological check ───────────────────────────────────────────────
+        # ── 1. Existence check against compiled action space ──────────────────
+        # policy.action_space is the closed set: these and only these actions
+        # exist in this compiled world. Absent name = impossible, not denied.
         action = policy.get_action(action_name)
         if action is None:
             raise NonExistentAction(
-                f"Action {action_name!r} does not exist in the compiled policy — "
-                f"undefined actions are impossible, not denied"
+                f"Action {action_name!r} is not in the compiled action space "
+                f"{sorted(policy.action_space)!r} — "
+                f"absent actions are impossible in this world, not merely denied"
             )
 
         # ── 2. Capability check (O(1) frozenset lookup) ────────────────────────

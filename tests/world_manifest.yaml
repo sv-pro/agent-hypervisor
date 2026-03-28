@@ -1,0 +1,131 @@
+# Test fixture manifest — mirrors src/agent_hypervisor/runtime/world_manifest.yaml.
+#
+# Used by tests/runtime/* tests as their MANIFEST path.
+# Action set must agree exactly with worker._REGISTRY.
+
+metadata:
+  workflow_id: agent-hypervisor-test
+
+actions:
+  read_data:
+    type: internal
+
+  summarize:
+    type: internal
+
+  send_email:
+    type: external
+
+  download_report:
+    type: internal
+    approval_required: true
+
+  post_webhook:
+    type: external
+
+trust:
+  user: trusted
+  system: trusted
+  external: untrusted
+
+capabilities:
+  trusted:   [internal, external]
+  untrusted: [internal]
+
+taint_rules:
+  - taint: tainted
+    action_type: external
+    reason: "Tainted data cannot flow into external actions — IR construction blocked"
+
+provenance_rules:
+
+  - id: allow-read-data
+    tool: read_data
+    verdict: allow
+
+  - id: allow-summarize
+    tool: summarize
+    verdict: allow
+
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  - id: ask-email-declared-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask
+
+  - id: deny-webhook-external-body
+    tool: post_webhook
+    argument: body
+    provenance: external_document
+    verdict: deny
+
+  - id: ask-webhook-clean
+    tool: post_webhook
+    verdict: ask
+
+  - id: ask-download-report
+    tool: download_report
+    verdict: ask
+
+calibration_constraints:
+
+  read_data:
+    expansion_policy: deny
+    surrogate_preferred: true
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document]
+
+  summarize:
+    expansion_policy: deny
+    surrogate_preferred: true
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document]
+
+  send_email:
+    expansion_policy: ask
+    surrogate_preferred: false
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document, derived]
+
+  download_report:
+    expansion_policy: ask
+    surrogate_preferred: true
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document]
+
+  post_webhook:
+    expansion_policy: ask
+    surrogate_preferred: false
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document, derived]
+
+simulation_bindings:
+  read_data:
+    returns:
+      data: "simulated-result"
+      rows: 42
+
+  summarize:
+    returns:
+      summary: "simulated summary"
+
+  send_email:
+    returns:
+      sent: true
+      message_id: "sim-001"
+
+  download_report:
+    returns:
+      report: "simulated report content"
+      pages: 10
+
+  post_webhook:
+    returns:
+      status: 200
+      ok: true

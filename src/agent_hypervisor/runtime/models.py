@@ -16,6 +16,60 @@ Design notes:
 from enum import Enum
 
 
+class ProvenanceVerdict(Enum):
+    """
+    The verdict produced by evaluating compiled provenance rules.
+
+    Verdict precedence (highest wins when multiple rules match):
+        deny > ask > allow
+
+    Fail-closed default: if no rule matches, the runtime returns deny.
+    """
+    allow = "allow"
+    deny  = "deny"
+    ask   = "ask"
+
+
+class CalibrationPolicy(Enum):
+    """
+    Compiled expansion policy for a single action.
+
+    Controls whether a future calibration engine may consider capability
+    expansion for this action. The compiled value is the authoritative
+    ruling — future calibration code must not override it.
+
+    Values:
+        deny  — expansion is prohibited regardless of the request
+        ask   — expansion requires explicit human review
+        allow — expansion may be considered (subject to other constraints)
+
+    Fail-closed: if no CalibrationPolicy is compiled for an action
+    (i.e. calibration_constraint_for() returns None), calibration code
+    must treat the absence as deny.
+    """
+    deny  = "deny"
+    ask   = "ask"
+    allow = "allow"
+
+
+class ArgumentProvenance(Enum):
+    """
+    Provenance class of a value argument, ordered from least to most trusted.
+
+    Mirrors hypervisor.models.ProvenanceClass but lives in the runtime kernel
+    so compile.py has no import dependency on hypervisor/.
+
+        external_document  — content from files, network, or agent outputs
+        derived            — computed/extracted from one or more parents
+        user_declared      — explicitly stated by the operator in the manifest
+        system             — hardcoded by the system (no user influence)
+    """
+    external_document = "external_document"
+    derived           = "derived"
+    user_declared     = "user_declared"
+    system            = "system"
+
+
 class TaintState(Enum):
     CLEAN = "clean"
     TAINTED = "tainted"
@@ -107,4 +161,17 @@ class ApprovalRequired(ConstructionError):
     This is an honest dead end: the feature is deferred. The action exists
     and the capability check passes, but construction is blocked until an
     approval mechanism is implemented.
+    """
+
+
+class NonSimulatableAction(RuntimeError):
+    """
+    The action has no simulation binding in the compiled policy.
+
+    Raised by SimulationExecutor when execute(ir) is called for an action
+    whose action_name is not present in policy.simulation_bindings.
+
+    This is a simulation-mode gap, not an ontological absence — the action
+    exists and the IR was validly constructed; only the surrogate response
+    is missing from the compiled artifact.
     """

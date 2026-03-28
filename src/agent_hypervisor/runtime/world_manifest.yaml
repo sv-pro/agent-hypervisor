@@ -10,13 +10,26 @@
 #   taint_rules:       tuple[TaintRule, ...]
 #   trust_map:         MappingProxyType[str, TrustLevel]
 
+# ── Metadata ──────────────────────────────────────────────────────────────────
+# Carried into ManifestProvenance at compile time.
+# workflow_id is included in the compiled artifact for traceability.
+
+metadata:
+  workflow_id: agent-hypervisor-default
+
 # ── Actions ───────────────────────────────────────────────────────────────────
 # Each action in this list is the ONLY action that can ever be executed.
 # Any action name not listed here cannot be represented as an IntentIR.
 # The IRBuilder raises ConstructionError before execution is attempted.
+#
+# This set must agree exactly with worker._REGISTRY.
+# build_runtime() enforces this at startup via _assert_worker_registry_agrees().
 
 actions:
   read_data:
+    type: internal
+
+  summarize:
     type: internal
 
   send_email:
@@ -62,3 +75,148 @@ taint_rules:
   - taint: tainted
     action_type: external
     reason: "Tainted data cannot flow into external actions — IR construction blocked"
+
+# ── Provenance rules ──────────────────────────────────────────────────────────
+# Compiled into tuple[CompiledProvenanceRule, ...] at startup.
+# Evaluated by CompiledPolicy.evaluate_provenance() — no YAML access at call time.
+#
+# Verdict precedence: deny > ask > allow.
+# No-match default: deny (fail-closed).
+#
+# Rule structure:
+#   id:         unique rule identifier (for trace logs)
+#   tool:       tool name or "*" for any tool
+#   argument:   argument name to inspect (omit for whole-call rules)
+#   provenance: provenance class that must appear in the argument chain (omit = any)
+#   verdict:    allow | deny | ask
+
+provenance_rules:
+
+  # Read-only internal actions — always allow
+  - id: allow-read-data
+    tool: read_data
+    verdict: allow
+
+  - id: allow-summarize
+    tool: summarize
+    verdict: allow
+
+  # send_email: provenance-gated on recipient argument
+  # RULE-01: external_document in recipient chain → hard deny
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  # user_declared recipient → ask for confirmation
+  - id: ask-email-declared-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask
+
+  # post_webhook: provenance-gated on body argument
+  # Data derived from external_document reaching post_webhook → deny (exfiltration)
+  - id: deny-webhook-external-body
+    tool: post_webhook
+    argument: body
+    provenance: external_document
+    verdict: deny
+
+  # post_webhook with clean data → ask for confirmation
+  - id: ask-webhook-clean
+    tool: post_webhook
+    verdict: ask
+
+  # download_report requires approval; provenance gate → ask
+  - id: ask-download-report
+    tool: download_report
+    verdict: ask
+
+# ── Calibration constraints ───────────────────────────────────────────────────
+# Compiled into MappingProxyType[str, CompiledCalibrationConstraint] at startup.
+# Future calibration code reads these fields instead of guessing expansion rules.
+#
+# Fail-closed: absent action entry → calibration_constraint_for() returns None
+#              → calibration code must treat as CalibrationPolicy.deny.
+#
+# Fields:
+#   expansion_policy:           deny | ask | allow
+#   surrogate_preferred:        true if simulation surrogate preferred over expansion
+#   requires_direct_need:       true if derived-only need is insufficient
+#   adversarial_provenance_stop: provenance classes that hard-stop any expansion request
+
+calibration_constraints:
+
+  # Pure read-only internal action: no expansion warranted.
+  # Surrogate covers all testing needs; derived need alone is insufficient.
+  read_data:
+    expansion_policy: deny
+    surrogate_preferred: true
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document]
+
+  # Internal summarisation: no expansion warranted.
+  summarize:
+    expansion_policy: deny
+    surrogate_preferred: true
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document]
+
+  # External action touching real recipients: expansion requires review.
+  # External-document provenance in any argument chain is a hard stop —
+  # adversarially induced expansion into email delivery is never permitted.
+  send_email:
+    expansion_policy: ask
+    surrogate_preferred: false
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document, derived]
+
+  # Internal action gated by approval_required; surrogate covers simulation.
+  download_report:
+    expansion_policy: ask
+    surrogate_preferred: true
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document]
+
+  # External webhook delivery: expansion requires review; hard-stop on external
+  # or derived provenance (most common adversarial exfiltration vector).
+  post_webhook:
+    expansion_policy: ask
+    surrogate_preferred: false
+    requires_direct_need: true
+    adversarial_provenance_stop: [external_document, derived]
+
+# ── Simulation bindings ───────────────────────────────────────────────────────
+# Compiled into MappingProxyType[str, CompiledSimulationBinding] at startup.
+# Used ONLY by SimulationExecutor (build_simulation_runtime()).
+# The real Executor (subprocess) ignores this section entirely.
+#
+# Each binding provides a deterministic surrogate response for the action.
+# All IRBuilder constraints still apply — simulation replaces transport, not guard.
+
+simulation_bindings:
+  read_data:
+    returns:
+      data: "simulated-result"
+      rows: 42
+
+  summarize:
+    returns:
+      summary: "simulated summary"
+
+  send_email:
+    returns:
+      sent: true
+      message_id: "sim-001"
+
+  download_report:
+    returns:
+      report: "simulated report content"
+      pages: 10
+
+  post_webhook:
+    returns:
+      status: 200
+      ok: true

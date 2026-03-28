@@ -60,7 +60,37 @@ from typing import Any
 from .compile import CompiledPolicy, compile_world
 from .channel import Channel
 from .ir import IRBuilder
-from .executor import Executor
+from .executor import Executor, SimulationExecutor
+
+
+def _assert_worker_registry_agrees(policy: CompiledPolicy) -> None:
+    """
+    Fail at startup if worker._REGISTRY diverges from the compiled action space.
+
+    The worker's handler set and policy.action_space must be identical sets.
+    A mismatch means either:
+      - A handler exists in the worker for an action outside the compiled action
+        space (unreachable but present — silent dead code risk).
+      - An action is in the compiled action space but has no worker handler
+        (IRBuilder would permit IR construction but execution would fail at the
+        worker — caught here instead, before any request is processed).
+
+    Both cases are caught at startup so the system refuses to start rather than
+    discovering the drift at execution time.
+    """
+    from . import worker  # subprocess module — local import, never re-exported
+
+    worker_actions = frozenset(worker._REGISTRY.keys())
+
+    if worker_actions != policy.action_space:
+        only_in_worker = sorted(worker_actions - policy.action_space)
+        only_in_space  = sorted(policy.action_space - worker_actions)
+        raise RuntimeError(
+            "Worker registry diverges from compiled action space.\n"
+            f"  Only in worker:       {only_in_worker}\n"
+            f"  Only in action space: {only_in_space}\n"
+            "Fix: update world_manifest.yaml and worker._REGISTRY to agree exactly."
+        )
 
 
 class Runtime:
@@ -135,6 +165,34 @@ def build_runtime(manifest_path: str = "world_manifest.yaml") -> Runtime:
         )
 
     policy = compile_world(manifest_path)
+    _assert_worker_registry_agrees(policy)
     executor = Executor()
+
+    return Runtime(policy, executor)
+
+
+def build_simulation_runtime(manifest_path: str = "world_manifest.yaml") -> Runtime:
+    """
+    Simulation entry point: compile world manifest and return a Runtime backed
+    by SimulationExecutor instead of the real subprocess Executor.
+
+    No subprocess is launched. No worker handlers run. Responses come entirely
+    from the compiled simulation_bindings in the manifest.
+
+    Worker registry agreement is NOT checked — simulation mode has no subprocess
+    handler set to agree with. IRBuilder constraints (ontological, capability,
+    taint, approval) are still enforced — simulation replaces transport, not guard.
+
+    Raises NonSimulatableAction at execute() time if an action has no compiled
+    simulation binding.
+    """
+    if not os.path.isabs(manifest_path):
+        manifest_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            manifest_path,
+        )
+
+    policy = compile_world(manifest_path)
+    executor = SimulationExecutor(policy)
 
     return Runtime(policy, executor)
