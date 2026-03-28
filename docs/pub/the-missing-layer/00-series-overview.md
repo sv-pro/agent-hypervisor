@@ -6,12 +6,41 @@
 
 ## Series Structure
 
-| #   | Title                                                   | Whitepaper Sections                                     | Key VB Sources                                                                               | Core Thesis                                                                                       |
-| --- | ------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| 1   | **Every AI Defense Broke. The Pattern Tells You Why.**  | Part I (Core Architecture), Part II (Semantic Gap)      | 12 broken defenses, Copilot DLP bypass, OpenAI admission, Opus 4.6 ASR                       | Permission security fails. Ontological security is the alternative. Honest weakness acknowledged. |
-| 2   | **AI Aikido: The Pattern Every Developer Uses Daily**   | Part III (AI Aikido), Part IV (World Manifest Compiler) | SOC bounded autonomy, Voice AI modular arch, Cloudflare Moltworker, Meta Rule of Two         | Stochastic design-time → deterministic runtime. The industry already does this. Nobody named it.  |
-| 3   | **Design-Time HITL: Why the Economics Are Wrong**       | Part V (Design-Time Human-in-the-Loop)                  | SOC 10K alerts/day, Schneier trilemma, OpenClaw 48hr weaponization, Gartner 40% cancellation | O(n) runtime HITL doesn't scale. O(log n) design-time HITL does. Four-phase cycle.                |
-| 4   | **MCP, OpenClaw, and the Missing Virtualization Layer** | Section 4.3 (Tool Integration), Full synthesis          | MCP CVEs, OpenClaw/Moltbook, CX blind spots, Browser security parallel                       | Tools as virtualized devices. Lethal trifecta broken. Compile intent into physics.                |
+| #   | Title                                                   | Whitepaper Sections                                     | Key VB Sources                                                                               | Core Thesis                                                                                       | Positioning Layer                              |
+| --- | ------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| 1   | **Every AI Defense Broke. The Pattern Tells You Why.**  | Part I (Core Architecture), Part II (Semantic Gap)      | 12 broken defenses, Copilot DLP bypass, OpenAI admission, Opus 4.6 ASR                       | Permission security fails. Ontological security is the alternative. Honest weakness acknowledged. | 🔴 Exposes Crutches — shows why filters fail by design |
+| 2   | **AI Aikido: The Pattern Every Developer Uses Daily**   | Part III (AI Aikido), Part IV (World Manifest Compiler) | SOC bounded autonomy, Voice AI modular arch, Cloudflare Moltworker, Meta Rule of Two         | Stochastic design-time → deterministic runtime. The industry already does this. Nobody named it.  | 🟢 Introduces Bridge thinking — design-time → runtime determinism |
+| 3   | **Design-Time HITL: Why the Economics Are Wrong**       | Part V (Design-Time Human-in-the-Loop)                  | SOC 10K alerts/day, Schneier trilemma, OpenClaw 48hr weaponization, Gartner 40% cancellation | O(n) runtime HITL doesn't scale. O(log n) design-time HITL does. Four-phase cycle.                | 🟡 Explains why Workarounds don't scale — O(n) runtime enforcement vs. O(log n) design-time |
+| 4   | **MCP, OpenClaw, and the Missing Virtualization Layer** | Section 4.3 (Tool Integration), Full synthesis          | MCP CVEs, OpenClaw/Moltbook, CX blind spots, Browser security parallel                       | Tools as virtualized devices. Lethal trifecta broken. Compile intent into physics.                | 🟢 Applies Bridge — Agent Hypervisor as the virtualization layer |
+
+---
+
+## Positioning Arc (Crutch / Workaround / Bridge)
+
+The series maps to the [Crutch / Workaround / Bridge framework](../../positioning/crutch_workaround_bridge.md):
+
+```
+Article 1 → Exposes Crutches
+            Shows that prompt filters, output scanners, and LLM-as-judge
+            are probabilistic, bypassable, and architecturally incorrect.
+            Evidence: 12 defenses broke. Not bad luck — structural failure.
+
+Article 2 → Introduces Bridge thinking
+            AI Aikido is the transition from Crutch/Workaround to Bridge.
+            Stochastic design-time → deterministic runtime.
+            The industry already makes this move. It just hasn't named it.
+
+Article 3 → Explains why Workarounds don't scale
+            O(n) runtime enforcement is a Workaround.
+            It operates inside an unsafe architecture and grows in cost
+            with every new threat. Design-time HITL is the Bridge move:
+            O(log n), upstream, structural.
+
+Article 4 → Applies Bridge (Agent Hypervisor as the missing layer)
+            Tool virtualization = Bridge applied to the tool problem.
+            Not "deny this tool call" but "this tool does not exist in
+            this form." Compile intent into physics.
+```
 
 ---
 

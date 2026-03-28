@@ -261,6 +261,59 @@ The Compiled World is the central artifact in this path. The runtime loads it on
 
 ---
 
+## Where Security Approaches Sit in the Pipeline
+
+The [Crutch / Workaround / Bridge framework](../positioning/crutch_workaround_bridge.md)
+maps directly to pipeline stages:
+
+```
+Stage 0 — Design-Time World Compilation          ← 🟢 Bridge
+          World Manifest compiled into frozen policy artifacts.
+          Dangerous actions are absent from the action space.
+          This stage runs before the agent exists.
+
+Stage 1 — Input Arrival
+          Inputs enter the agent's perception channel.
+
+Stage 2 — Canonicalization / Taint Assignment    ← 🔴 Crutch territory
+          Regex filters, prompt classifiers, output scanners.
+          Operates after the input has already entered.
+          Probabilistic. Bypassable. Does not change the action space.
+
+Stage 3 — Agent Processing
+          Agent forms intent within its rendered capability surface.
+          If Stage 0 was correct, dangerous intents cannot be formed.
+
+Stage 4 — Intent Construction (IRBuilder)
+          IntentIR constructed with full constraint checking.
+          Ontological, capability, taint, and approval checks here.
+
+Stage 5 — Policy Enforcement                     ← 🟡 Workaround territory
+          ProvenanceFirewall + PolicyEngine evaluate the call.
+          Declarative rules, structural provenance checks.
+          Operates on an already-formed intent.
+          Effective only within the bounds of explicit enumeration.
+
+Stage 6 — Execution
+          Tool adapter called. Worker subprocess dispatched.
+```
+
+**The critical observation:**
+
+- 🔴 Crutch approaches (Stage 2) are downstream of input arrival. The dangerous
+  content is already in the pipeline.
+- 🟡 Workaround approaches (Stage 5) are downstream of intent formation. The
+  dangerous action was already expressible and expressed.
+- 🟢 Bridge approaches (Stage 0) are upstream of everything. The dangerous action
+  was never representable. The agent cannot form intent to call it.
+
+Layer 1 (Base Ontology) is the Bridge stage. Layer 3 (Execution Governance) is
+where Workaround-equivalent controls operate, but within an already-bounded action
+space. The bounded action space is what makes Layer 3 deterministic and auditable
+rather than probabilistic and open-ended.
+
+---
+
 ## Component Map
 
 | Layer | Package | Key entry points |
