@@ -415,6 +415,119 @@ The sandbox is bounded by the Kernel — it cannot expand what is permitted.
 
 ---
 
+## Economic Execution Control
+
+> Cost is a capability boundary.
+> Agents cannot spend what does not exist in their world.
+> Economic constraints are part of runtime physics.
+
+Economic limits are a first-class constraint dimension, alongside capabilities and provenance.
+They are not a metric layer added after the fact — they are an enforcement boundary compiled
+into the world before the agent runs.
+
+**Guiding constraint:** Cost estimation and budget enforcement occur on the deterministic path,
+before execution. No LLM participates in enforcement. Every cost decision is explicit and auditable.
+
+---
+
+### Phase 1 — Cost Preflight *(MVP)*
+
+**Goal:** Block executions that exceed their declared budget before any tool is called.
+
+**Scope:**
+- Static pricing table per model and tool (compiled into the world at startup)
+- Budget limits per request and per session (declared in the World Manifest)
+- Token-based cost estimation at IR construction time (input tokens × price + output cap × price)
+- Deterministic `DENY` if estimated cost exceeds the applicable budget
+- `BudgetExceeded` — a new `ConstructionError` subclass; cost over-run blocks IR construction exactly as a taint violation does
+- Integration point: cost check runs after capability and provenance checks, before execution
+
+**Out of scope:** Plan-level estimation, actual-cost recording, replanning.
+
+---
+
+### Phase 2 — Plan-Level Estimation
+
+**Goal:** Estimate cost for multi-step agent plans before any step executes.
+
+**Scope:**
+- Cost estimation for plans containing LLM calls, tool calls, and retrieval/embedding steps
+- Three-point estimate per plan: optimistic / expected / worst-case
+- Uncertainty multiplier applied to worst-case (configurable per action type)
+- Policy decisions based on estimate ranges:
+  - worst-case fits budget → ALLOW
+  - expected fits, worst-case does not → ASK
+  - expected exceeds budget → DENY or REPLAN
+- Plan cost attached to the `ExecutionPlan` object (does not alter enforcement path)
+
+**Out of scope:** Trace-driven profiles, cost-aware replanning.
+
+---
+
+### Phase 3 — Trace-Driven Cost Profiles
+
+**Goal:** Replace static estimates with empirical cost profiles derived from execution traces.
+
+**Scope:**
+- Actual cost recorded in every execution trace (`actual_cost` field on trace records)
+- `CostProfileStore` aggregates per-action and per-workflow cost observations
+- Percentile summaries (p50 / p90 / p99) available as estimation inputs
+- Profiles fed back into `CostEstimator` at design-time (observe → compile → enforce loop)
+- Cost profile export: `ahc cost-profile <trace-set>` derives and prints the profile
+
+**Architectural alignment:** Trace-driven profiles follow the existing
+`Design → Compile → Deploy → Learn → Redesign` cycle. Profiles are compiled
+artifacts, not live runtime lookups.
+
+**Out of scope:** Cost-aware replanning, economic governance by role/provenance.
+
+---
+
+### Phase 4 — Cost-Aware Replanning
+
+**Goal:** On a budget `DENY`, propose a cheaper alternative execution path — deterministically.
+
+**Scope:**
+- New verdict: `REPLAN` (alongside `ALLOW`, `DENY`, `ASK`)
+- `REPLAN` carries a structured hint: what made the original plan too expensive
+- Replan strategies (compiled, not LLM-driven):
+  - switch to a cheaper model in the pricing registry
+  - reduce `max_tokens` cap for the output bound
+  - truncate context to a declared limit
+  - decompose the plan into smaller approved sub-plans
+- Replan suggestions are deterministic: same over-budget plan → same suggestion
+- The agent may re-propose a modified plan; the hypervisor re-evaluates from scratch
+
+**Design constraint:** Replanning logic lives entirely in the Economic Policy Engine.
+The LLM is not consulted during replanning. The result is a structured diff, not a
+generated narrative.
+
+**Out of scope:** Economic governance by role/provenance (Phase 5).
+
+---
+
+### Phase 5 — Economic Governance
+
+**Goal:** Bind budget limits to roles, provenance classes, and task types in the World Manifest.
+
+**Scope:**
+- Budget policies expressed in the manifest `economic.policies` section
+- Policy conditions: role, provenance class, task type, trust level
+- Examples:
+  - `untrusted` input provenance → strict budget (e.g. $0.01 per request)
+  - `trusted` workflow role → higher budget (e.g. $1.00 per request)
+  - `external_document` taint → deny any LLM call above p50 estimate
+- Policies compiled into the `CompiledPolicy` artifact; no YAML access at runtime
+- Composable with existing capability and provenance rules: all three dimensions
+  evaluated together at IR construction time
+
+**Success criteria:**
+- A manifest expressing role-differentiated budgets compiles and enforces correctly
+- The same scenario with different roles produces different budget limits
+- All budget decisions appear in the audit trace with the matched policy id
+
+---
+
 ## Open Architectural Decisions
 
 The following decisions are unresolved and tracked in [`docs/ADR/`](docs/ADR/README.md). Each has a designated resolution trigger tied to a phase milestone.
@@ -425,6 +538,7 @@ The following decisions are unresolved and tracked in [`docs/ADR/`](docs/ADR/REA
 | [ADR-002](docs/ADR/ADR-002-ahc-simulate-fidelity.md) | `ahc simulate` fidelity: compiled artifact vs. YAML re-interpretation | v0.3 | Open |
 | [ADR-003](docs/ADR/ADR-003-policy-ir-stability.md) | Policy IR: internal compiler format vs. stable external interface | v0.4 | Open |
 | [ADR-004](docs/ADR/ADR-004-policy-language-backend.md) | Policy language backend: Datalog vs. Rego vs. Cedar | v0.4 | Open |
+| [ADR-006](docs/adr/ADR-006-economic-constraints.md) | Economic constraint integration: estimation model, replan verdict, manifest schema extension | Economic Phase 1–2 | Open |
 
 ---
 

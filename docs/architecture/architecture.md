@@ -331,6 +331,156 @@ rather than probabilistic and open-ended.
 
 ---
 
+## Economic Policy Engine
+
+Economic constraints are a third enforcement dimension, alongside capability constraints
+and provenance/taint constraints. They are part of the deterministic enforcement kernel,
+not a metric layer or a post-execution accounting system.
+
+> Cost is a capability boundary.
+> An agent cannot spend what does not exist in its world.
+
+### Responsibilities
+
+| Concern | Where it lives |
+|---|---|
+| Static pricing table (model/tool costs) | Compiled into `CompiledPolicy` at startup |
+| Budget limits (per-request, per-session) | Declared in `world_manifest.yaml → economic.budgets` |
+| Pre-execution cost estimation | `CostEstimator` — runs at IR construction time |
+| Budget enforcement | `EconomicPolicyEngine.evaluate_budget()` — raises `BudgetExceeded` |
+| Replan hints | `REPLAN` verdict — structured, deterministic, LLM-free |
+| Actual cost recording | Trace record `actual_cost` field |
+
+### Updated Enforcement Pipeline
+
+```
+Agent / LLM
+    │
+    ▼
+IRBuilder.build()               ← ALL enforcement happens here
+    │
+    ├─ 1. Ontology check         (NonExistentAction if absent)
+    ├─ 2. Capability check       (ConstraintViolation if trust insufficient)
+    ├─ 3. Provenance check       (deny/ask/allow via CompiledProvenanceRule)
+    ├─ 4. Taint check            (TaintViolation if tainted → external)
+    ├─ 5. Cost estimation        (CostEstimator.estimate_cost)       ← NEW
+    └─ 6. Budget enforcement     (BudgetExceeded if estimate > limit) ← NEW
+    │ success → IntentIR
+    ▼
+Executor.execute()              ← consequence of enforcement
+    │
+    ▼
+TaintedValue + actual_cost      ← cost recorded in trace            ← NEW
+```
+
+The cost check runs after provenance and taint: a call already blocked for security reasons
+never reaches the cost estimator. A call that clears all security checks is then subject to
+the economic boundary. The two dimensions are composable but independent.
+
+### Cost Estimation Model
+
+```
+estimated_cost =
+    (input_tokens  × input_price_per_1k  / 1000)
+  + (output_tokens_cap × output_price_per_1k / 1000)
+  + tool_fixed_cost
+  × uncertainty_multiplier
+```
+
+| Term | Source | Notes |
+|---|---|---|
+| `input_tokens` | Tokenizer estimate on actual input | Conservative: counts all context |
+| `output_tokens_cap` | `max_tokens` declared in the call | Hard upper bound, never actual |
+| `input_price_per_1k` | `PricingRegistry` keyed by model name | Compiled from manifest |
+| `output_price_per_1k` | `PricingRegistry` keyed by model name | Compiled from manifest |
+| `tool_fixed_cost` | Per-tool cost declared in manifest | 0.0 if not declared |
+| `uncertainty_multiplier` | Manifest-level float, default 1.2 | Applied to whole estimate |
+
+Estimation is always conservative (upper-bound preferred). The actual cost is recorded
+in the trace after execution for profile building. The estimate never decreases to allow
+execution; if the worst-case cost exceeds the budget, the request is denied.
+
+### The REPLAN Verdict
+
+`REPLAN` is a new outcome alongside `ALLOW`, `DENY`, and `ASK`. It is produced when:
+
+- the estimated cost exceeds the current budget, **and**
+- at least one cheaper execution path is structurally possible within the same manifest
+
+A `REPLAN` verdict carries a `ReplanHint` — a structured, deterministic suggestion:
+
+```python
+@dataclass(frozen=True)
+class ReplanHint:
+    reason: str                   # human-readable: why the plan was over-budget
+    switch_model: str | None      # cheaper model from PricingRegistry, if available
+    reduce_max_tokens: int | None # suggested output cap reduction
+    truncate_context: int | None  # suggested input token limit
+    split_into_subtasks: bool     # whether task decomposition is advised
+```
+
+The hint is computed entirely from compiled artifacts (pricing table, budget limits,
+manifest action graph). No LLM is consulted. Same over-budget input → same hint, always.
+
+`DENY` (not `REPLAN`) is issued when no cheaper alternative is structurally possible —
+for example, when the cheapest available model already exceeds the budget, or when the
+task cannot be decomposed within the current manifest.
+
+### Economic Constraints in the World Manifest
+
+```yaml
+economic:
+  budgets:
+    per_request: 0.05     # USD — hard limit per single tool invocation
+    per_session: 1.00     # USD — cumulative limit for the session
+
+  model_pricing:
+    claude-haiku-4-5:
+      input_per_1k:  0.00025
+      output_per_1k: 0.00125
+    claude-sonnet-4-6:
+      input_per_1k:  0.003
+      output_per_1k: 0.015
+    claude-opus-4-6:
+      input_per_1k:  0.015
+      output_per_1k: 0.075
+
+  uncertainty_multiplier: 1.2   # applied to all estimates; conservative default
+
+  policies:
+    - id: strict-untrusted-budget
+      condition:
+        provenance: external_document
+      budget_override:
+        per_request: 0.01
+      action: deny
+
+    - id: trusted-workflow-budget
+      condition:
+        trust_level: trusted
+      budget_override:
+        per_request: 0.10
+      action: allow
+```
+
+The `economic` section is compiled at startup into the `CompiledPolicy` artifact.
+No YAML is accessed at enforcement time. The pricing table and budget limits are
+frozen values in the compiled world.
+
+### Component Map (Extended)
+
+| Component | Package | Responsibility |
+|---|---|---|
+| `CostEstimator` | `agent_hypervisor.economic.cost_estimator` | Pre-execution cost estimate |
+| `EconomicPolicyEngine` | `agent_hypervisor.economic.economic_policy` | Budget evaluation + REPLAN verdict |
+| `PricingRegistry` | `agent_hypervisor.economic.pricing_registry` | Static model/tool pricing table |
+| `CostProfileStore` | `agent_hypervisor.economic.cost_profile_store` | Trace-driven empirical profiles |
+
+See [`docs/architecture/economic_constraints.md`](economic_constraints.md) for the
+full economic constraint specification.
+
+---
+
 ## Layer Model Mapping
 
 `docs/concept/overview.md` uses a five-layer model for conceptual clarity. This document uses a four-layer model. They describe the same architecture with different granularity:

@@ -164,6 +164,34 @@ class ApprovalRequired(ConstructionError):
     """
 
 
+class BudgetExceeded(ConstructionError):
+    """
+    The estimated cost of the requested action exceeds the compiled budget limit.
+
+    This is an economic boundary violation, not a security policy denial.
+    The action exists and the capability/taint checks passed, but the declared
+    budget does not cover the worst-case estimated cost.
+
+    Attributes:
+        estimated_cost: The conservative cost estimate that triggered this error (USD).
+        budget_limit:   The applicable compiled budget limit (USD).
+        replan_hint:    Optional structured suggestion for a cheaper alternative.
+                        None when no cheaper path is structurally available.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        estimated_cost: float,
+        budget_limit: float,
+        replan_hint: object | None = None,
+    ) -> None:
+        self.estimated_cost = estimated_cost
+        self.budget_limit = budget_limit
+        self.replan_hint = replan_hint
+        super().__init__(reason)
+
+
 class NonSimulatableAction(RuntimeError):
     """
     The action has no simulation binding in the compiled policy.
