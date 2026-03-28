@@ -1,0 +1,38 @@
+# Test fixture manifest — mirrors src/agent_hypervisor/runtime/world_manifest.yaml.
+#
+# Used by tests/runtime/* tests as their MANIFEST path.
+# Action set must agree exactly with worker._REGISTRY.
+
+metadata:
+  workflow_id: agent-hypervisor-test
+
+actions:
+  read_data:
+    type: internal
+
+  summarize:
+    type: internal
+
+  send_email:
+    type: external
+
+  download_report:
+    type: internal
+    approval_required: true
+
+  post_webhook:
+    type: external
+
+trust:
+  user: trusted
+  system: trusted
+  external: untrusted
+
+capabilities:
+  trusted:   [internal, external]
+  untrusted: [internal]
+
+taint_rules:
+  - taint: tainted
+    action_type: external
+    reason: "Tainted data cannot flow into external actions — IR construction blocked"

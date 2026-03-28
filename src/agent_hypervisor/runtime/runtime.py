@@ -63,6 +63,37 @@ from .ir import IRBuilder
 from .executor import Executor
 
 
+def _assert_worker_registry_agrees(policy: CompiledPolicy) -> None:
+    """
+    Fail at startup if worker._REGISTRY and CompiledPolicy.actions diverge.
+
+    The worker's closed handler set and the compiled action ontology must be
+    identical. A mismatch means either:
+      - A handler exists in the worker for an action the compiled world does
+        not know about (unreachable but present — silent dead code risk).
+      - An action is declared in the manifest but has no worker handler
+        (IRBuilder would permit IR construction but execution would fail closed
+        at the worker).
+
+    Both cases are caught here, before any request is processed, so the system
+    refuses to start rather than discovering the drift at execution time.
+    """
+    from . import worker  # subprocess module — local import, never re-exported
+
+    worker_actions = frozenset(worker._REGISTRY.keys())
+    compiled_actions = frozenset(policy.actions.keys())
+
+    if worker_actions != compiled_actions:
+        only_in_worker = sorted(worker_actions - compiled_actions)
+        only_in_policy = sorted(compiled_actions - worker_actions)
+        raise RuntimeError(
+            "Worker registry diverges from compiled world.\n"
+            f"  Only in worker:  {only_in_worker}\n"
+            f"  Only in policy:  {only_in_policy}\n"
+            "Fix: update world_manifest.yaml and worker._REGISTRY to agree exactly."
+        )
+
+
 class Runtime:
     """
     Assembled runtime: compiled policy + channel factory + IR builder + executor.
@@ -135,6 +166,7 @@ def build_runtime(manifest_path: str = "world_manifest.yaml") -> Runtime:
         )
 
     policy = compile_world(manifest_path)
+    _assert_worker_registry_agrees(policy)
     executor = Executor()
 
     return Runtime(policy, executor)

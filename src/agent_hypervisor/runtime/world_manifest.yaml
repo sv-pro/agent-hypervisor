@@ -10,13 +10,26 @@
 #   taint_rules:       tuple[TaintRule, ...]
 #   trust_map:         MappingProxyType[str, TrustLevel]
 
+# ── Metadata ──────────────────────────────────────────────────────────────────
+# Carried into ManifestProvenance at compile time.
+# workflow_id is included in the compiled artifact for traceability.
+
+metadata:
+  workflow_id: agent-hypervisor-default
+
 # ── Actions ───────────────────────────────────────────────────────────────────
 # Each action in this list is the ONLY action that can ever be executed.
 # Any action name not listed here cannot be represented as an IntentIR.
 # The IRBuilder raises ConstructionError before execution is attempted.
+#
+# This set must agree exactly with worker._REGISTRY.
+# build_runtime() enforces this at startup via _assert_worker_registry_agrees().
 
 actions:
   read_data:
+    type: internal
+
+  summarize:
     type: internal
 
   send_email:

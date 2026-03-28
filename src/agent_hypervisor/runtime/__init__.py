@@ -10,7 +10,7 @@ from .models import (
     TrustLevel,
 )
 from .taint import TaintContext, TaintedValue
-from .compile import CompiledPolicy, compile_world
+from .compile import CompiledPolicy, ManifestProvenance, compile_world
 
 __all__ = [
     # Entry point
@@ -18,6 +18,7 @@ __all__ = [
     "build_runtime",
     # Policy compilation
     "CompiledPolicy",
+    "ManifestProvenance",
     "compile_world",
     # Enumerations
     "ActionType",

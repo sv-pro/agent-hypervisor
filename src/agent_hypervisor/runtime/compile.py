@@ -34,6 +34,8 @@ Execution boundary:
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, Optional, Tuple
@@ -41,6 +43,27 @@ from typing import Any, Dict, FrozenSet, Optional, Tuple
 import yaml
 
 from .models import ActionType, TaintState, TrustLevel
+
+
+# ── ManifestProvenance ────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ManifestProvenance:
+    """
+    Compile-time provenance record for a CompiledPolicy.
+
+    Produced once by compile_world() and carried inside CompiledPolicy.
+    Allows the runtime artifact to prove which manifest it was compiled from,
+    and when, without re-reading the source file.
+
+    Fields:
+        workflow_id   : from manifest metadata.workflow_id, or "unknown"
+        manifest_hash : sha256 hex digest of the raw manifest bytes
+        compiled_at   : ISO-8601 UTC timestamp of when compile_world() ran
+    """
+    workflow_id: str
+    manifest_hash: str
+    compiled_at: str
 
 
 # ── Module-private compile gate ───────────────────────────────────────────────
@@ -127,15 +150,17 @@ class CompiledPolicy:
     occurs after compile_world() returns.
     """
 
-    __slots__ = ("_actions", "_capability_matrix", "_taint_rules", "_trust_map")
+    __slots__ = ("_provenance", "_actions", "_capability_matrix", "_taint_rules", "_trust_map")
 
     def __init__(
         self,
+        provenance: ManifestProvenance,
         actions: Dict[str, CompiledAction],
         capability_matrix: FrozenSet[Tuple[TrustLevel, ActionType]],
         taint_rules: Tuple[TaintRule, ...],
         trust_map: Dict[str, TrustLevel],
     ) -> None:
+        object.__setattr__(self, "_provenance", provenance)
         object.__setattr__(self, "_actions", MappingProxyType(actions))
         object.__setattr__(self, "_capability_matrix", capability_matrix)
         object.__setattr__(self, "_taint_rules", taint_rules)
@@ -143,6 +168,13 @@ class CompiledPolicy:
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CompiledPolicy is immutable after construction")
+
+    # ── Provenance ────────────────────────────────────────────────────────────
+
+    @property
+    def provenance(self) -> ManifestProvenance:
+        """Compile-time provenance: manifest hash, workflow_id, compiled_at."""
+        return self._provenance
 
     # ── Action access (read-only proxy) ───────────────────────────────────────
 
@@ -191,8 +223,9 @@ class CompiledPolicy:
     def __repr__(self) -> str:
         return (
             f"CompiledPolicy("
-            f"actions={list(self._actions)}, "
-            f"matrix={self._capability_matrix})"
+            f"workflow_id={self._provenance.workflow_id!r}, "
+            f"manifest_hash={self._provenance.manifest_hash[:12]!r}, "
+            f"actions={list(self._actions)})"
         )
 
 
@@ -206,8 +239,20 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
     CompiledPolicy containing pure metadata. After this function returns,
     the YAML file is not accessed again by any runtime component.
     """
-    with open(manifest_path) as f:
-        raw = yaml.safe_load(f)
+    with open(manifest_path, "rb") as f:
+        raw_bytes = f.read()
+
+    raw = yaml.safe_load(raw_bytes)
+
+    # ── Compute manifest provenance ───────────────────────────────────────────
+    manifest_hash = hashlib.sha256(raw_bytes).hexdigest()
+    workflow_id = raw.get("metadata", {}).get("workflow_id", "unknown")
+    compiled_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    provenance = ManifestProvenance(
+        workflow_id=workflow_id,
+        manifest_hash=manifest_hash,
+        compiled_at=compiled_at,
+    )
 
     # ── Compile actions (metadata only — no handlers) ─────────────────────────
     actions: Dict[str, CompiledAction] = {}
@@ -248,6 +293,7 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
     }
 
     return CompiledPolicy(
+        provenance=provenance,
         actions=actions,
         capability_matrix=capability_matrix,
         taint_rules=taint_rules,
