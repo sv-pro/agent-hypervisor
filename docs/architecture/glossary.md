@@ -60,6 +60,20 @@ The deterministic runtime artifacts produced by the World Manifest Compiler — 
 
 ---
 
+## Compiled World
+
+The complete rendered environment produced by the compiler from a World Manifest. The Compiled World is the central artifact between the compiler and the runtime: it contains the full action set, resource constraints, taint rules, provenance schema, and enforcement logic for one workflow.
+
+The runtime consumes the Compiled World at startup. It does not re-read or re-interpret the source manifest during execution.
+
+Distinguish from:
+
+- **World Manifest** — the source YAML authored at design-time; the compiler's input, not its output
+- **Rendered Capability Surface** — the per-context projection of the Compiled World onto a specific role, task, and state at runtime (Layer 2)
+- **Compiled Physics** — the enforcement laws embedded within the Compiled World
+
+---
+
 ## Hypervisor
 
 The deterministic virtualization layer between the Agent and Reality. Responsible for:
@@ -218,7 +232,27 @@ The manifest is compiled by the World Manifest Compiler into deterministic runti
 
 ## World Manifest Compiler
 
-The compilation phase that transforms a manifest into deterministic runtime artifacts — policy tables, schemas, taint matrices.
+The compilation phase that transforms a World Manifest into a Compiled World — deterministic runtime artifacts including policy tables, schemas, and taint matrices. The compiler is fully deterministic: the same manifest always produces the same artifacts. No LLM is involved. See also: *Synthesizer* (the distinct design-time tool that produces manifest drafts).
+
+---
+
+## Synthesizer
+
+The design-time tool that uses LLM generation to produce World Manifest drafts from a workflow description (`ahc draft`). The synthesizer is stochastic — it applies LLM generative capability to propose an initial manifest. Its output is a draft manifest for human review.
+
+**Distinction from the Compiler.** The synthesizer produces a manifest draft (human-reviewable YAML). The compiler (`ahc build`) transforms a reviewed manifest into the Compiled World. The LLM participates only in synthesis; it does not participate in compilation. This separation is the operational form of the AI Aikido principle: stochastic generation at design-time produces the deterministic artifacts that govern runtime.
+
+---
+
+## Sound-but-incomplete bias
+
+The compiler's deliberate conservative stance when deriving a capability profile: under-approximation is allowed; over-approximation is forbidden.
+
+A compiled world may under-approximate a workflow's needs — legitimate calls may produce `DENY_ABSENT` if they were not covered during profiling. This is operationally recoverable: the manifest can be revised and recompiled. A compiled world must never over-approximate — it cannot include capabilities that were not established by safe, reviewed evidence.
+
+> You can lose precision, but you cannot add capabilities.
+
+See also: *Safe Compression* (`docs/concept/concepts.md`).
 
 ---
 

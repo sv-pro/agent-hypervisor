@@ -156,6 +156,14 @@ The distinction matters operationally:
 | `ABSENT` | The action does not exist in this execution environment | No — there is no object to reach |
 | `POLICY` | The action exists, but this specific call violates its constraints | No — enforcement is deterministic against the compiled manifest |
 
+### Expansion Invariant
+
+The action set of the compiled world is sealed at compile time and cannot be expanded at runtime by any signal — including adversarially crafted inputs.
+
+A prompt injection that attempts to introduce a new capability, invoke an unlisted tool, or redefine the scope of an existing action produces `DENY_ABSENT`. There is no object to reach. The attempt does not trigger a policy evaluation — it fails structurally before evaluation begins.
+
+This invariant holds because the runtime consumes the Compiled World, not the raw manifest. No runtime signal reaches the compiler. The world is defined once, before the agent runs.
+
 ---
 
 ## Safe Compression
