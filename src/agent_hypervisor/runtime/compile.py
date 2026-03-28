@@ -10,14 +10,22 @@ This runs ONCE at startup via build_runtime(). After compilation:
   - No string comparisons, no YAML parsing, no dict iteration at request time
 
 Compile outputs:
+  action_space:      frozenset[str]
+                     The closed action set. These and only these actions exist
+                     in this compiled world. Membership test is O(1).
   actions:           MappingProxyType[str, CompiledAction]
                      Sealed — CallerCode cannot add or modify entries.
   capability_matrix: frozenset[tuple[TrustLevel, ActionType]]
                      O(1) membership test — no loops, no strings.
-  taint_rules:       tuple[TaintRule, ...]
-                     Immutable ordered sequence.
-  trust_map:         MappingProxyType[str, TrustLevel]
-                     Channel identity → TrustLevel, resolved at IR build time.
+  taint_rules:          tuple[TaintRule, ...]
+                        Immutable ordered sequence.
+  trust_map:            MappingProxyType[str, TrustLevel]
+                        Channel identity → TrustLevel, resolved at IR build time.
+  provenance_rules:     tuple[CompiledProvenanceRule, ...]
+                        Compiled provenance decision structure.
+  simulation_bindings:  MappingProxyType[str, CompiledSimulationBinding]
+                        Surrogate responses keyed by action name. Used only by
+                        SimulationExecutor — the real Executor ignores this field.
 
 Sealing mechanism for CompiledAction:
   _COMPILE_GATE is a module-private object() sentinel. CompiledAction.__init__
@@ -34,13 +42,36 @@ Execution boundary:
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 import yaml
 
-from .models import ActionType, TaintState, TrustLevel
+from .models import ActionType, ArgumentProvenance, CalibrationPolicy, ProvenanceVerdict, TaintState, TrustLevel
+
+
+# ── ManifestProvenance ────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ManifestProvenance:
+    """
+    Compile-time provenance record for a CompiledPolicy.
+
+    Produced once by compile_world() and carried inside CompiledPolicy.
+    Allows the runtime artifact to prove which manifest it was compiled from,
+    and when, without re-reading the source file.
+
+    Fields:
+        workflow_id   : from manifest metadata.workflow_id, or "unknown"
+        manifest_hash : sha256 hex digest of the raw manifest bytes
+        compiled_at   : ISO-8601 UTC timestamp of when compile_world() ran
+    """
+    workflow_id: str
+    manifest_hash: str
+    compiled_at: str
 
 
 # ── Module-private compile gate ───────────────────────────────────────────────
@@ -111,6 +142,161 @@ class CompiledAction:
         return self.name == other.name
 
 
+# ── CompiledProvenanceRule ────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompiledProvenanceRule:
+    """
+    One compiled provenance rule from the world manifest.
+
+    Replaces a YAML dict entry that would otherwise be interpreted at runtime.
+    All fields are typed enums produced at compile_world() time; no string
+    comparison or enum construction occurs after compilation.
+
+    Matching semantics:
+        tool       : "*" matches any tool name, otherwise exact match
+        argument   : None means the rule applies to the whole call
+                     (not to a specific argument); otherwise exact match
+        provenance : None means any provenance; otherwise the ArgumentProvenance
+                     must appear somewhere in the argument's provenance chain
+        verdict    : the verdict to return if this rule matches
+
+    Verdict precedence (highest wins across all matching rules):
+        deny (2) > ask (1) > allow (0)
+
+    Fail-closed default: if no rule matches, evaluate_provenance() returns deny.
+    """
+    rule_id: str
+    tool: str
+    verdict: ProvenanceVerdict
+    argument: Optional[str] = None
+    provenance: Optional[ArgumentProvenance] = None
+
+
+# Precedence table used by evaluate_provenance — module-level constant.
+_VERDICT_PRECEDENCE: dict[str, int] = {"deny": 2, "ask": 1, "allow": 0}
+
+
+def _provenance_rule_matches(
+    rule: CompiledProvenanceRule,
+    tool: str,
+    argument: Optional[str],
+    chain_provenances: FrozenSet[ArgumentProvenance],
+) -> bool:
+    """
+    Return True if the compiled rule applies to (tool, argument, chain).
+
+    Module-private helper so CompiledPolicy.evaluate_provenance() stays
+    readable. Contains no I/O, no string-to-enum construction, no YAML access.
+    """
+    # Tool filter
+    if rule.tool != "*" and rule.tool != tool:
+        return False
+
+    # Argument + provenance filter
+    if rule.argument is not None:
+        # Rule targets a specific argument: caller must have provided that argument.
+        if argument != rule.argument:
+            return False
+        # If the rule also filters on a provenance class, that class must appear
+        # somewhere in the argument's provenance chain.
+        if rule.provenance is not None and rule.provenance not in chain_provenances:
+            return False
+
+    return True
+
+
+# ── CompiledSimulationBinding ─────────────────────────────────────────────────
+
+class CompiledSimulationBinding:
+    """
+    A sealed surrogate response for one action in simulation mode.
+
+    Produced at compile time from the manifest's simulation_bindings section.
+    Used exclusively by SimulationExecutor — the real Executor (subprocess)
+    ignores this object entirely.
+
+    The returns field is a MappingProxyType so callers cannot mutate it after
+    the binding is compiled. The binding itself is sealed by _COMPILE_GATE.
+
+    Fields:
+        action_name : the action this binding applies to (same as the dict key)
+        returns     : immutable surrogate result dict returned by SimulationExecutor
+    """
+
+    __slots__ = ("action_name", "returns")
+
+    def __init__(
+        self,
+        action_name: str,
+        returns: Dict[str, Any],
+        _gate: object,
+    ) -> None:
+        if _gate is not _COMPILE_GATE:
+            raise TypeError(
+                "CompiledSimulationBinding cannot be constructed outside the compile phase. "
+                "Obtain bindings from CompiledPolicy.simulation_bindings."
+            )
+        object.__setattr__(self, "action_name", action_name)
+        object.__setattr__(self, "returns", MappingProxyType(returns))
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("CompiledSimulationBinding is immutable after construction")
+
+    def __repr__(self) -> str:
+        return f"CompiledSimulationBinding({self.action_name!r}, returns={dict(self.returns)!r})"
+
+
+# ── CompiledCalibrationConstraint ────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompiledCalibrationConstraint:
+    """
+    Compiled calibration constraints for one action.
+
+    Produced at compile time from the manifest's calibration_constraints section.
+    Future calibration code reads these fields to decide whether to allow, deny,
+    or escalate a capability expansion request — without re-parsing YAML or relying
+    on scattered assumptions.
+
+    Fields:
+        action_name:
+            The action this constraint governs. Matches the key in
+            CompiledPolicy.calibration_constraints.
+
+        expansion_policy:
+            CalibrationPolicy controlling whether capability expansion may
+            be considered for this action. Fail-closed: if no constraint is
+            compiled for an action (calibration_constraint_for() returns None),
+            future calibration code must treat the absence as deny.
+
+        surrogate_preferred:
+            True if a simulation surrogate is preferred over real capability
+            expansion. When True, calibration must exhaust surrogate options
+            before proposing a wider capability surface.
+
+        requires_direct_need:
+            True if derived-only need is insufficient to justify capability
+            expansion. An expansion request that can only demonstrate derived
+            need (e.g. a downstream inference chain) must be rejected when
+            this flag is set — direct need must be shown.
+
+        adversarial_provenance_stop:
+            Frozenset of ArgumentProvenance classes that unconditionally block
+            capability expansion requests for this action. Any expansion request
+            whose argument provenance chain contains one of these classes is
+            hard-stopped — no escalation, no ask, no further deliberation.
+
+    Absent calibration_constraints section → empty map → constraint_for() returns
+    None → calibration code must default to deny. Do not interpret None as allow.
+    """
+    action_name: str
+    expansion_policy: CalibrationPolicy
+    surrogate_preferred: bool
+    requires_direct_need: bool
+    adversarial_provenance_stop: FrozenSet[ArgumentProvenance]
+
+
 # ── CompiledPolicy ────────────────────────────────────────────────────────────
 
 class CompiledPolicy:
@@ -127,22 +313,68 @@ class CompiledPolicy:
     occurs after compile_world() returns.
     """
 
-    __slots__ = ("_actions", "_capability_matrix", "_taint_rules", "_trust_map")
+    __slots__ = (
+        "_provenance",
+        "_action_space",
+        "_actions",
+        "_capability_matrix",
+        "_taint_rules",
+        "_trust_map",
+        "_provenance_rules",
+        "_simulation_bindings",
+        "_calibration_constraints",
+    )
 
     def __init__(
         self,
+        provenance: ManifestProvenance,
         actions: Dict[str, CompiledAction],
         capability_matrix: FrozenSet[Tuple[TrustLevel, ActionType]],
         taint_rules: Tuple[TaintRule, ...],
         trust_map: Dict[str, TrustLevel],
+        provenance_rules: Tuple["CompiledProvenanceRule", ...] = (),
+        simulation_bindings: Dict[str, "CompiledSimulationBinding"] = {},
+        calibration_constraints: Dict[str, "CompiledCalibrationConstraint"] = {},
     ) -> None:
+        object.__setattr__(self, "_provenance", provenance)
+        object.__setattr__(self, "_action_space", frozenset(actions.keys()))
         object.__setattr__(self, "_actions", MappingProxyType(actions))
         object.__setattr__(self, "_capability_matrix", capability_matrix)
         object.__setattr__(self, "_taint_rules", taint_rules)
         object.__setattr__(self, "_trust_map", MappingProxyType(trust_map))
+        object.__setattr__(self, "_provenance_rules", provenance_rules)
+        object.__setattr__(self, "_simulation_bindings", MappingProxyType(simulation_bindings))
+        object.__setattr__(self, "_calibration_constraints", MappingProxyType(calibration_constraints))
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CompiledPolicy is immutable after construction")
+
+    # ── Closed action set ─────────────────────────────────────────────────────
+
+    @property
+    def action_space(self) -> FrozenSet[str]:
+        """
+        The closed action set of this compiled world.
+
+        Contains exactly the names of actions declared in the world manifest.
+        These and only these actions exist — any name absent from this set
+        is impossible in this world, not merely denied.
+
+        This is the canonical existence boundary. Downstream checks
+        (IRBuilder, worker registry assertion) should derive existence from
+        this set, not from len(actions) or actions.keys().
+
+        O(1) membership test:
+            if action_name in policy.action_space: ...
+        """
+        return self._action_space
+
+    # ── Provenance ────────────────────────────────────────────────────────────
+
+    @property
+    def provenance(self) -> ManifestProvenance:
+        """Compile-time provenance: manifest hash, workflow_id, compiled_at."""
+        return self._provenance
 
     # ── Action access (read-only proxy) ───────────────────────────────────────
 
@@ -177,6 +409,48 @@ class CompiledPolicy:
                 return rule
         return None
 
+    # ── Provenance rule evaluation ────────────────────────────────────────────
+
+    @property
+    def provenance_rules(self) -> Tuple["CompiledProvenanceRule", ...]:
+        """Immutable tuple of compiled provenance rules. Read-only."""
+        return self._provenance_rules
+
+    def evaluate_provenance(
+        self,
+        tool: str,
+        argument: Optional[str] = None,
+        chain_provenances: FrozenSet[ArgumentProvenance] = frozenset(),
+    ) -> ProvenanceVerdict:
+        """
+        Evaluate compiled provenance rules for a (tool, argument, chain) triple.
+
+        Returns the highest-precedence verdict among all matching rules.
+        Returns ProvenanceVerdict.deny if no rules match — fail-closed default.
+
+        This method operates entirely on compiled data structures.
+        No YAML parsing, no file access, no string-to-enum construction.
+
+        Args:
+            tool:             the tool name being requested
+            argument:         the specific argument being evaluated, or None for
+                              a whole-call (tool-level) evaluation
+            chain_provenances: the set of provenance classes present anywhere in
+                              the argument's value provenance chain
+        """
+        best: Optional[ProvenanceVerdict] = None
+        best_prec = -1
+
+        for rule in self._provenance_rules:
+            if not _provenance_rule_matches(rule, tool, argument, chain_provenances):
+                continue
+            prec = _VERDICT_PRECEDENCE.get(rule.verdict.value, 0)
+            if prec > best_prec:
+                best = rule.verdict
+                best_prec = prec
+
+        return best if best is not None else ProvenanceVerdict.deny
+
     # ── Trust resolution ──────────────────────────────────────────────────────
 
     def resolve_trust(self, channel_identity: str) -> TrustLevel:
@@ -188,11 +462,64 @@ class CompiledPolicy:
         """
         return self._trust_map.get(channel_identity, TrustLevel.UNTRUSTED)
 
+    # ── Simulation bindings ───────────────────────────────────────────────────
+
+    @property
+    def simulation_bindings(self) -> MappingProxyType:
+        """
+        Read-only map of action name → CompiledSimulationBinding.
+
+        Present on every CompiledPolicy. Empty when the manifest has no
+        simulation_bindings section. SimulationExecutor reads from this;
+        the real Executor (subprocess) never touches it.
+        """
+        return self._simulation_bindings
+
+    def simulation_binding_for(self, action_name: str) -> "Optional[CompiledSimulationBinding]":
+        """
+        Return the CompiledSimulationBinding for action_name, or None.
+
+        None means the action has no surrogate response in the compiled policy.
+        SimulationExecutor raises NonSimulatableAction when this returns None.
+        """
+        return self._simulation_bindings.get(action_name)
+
+    # ── Calibration constraints ───────────────────────────────────────────────
+
+    @property
+    def calibration_constraints(self) -> MappingProxyType:
+        """
+        Read-only map of action name → CompiledCalibrationConstraint.
+
+        Present on every CompiledPolicy. Empty when the manifest has no
+        calibration_constraints section. Future calibration code reads this
+        map to determine expansion policy, surrogate preference, direct-need
+        requirements, and adversarial provenance hard-stops — without guessing.
+
+        Absent entry (calibration_constraint_for() returning None) must be
+        treated as deny by calibration code. Do not interpret absence as allow.
+        """
+        return self._calibration_constraints
+
+    def calibration_constraint_for(
+        self, action_name: str
+    ) -> "Optional[CompiledCalibrationConstraint]":
+        """
+        Return the CompiledCalibrationConstraint for action_name, or None.
+
+        None means no calibration constraint was compiled for this action.
+        Future calibration code must treat None as CalibrationPolicy.deny —
+        fail-closed: unknown expansion constraints are always rejected.
+        """
+        return self._calibration_constraints.get(action_name)
+
     def __repr__(self) -> str:
         return (
             f"CompiledPolicy("
-            f"actions={list(self._actions)}, "
-            f"matrix={self._capability_matrix})"
+            f"workflow_id={self._provenance.workflow_id!r}, "
+            f"manifest_hash={self._provenance.manifest_hash[:12]!r}, "
+            f"action_space={sorted(self._action_space)}, "
+            f"provenance_rules={len(self._provenance_rules)})"
         )
 
 
@@ -206,8 +533,20 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
     CompiledPolicy containing pure metadata. After this function returns,
     the YAML file is not accessed again by any runtime component.
     """
-    with open(manifest_path) as f:
-        raw = yaml.safe_load(f)
+    with open(manifest_path, "rb") as f:
+        raw_bytes = f.read()
+
+    raw = yaml.safe_load(raw_bytes)
+
+    # ── Compute manifest provenance ───────────────────────────────────────────
+    manifest_hash = hashlib.sha256(raw_bytes).hexdigest()
+    workflow_id = raw.get("metadata", {}).get("workflow_id", "unknown")
+    compiled_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    provenance = ManifestProvenance(
+        workflow_id=workflow_id,
+        manifest_hash=manifest_hash,
+        compiled_at=compiled_at,
+    )
 
     # ── Compile actions (metadata only — no handlers) ─────────────────────────
     actions: Dict[str, CompiledAction] = {}
@@ -247,9 +586,65 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
         for identity, trust_str in raw_trust.items()
     }
 
+    # ── Compile provenance rules → tuple[CompiledProvenanceRule, ...] ─────────
+    # Source: manifest provenance_rules section.
+    # Absent section → empty tuple → evaluate_provenance() is fail-closed (deny).
+    raw_provenance_rules: list = raw.get("provenance_rules", [])
+    provenance_rules: Tuple[CompiledProvenanceRule, ...] = tuple(
+        CompiledProvenanceRule(
+            rule_id=r.get("id", f"rule-{i:03d}"),
+            tool=r.get("tool", "*"),
+            verdict=ProvenanceVerdict(r["verdict"]),
+            argument=r.get("argument"),
+            provenance=ArgumentProvenance(r["provenance"]) if r.get("provenance") else None,
+        )
+        for i, r in enumerate(raw_provenance_rules)
+    )
+
+    # ── Compile calibration constraints → MappingProxyType[str, CompiledCalibrationConstraint] ──
+    # Source: manifest calibration_constraints section.
+    # Absent section → empty dict → calibration_constraint_for() returns None for all names.
+    # Future calibration code must interpret None as CalibrationPolicy.deny (fail-closed).
+    # Within a declared entry, individual fields also default fail-closed:
+    #   expansion_policy     : "deny"  (most restrictive)
+    #   surrogate_preferred  : False   (no assumed preference — must be explicit)
+    #   requires_direct_need : True    (derived-only need insufficient by default)
+    #   adversarial_provenance_stop: [] (empty — policy deny already blocks; add classes explicitly)
+    raw_calibration: Dict[str, Any] = raw.get("calibration_constraints", {}) or {}
+    calibration_constraints: Dict[str, CompiledCalibrationConstraint] = {
+        name: CompiledCalibrationConstraint(
+            action_name=name,
+            expansion_policy=CalibrationPolicy(cfg.get("expansion_policy", "deny")),
+            surrogate_preferred=bool(cfg.get("surrogate_preferred", False)),
+            requires_direct_need=bool(cfg.get("requires_direct_need", True)),
+            adversarial_provenance_stop=frozenset(
+                ArgumentProvenance(p)
+                for p in (cfg.get("adversarial_provenance_stop") or [])
+            ),
+        )
+        for name, cfg in raw_calibration.items()
+    }
+
+    # ── Compile simulation bindings → MappingProxyType[str, CompiledSimulationBinding] ──
+    # Source: manifest simulation_bindings section.
+    # Absent section → empty dict → simulation_binding_for() returns None for all names.
+    raw_sim_bindings: Dict[str, Any] = raw.get("simulation_bindings", {}) or {}
+    sim_bindings: Dict[str, CompiledSimulationBinding] = {
+        name: CompiledSimulationBinding(
+            action_name=name,
+            returns=dict(cfg.get("returns", {})),
+            _gate=_COMPILE_GATE,
+        )
+        for name, cfg in raw_sim_bindings.items()
+    }
+
     return CompiledPolicy(
+        provenance=provenance,
         actions=actions,
         capability_matrix=capability_matrix,
         taint_rules=taint_rules,
         trust_map=trust_map,
+        provenance_rules=provenance_rules,
+        simulation_bindings=sim_bindings,
+        calibration_constraints=calibration_constraints,
     )

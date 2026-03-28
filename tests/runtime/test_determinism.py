@@ -132,7 +132,7 @@ def test_unknown_action_always_raises_nonexistent(rt):
     source = rt.channel("user").source
 
     for _ in range(5):
-        with pytest.raises(NonExistentAction, match="does not exist in the compiled policy"):
+        with pytest.raises(NonExistentAction, match="is not in the compiled action space"):
             rt.builder.build("ghost_action", source, {}, TaintContext.clean())
 
 

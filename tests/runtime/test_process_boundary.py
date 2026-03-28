@@ -29,7 +29,7 @@ from runtime.models import ConstructionError, NonExistentAction, TaintViolation,
 from runtime.taint import TaintContext, TaintedValue
 
 MANIFEST = os.path.join(os.path.dirname(__file__), "..", "world_manifest.yaml")
-WORKER = os.path.join(os.path.dirname(__file__), "..", "runtime", "worker.py")
+WORKER = os.path.join(os.path.dirname(__file__), "..", "..", "src", "agent_hypervisor", "runtime", "worker.py")
 
 
 @pytest.fixture(scope="module")
@@ -55,7 +55,7 @@ def test_unknown_action_fails_before_worker(rt):
         return original_call_worker(self, spec)
 
     with patch.object(Executor, "_call_worker", counting_call_worker):
-        with pytest.raises(NonExistentAction, match="does not exist in the compiled policy"):
+        with pytest.raises(NonExistentAction, match="not in the compiled action space"):
             rt.builder.build("delete_repository", source, {}, TaintContext.clean())
 
     assert call_counter["count"] == 0, (

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 from .ir import IntentIR
+from .models import NonSimulatableAction
 from .taint import TaintedValue
 
 
@@ -127,3 +128,42 @@ class Executor:
             )
 
         return response["result"]
+
+
+# ── SimulationExecutor ────────────────────────────────────────────────────────
+
+class SimulationExecutor:
+    """
+    Surrogate executor: returns compiled simulation bindings instead of
+    dispatching to the worker subprocess.
+
+    Same interface as Executor (execute(ir) → TaintedValue) so Runtime can
+    hold either executor without modification. No subprocess is launched.
+    No handler code runs. The returned value comes entirely from compiled
+    data in CompiledPolicy.simulation_bindings.
+
+    IRBuilder constraints (ontological, capability, taint, approval) still
+    apply before execute() is called — the IR must be validly constructed.
+    SimulationExecutor only replaces the execution transport, not the guard.
+
+    Raises NonSimulatableAction if the action has no compiled binding.
+    """
+
+    def __init__(self, policy: "Any") -> None:
+        # "Any" here to avoid circular import; policy is CompiledPolicy.
+        self._policy = policy
+
+    def execute(self, ir: IntentIR) -> TaintedValue:
+        """
+        Return the compiled surrogate response for ir.action.name.
+
+        Preserves ir.taint in the output — taint is monotonic even in simulation.
+        Raises NonSimulatableAction if no binding is compiled for this action.
+        """
+        binding = self._policy.simulation_binding_for(ir.action.name)
+        if binding is None:
+            raise NonSimulatableAction(
+                f"Action {ir.action.name!r} has no simulation binding in the compiled policy — "
+                f"add a simulation_bindings entry to the manifest or use build_runtime() instead"
+            )
+        return TaintedValue(value=dict(binding.returns), taint=ir.taint)
