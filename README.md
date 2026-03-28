@@ -31,6 +31,41 @@ The answer is not better filters. It is a different abstraction layer: an **Agen
 
 ---
 
+## Why Most AI Security Fails
+
+Most AI security approaches fall into one of three categories:
+
+| Type | What it does | Deterministic | Bypassable | Scales |
+|------|-------------|---------------|------------|--------|
+| 🔴 **Crutch** | Filters outputs or classifies prompts | No | Yes — adaptive attacks | No |
+| 🟡 **Workaround** | Enforces rules at execution boundary | Mixed | Partly | Partially |
+| 🟢 **Bridge** | Defines what actions can exist at all | Yes | No (bounded) | Yes |
+
+**Crutches** (prompt filters, output scanners, LLM-as-judge) are probabilistic and bypassable.
+They operate *after* the unsafe input has entered the pipeline. Every new attack variant
+needs a new rule. The treadmill never stops.
+
+**Workarounds** (tool allow/deny lists, runtime monitoring, LangChain security layers) solve
+real problems. They are production-usable. But they operate inside an architecturally unsafe
+pipeline, and their coverage is bounded by what they explicitly enumerate.
+
+**Bridges** change what can exist, not what is permitted. The attack surface is removed
+before the agent encounters it — not by filtering, but by construction.
+
+The question shifts from:
+> "Can we stop this attack?"
+
+To:
+> "Can this action exist in this world?"
+
+> Agent Hypervisor does not block unsafe behavior.
+> It defines a world where unsafe behavior does not exist.
+
+→ Full framework: [docs/positioning/crutch_workaround_bridge.md](docs/positioning/crutch_workaround_bridge.md)
+→ Comparison table: [docs/positioning/security_comparison.md](docs/positioning/security_comparison.md)
+
+---
+
 ## Architecture
 
 ```
