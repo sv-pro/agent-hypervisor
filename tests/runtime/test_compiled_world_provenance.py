@@ -130,7 +130,7 @@ def test_startup_fails_when_worker_has_extra_action():
             build_runtime(MANIFEST)
 
     msg = str(exc_info.value)
-    assert "diverges from compiled world" in msg
+    assert "diverges from compiled action space" in msg
     assert "_ghost_action" in msg
     assert "Only in worker" in msg
 
@@ -171,9 +171,9 @@ def test_startup_fails_when_policy_has_extra_action(tmp_path):
         build_runtime(str(manifest))
 
     msg = str(exc_info.value)
-    assert "diverges from compiled world" in msg
+    assert "diverges from compiled action space" in msg
     assert "unimplemented_future_action" in msg
-    assert "Only in policy" in msg
+    assert "Only in action space" in msg
 
 
 def test_startup_error_names_both_sides_when_mutual_divergence():
@@ -194,7 +194,7 @@ def test_startup_error_names_both_sides_when_mutual_divergence():
 
     msg = str(exc_info.value)
     assert "Only in worker" in msg
-    assert "Only in policy" in msg
+    assert "Only in action space" in msg
     assert "_phantom" in msg
     assert "post_webhook" in msg
 

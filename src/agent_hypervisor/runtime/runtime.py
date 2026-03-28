@@ -65,31 +65,30 @@ from .executor import Executor
 
 def _assert_worker_registry_agrees(policy: CompiledPolicy) -> None:
     """
-    Fail at startup if worker._REGISTRY and CompiledPolicy.actions diverge.
+    Fail at startup if worker._REGISTRY diverges from the compiled action space.
 
-    The worker's closed handler set and the compiled action ontology must be
-    identical. A mismatch means either:
-      - A handler exists in the worker for an action the compiled world does
-        not know about (unreachable but present — silent dead code risk).
-      - An action is declared in the manifest but has no worker handler
-        (IRBuilder would permit IR construction but execution would fail closed
-        at the worker).
+    The worker's handler set and policy.action_space must be identical sets.
+    A mismatch means either:
+      - A handler exists in the worker for an action outside the compiled action
+        space (unreachable but present — silent dead code risk).
+      - An action is in the compiled action space but has no worker handler
+        (IRBuilder would permit IR construction but execution would fail at the
+        worker — caught here instead, before any request is processed).
 
-    Both cases are caught here, before any request is processed, so the system
-    refuses to start rather than discovering the drift at execution time.
+    Both cases are caught at startup so the system refuses to start rather than
+    discovering the drift at execution time.
     """
     from . import worker  # subprocess module — local import, never re-exported
 
     worker_actions = frozenset(worker._REGISTRY.keys())
-    compiled_actions = frozenset(policy.actions.keys())
 
-    if worker_actions != compiled_actions:
-        only_in_worker = sorted(worker_actions - compiled_actions)
-        only_in_policy = sorted(compiled_actions - worker_actions)
+    if worker_actions != policy.action_space:
+        only_in_worker = sorted(worker_actions - policy.action_space)
+        only_in_space  = sorted(policy.action_space - worker_actions)
         raise RuntimeError(
-            "Worker registry diverges from compiled world.\n"
-            f"  Only in worker:  {only_in_worker}\n"
-            f"  Only in policy:  {only_in_policy}\n"
+            "Worker registry diverges from compiled action space.\n"
+            f"  Only in worker:       {only_in_worker}\n"
+            f"  Only in action space: {only_in_space}\n"
             "Fix: update world_manifest.yaml and worker._REGISTRY to agree exactly."
         )
 

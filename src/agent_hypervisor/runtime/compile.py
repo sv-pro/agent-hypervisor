@@ -10,6 +10,9 @@ This runs ONCE at startup via build_runtime(). After compilation:
   - No string comparisons, no YAML parsing, no dict iteration at request time
 
 Compile outputs:
+  action_space:      frozenset[str]
+                     The closed action set. These and only these actions exist
+                     in this compiled world. Membership test is O(1).
   actions:           MappingProxyType[str, CompiledAction]
                      Sealed — CallerCode cannot add or modify entries.
   capability_matrix: frozenset[tuple[TrustLevel, ActionType]]
@@ -18,6 +21,8 @@ Compile outputs:
                      Immutable ordered sequence.
   trust_map:         MappingProxyType[str, TrustLevel]
                      Channel identity → TrustLevel, resolved at IR build time.
+  provenance_rules:  tuple[CompiledProvenanceRule, ...]
+                     Compiled provenance decision structure.
 
 Sealing mechanism for CompiledAction:
   _COMPILE_GATE is a module-private object() sentinel. CompiledAction.__init__
@@ -216,6 +221,7 @@ class CompiledPolicy:
 
     __slots__ = (
         "_provenance",
+        "_action_space",
         "_actions",
         "_capability_matrix",
         "_taint_rules",
@@ -233,6 +239,7 @@ class CompiledPolicy:
         provenance_rules: Tuple["CompiledProvenanceRule", ...] = (),
     ) -> None:
         object.__setattr__(self, "_provenance", provenance)
+        object.__setattr__(self, "_action_space", frozenset(actions.keys()))
         object.__setattr__(self, "_actions", MappingProxyType(actions))
         object.__setattr__(self, "_capability_matrix", capability_matrix)
         object.__setattr__(self, "_taint_rules", taint_rules)
@@ -241,6 +248,26 @@ class CompiledPolicy:
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CompiledPolicy is immutable after construction")
+
+    # ── Closed action set ─────────────────────────────────────────────────────
+
+    @property
+    def action_space(self) -> FrozenSet[str]:
+        """
+        The closed action set of this compiled world.
+
+        Contains exactly the names of actions declared in the world manifest.
+        These and only these actions exist — any name absent from this set
+        is impossible in this world, not merely denied.
+
+        This is the canonical existence boundary. Downstream checks
+        (IRBuilder, worker registry assertion) should derive existence from
+        this set, not from len(actions) or actions.keys().
+
+        O(1) membership test:
+            if action_name in policy.action_space: ...
+        """
+        return self._action_space
 
     # ── Provenance ────────────────────────────────────────────────────────────
 
@@ -340,7 +367,7 @@ class CompiledPolicy:
             f"CompiledPolicy("
             f"workflow_id={self._provenance.workflow_id!r}, "
             f"manifest_hash={self._provenance.manifest_hash[:12]!r}, "
-            f"actions={list(self._actions)}, "
+            f"action_space={sorted(self._action_space)}, "
             f"provenance_rules={len(self._provenance_rules)})"
         )
 
