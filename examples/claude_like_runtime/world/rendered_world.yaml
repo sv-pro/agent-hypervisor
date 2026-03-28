@@ -1,11 +1,17 @@
 name: rendered_world
-mode: curated
 description: >
-  Restricted tool surface. Read-only and test-oriented actions only.
+  Restricted action space. Read-only and test-oriented actions only.
   Write operations, shell execution, and push paths do not exist in this world.
   The agent cannot push because push is not a concept that exists here —
-  not because it is blocked, but because it was never rendered.
-tools:
+  not because it is blocked, but because it was never rendered into the
+  Compiled World. All present actions are simulation-bound: execution runs
+  against curated snapshots, not real state.
+action_space:
+  - read_file
+  - grep_code
+  - list_files
+  - run_tests
+simulation_bindings:
   - read_file
   - grep_code
   - list_files

@@ -1,12 +1,14 @@
 name: raw_world
 description: >
-  Broad tool surface. All real side effects are available and executable.
+  Broad action space. All real side effects are available and executable.
   The agent inhabits a world where writing, shelling, committing, and pushing
-  are all ontologically present.
-tools:
+  are all ontologically present. No simulation bindings: every action in this
+  world executes against real state.
+action_space:
   - read_file
   - write_file
   - run_command
   - git_status
   - git_commit
   - git_push
+simulation_bindings: []

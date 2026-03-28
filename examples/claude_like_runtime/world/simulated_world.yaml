@@ -1,11 +1,17 @@
 name: simulated_world
-mode: curated
 description: >
-  Same read/test surface as rendered_world, plus a simulated push path.
-  git_push_simulated exists ontologically — the agent can traverse the push
-  path — but the side effect is captured and echoed, not executed against
-  the real remote. Dangerous actions are rendered as simulations.
-tools:
+  Same read/test action space as rendered_world, plus a simulated push binding.
+  git_push_simulated exists ontologically — the agent can traverse the full
+  push path — but its side effect is captured in the simulation layer, not
+  executed against the real remote. All actions in this world are
+  simulation-bound: rendered reality, not real execution.
+action_space:
+  - read_file
+  - grep_code
+  - list_files
+  - run_tests
+  - git_push_simulated
+simulation_bindings:
   - read_file
   - grep_code
   - list_files

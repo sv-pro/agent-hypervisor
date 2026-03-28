@@ -1,13 +1,20 @@
 """
-proxy.py — WorldProxy: the tool surface enforcement layer.
+proxy.py — WorldProxy: the action dispatch layer.
 
-The proxy is the single point through which all tool calls pass.
-It consults the active world to determine whether a tool ontologically
-exists, and routes execution accordingly.
+The proxy is the single point through which all action calls pass.
+It consults the active Compiled World's action_space to determine whether
+an action ontologically exists, then routes to the appropriate binding:
+real execution or simulation layer.
 
-If a tool is not present in the current world, the proxy does not block
-or deny the call — it reports that the tool does not exist in this world.
-Ontological absence, not policy denial.
+Dispatch logic
+--------------
+  1. Action not in action_space  → absent (does not exist in this world)
+  2. Action in simulation_bindings → simulation layer
+  3. Action in action_space only  → real execution layer
+
+Ontological absence, not policy denial. An action absent from the
+Compiled World's action_space does not exist — it cannot be dispatched,
+formed, or referenced.
 """
 
 from __future__ import annotations
@@ -16,8 +23,13 @@ from runtime.audit import AuditLogger
 import tools.real_tools as real
 import tools.simulated_tools as sim
 
-# Tools that have curated (non-real) implementations for sandboxed worlds.
-_CURATED_REGISTRY: dict[str, callable] = {
+
+# ---------------------------------------------------------------------------
+# Simulation layer: actions with curated (non-real) implementations.
+# Used when an action is present in the Compiled World's simulation_bindings.
+# ---------------------------------------------------------------------------
+
+_SIMULATION_LAYER: dict = {
     "read_file":  lambda inp: sim.curated_read_file(inp["path"]),
     "grep_code":  lambda inp: sim.curated_grep_code(inp["pattern"], inp.get("path", ".")),
     "list_files": lambda inp: sim.curated_list_files(inp.get("path", ".")),
@@ -26,10 +38,12 @@ _CURATED_REGISTRY: dict[str, callable] = {
 
 
 # ---------------------------------------------------------------------------
-# Tool registry: name → (callable, anthropic schema)
+# Action registry: name → (real_callable, anthropic_schema)
+# This is the complete set of known actions. An action only becomes part of
+# a world's ontology when it appears in that world's Compiled World artifact.
 # ---------------------------------------------------------------------------
 
-_TOOL_REGISTRY: dict[str, tuple[callable, dict]] = {
+_ACTION_REGISTRY: dict = {
     "read_file": (
         lambda inp: real.read_file(inp["path"]),
         {
@@ -159,48 +173,58 @@ _TOOL_REGISTRY: dict[str, tuple[callable, dict]] = {
 
 class WorldProxy:
     """
-    Routes tool calls through the active world surface.
+    Routes action calls through the active Compiled World's action space.
 
-    If the requested tool is not in the active world's tool list,
-    the proxy reports its absence — it does not exist in this world.
+    Existence check: if the action is not in the Compiled World's action_space,
+    it does not exist — absent, not blocked.
+
+    Binding dispatch: if the action is in simulation_bindings, it executes
+    against the simulation layer. Otherwise, real execution.
     """
 
     def __init__(self, switcher: WorldSwitcher, audit: AuditLogger) -> None:
         self._switcher = switcher
         self._audit = audit
 
-    def get_anthropic_tool_defs(self) -> list[dict]:
-        """Return Anthropic-format tool definitions for the active world only."""
-        active_tools = self._switcher.get_active_tools()
+    def get_anthropic_tool_defs(self) -> list:
+        """Return Anthropic-format tool definitions for the active Compiled World's action space."""
+        action_space = self._switcher.get_action_space()
         defs = []
-        for name in active_tools:
-            if name in _TOOL_REGISTRY:
-                _, schema = _TOOL_REGISTRY[name]
+        for name in sorted(action_space):
+            if name in _ACTION_REGISTRY:
+                _, schema = _ACTION_REGISTRY[name]
                 defs.append(schema)
         return defs
 
-    def execute(self, tool_name: str, tool_input: dict) -> str:
-        world_name = self._switcher.get_active_name()
-        active_tools = self._switcher.get_active_tools()
+    def execute(self, action_name: str, action_input: dict) -> str:
+        compiled_world = self._switcher.get_compiled_world()
+        world_name = compiled_world.name
 
-        if tool_name not in active_tools:
-            self._audit.log_absent_tool(world_name, tool_name)
+        # Existence check: absent from action_space = does not exist in this world
+        if not compiled_world.is_present(action_name):
+            self._audit.log_absent_action(world_name, action_name)
             return (
-                f"Tool '{tool_name}' does not exist in current world ({world_name})."
+                f"Action '{action_name}' does not exist in this Compiled World "
+                f"({world_name}). The action is absent — not blocked."
             )
 
-        if tool_name not in _TOOL_REGISTRY:
-            return f"Tool '{tool_name}' is declared in world but has no implementation."
+        if action_name not in _ACTION_REGISTRY:
+            return (
+                f"Action '{action_name}' is in the action space but has no implementation."
+            )
 
-        self._audit.log_tool_call(world_name, tool_name, tool_input)
-        mode = self._switcher.get_active_mode()
-        if mode == "curated" and tool_name in _CURATED_REGISTRY:
-            fn = _CURATED_REGISTRY[tool_name]
+        self._audit.log_action_call(world_name, action_name, action_input)
+
+        # Binding dispatch: simulation layer or real execution
+        if compiled_world.is_simulation_bound(action_name) and action_name in _SIMULATION_LAYER:
+            fn = _SIMULATION_LAYER[action_name]
         else:
-            fn, _ = _TOOL_REGISTRY[tool_name]
+            fn, _ = _ACTION_REGISTRY[action_name]
+
         try:
-            result = fn(tool_input)
+            result = fn(action_input)
         except Exception as e:
-            result = f"Tool execution error: {e}"
-        self._audit.log_tool_result(world_name, tool_name, result)
+            result = f"Action execution error: {e}"
+
+        self._audit.log_action_result(world_name, action_name, result)
         return result

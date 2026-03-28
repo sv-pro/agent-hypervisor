@@ -1,9 +1,9 @@
 """
-audit.py — Structured event log for world/tool runtime activity.
+audit.py — Structured event log for Compiled World / action runtime activity.
 
-Every world switch, tool call, result, and absence is recorded here.
-The audit log is the ground truth of what the agent attempted and
-what the world allowed.
+Every world switch, action call, result, and absent-action event is recorded.
+The audit log is the ground truth of what the agent attempted and what the
+Compiled World's action space permitted.
 """
 
 from __future__ import annotations
@@ -18,61 +18,61 @@ def _ts() -> str:
 class AuditLogger:
     def __init__(self, verbose: bool = True) -> None:
         self.verbose = verbose
-        self.events: list[dict] = []
+        self.events: list = []
 
-    def log_world_switch(self, world_name: str, tools: list[str]) -> None:
+    def log_world_switch(self, world_name: str, action_space: list) -> None:
         event = {
             "ts": _ts(),
             "event": "world_switch",
             "world": world_name,
-            "visible_tools": tools,
+            "action_space": sorted(action_space),
         }
         self.events.append(event)
         if self.verbose:
-            print(f"[AUDIT] world_switch → {world_name}  tools={tools}")
+            print(f"[AUDIT] world_switch   → {world_name}  action_space={sorted(action_space)}")
 
-    def log_tool_call(self, world_name: str, tool_name: str, inputs: dict) -> None:
+    def log_action_call(self, world_name: str, action_name: str, inputs: dict) -> None:
         event = {
             "ts": _ts(),
-            "event": "tool_call",
+            "event": "action_call",
             "world": world_name,
-            "tool": tool_name,
+            "action": action_name,
             "inputs": inputs,
         }
         self.events.append(event)
         if self.verbose:
             args_str = json.dumps(inputs, ensure_ascii=False)
-            print(f"[AUDIT] tool_call   → {tool_name}({args_str})")
+            print(f"[AUDIT] action_call    → {action_name}({args_str})")
 
-    def log_tool_result(self, world_name: str, tool_name: str, result: str) -> None:
+    def log_action_result(self, world_name: str, action_name: str, result: str) -> None:
         event = {
             "ts": _ts(),
-            "event": "tool_result",
+            "event": "action_result",
             "world": world_name,
-            "tool": tool_name,
+            "action": action_name,
             "result_preview": result[:120],
         }
         self.events.append(event)
         if self.verbose:
             preview = result[:80].replace("\n", "\\n")
-            print(f"[AUDIT] tool_result ← {tool_name}: {preview!r}")
+            print(f"[AUDIT] action_result  ← {action_name}: {preview!r}")
 
-    def log_absent_tool(self, world_name: str, tool_name: str) -> None:
+    def log_absent_action(self, world_name: str, action_name: str) -> None:
         event = {
             "ts": _ts(),
-            "event": "absent_tool",
+            "event": "absent_action",
             "world": world_name,
-            "tool": tool_name,
+            "action": action_name,
         }
         self.events.append(event)
         if self.verbose:
-            print(f"[AUDIT] absent_tool ! {tool_name} not in world '{world_name}'")
+            print(f"[AUDIT] absent_action  ! '{action_name}' absent from Compiled World '{world_name}'")
 
     def summary(self) -> None:
-        calls = [e for e in self.events if e["event"] == "tool_call"]
-        absences = [e for e in self.events if e["event"] == "absent_tool"]
+        calls = [e for e in self.events if e["event"] == "action_call"]
+        absences = [e for e in self.events if e["event"] == "absent_action"]
         switches = [e for e in self.events if e["event"] == "world_switch"]
         print(
-            f"\n[AUDIT SUMMARY] switches={len(switches)}  "
-            f"calls={len(calls)}  absences={len(absences)}"
+            f"\n[AUDIT SUMMARY] world_switches={len(switches)}  "
+            f"action_calls={len(calls)}  absent_actions={len(absences)}"
         )

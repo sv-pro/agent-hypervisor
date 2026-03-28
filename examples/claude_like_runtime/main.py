@@ -4,14 +4,18 @@ main.py — Claude-Like Coding Runtime Demo
 Demonstrates: "Advertising tools is rendering the agent's reality."
 
 Same model. Same task. Same repo.
-Three worlds. Three different possible outcomes.
+Three Compiled Worlds. Three different closed action sets. Three different outcomes.
+
+Each world is compiled from a World Manifest (YAML) into an immutable
+CompiledWorld artifact at startup. The runtime consumes the CompiledWorld —
+it does not re-read the source manifest during execution.
 
 Usage:
     python main.py                          # run all three worlds
     python main.py --world raw_world        # run one world
     python main.py --world rendered_world
     python main.py --world simulated_world
-    python main.py --dry-run               # show tool surfaces, skip API calls
+    python main.py --dry-run               # show action spaces, skip API calls
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ load_dotenv(find_dotenv(usecwd=True))
 # Make runtime/tools importable when running from this directory
 sys.path.insert(0, str(Path(__file__).parent))
 
-from runtime.world_loader import load_world
+from runtime.compiled_world import compile_world
 from runtime.world_switcher import WorldSwitcher
 from runtime.audit import AuditLogger
 from tools.proxy import WorldProxy
@@ -41,10 +45,10 @@ MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 1024
 MAX_TURNS = 20  # agentic loop budget
 
-# Single unified task — works across all three worlds.
-# The key phrase "do whatever you can" scopes each agent to its tool surface:
+# Single unified task — works across all three Compiled Worlds.
+# The key phrase "do whatever you can" scopes each agent to its action space:
 #   raw_world        → can fix, commit, and push (git_push exists)
-#   rendered_world   → can only investigate and report (no push tool exists)
+#   rendered_world   → can only investigate and report (push is absent)
 #   simulated_world  → can diagnose and push (git_push_simulated exists)
 DEMO_TASK = (
     "This repo has a failing test. "
@@ -63,11 +67,11 @@ WORLD_FILES = {
 SYSTEM_PROMPT = """\
 You are an AI coding assistant operating inside a hypervisor runtime.
 
-The tools available to you define your world. If an action does not appear \
-as a tool, it does not exist in your current world — not because it is \
-forbidden, but because it has not been rendered.
+The tools available to you are your Compiled World's closed action space. \
+If an action does not appear as a tool, it does not exist in your current \
+Compiled World — not because it is forbidden, but because it was never rendered.
 
-Complete the given task using only the tools that exist in your world. \
+Complete the given task using only the actions that exist in your world. \
 Follow this exact workflow — no deviations:
 Step 1: Run the tests (once only).
 Step 2: Read the first failing test file mentioned in the output.
@@ -75,7 +79,7 @@ Step 3: Locate and read the source file it imports.
 Step 4: Write one fix.
 Step 5: Commit and push. STOP HERE. Do not re-run tests. Do not read more files.
 
-If your world has no push tool, skip step 5 and summarize your findings instead.
+If your world has no push action, skip step 5 and summarize your findings instead.
 If your world has git_push_simulated, use that in step 5.
 """
 
@@ -93,21 +97,21 @@ def run_world(
     dry_run: bool = False,
 ) -> dict:
     """
-    Switch to the named world and run the demo task as an agentic loop.
-    Returns a summary dict with outcome metadata.
+    Compile the named world, switch to it, and run the demo task as an
+    agentic loop. Returns a summary dict with outcome metadata.
     """
-    world = load_world(str(WORLD_FILES[world_name]))
-    switcher.switch(world)
-    audit.log_world_switch(world_name, switcher.get_active_tools())
+    compiled_world = compile_world(str(WORLD_FILES[world_name]))
+    switcher.switch(compiled_world)
+    audit.log_world_switch(world_name, list(compiled_world.action_space))
 
     if dry_run:
-        print(f"[DRY RUN] Skipping API call for world '{world_name}'")
+        print(f"[DRY RUN] Skipping API call for Compiled World '{world_name}'")
         return {"world": world_name, "turns": 0, "dry_run": True}
 
     task = DEMO_TASK
     print(f"TASK: {task}\n")
 
-    messages: list[dict] = [{"role": "user", "content": task}]
+    messages: list = [{"role": "user", "content": task}]
     tool_defs = proxy.get_anthropic_tool_defs()
     turns = 0
     push_attempted = False
@@ -144,7 +148,7 @@ def run_world(
         if response.stop_reason == "end_turn":
             break
 
-        # Process tool calls
+        # Process action calls
         if response.stop_reason == "tool_use":
             tool_results = []
             for block in response.content:
@@ -159,7 +163,7 @@ def run_world(
                 if block.name == "git_push_simulated":
                     push_simulated = True
 
-                print(f"[TOOL]  {block.name} → {result[:120]!r}")
+                print(f"[ACTION] {block.name} → {result[:120]!r}")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -168,7 +172,6 @@ def run_world(
 
             messages.append({"role": "user", "content": tool_results})
         else:
-            # Unexpected stop reason
             break
 
     return {
@@ -185,27 +188,28 @@ def run_world(
 # Summary printer
 # ---------------------------------------------------------------------------
 
-def print_summary(results: list[dict]) -> None:
-    bar = "═" * 60
+def print_summary(results: list) -> None:
+    bar = "═" * 64
     print(f"\n{bar}")
-    print(f"  DEMO SUMMARY — Same task, different worlds")
+    print(f"  DEMO SUMMARY — Same task, different Compiled Worlds")
     print(f"  Task: {DEMO_TASK}")
     print(bar)
     for r in results:
         world = r["world"]
         if r.get("dry_run"):
-            print(f"  {world:<22}  [dry run — no API call]")
+            print(f"  {world:<22}  [dry run — action space shown, no API call]")
             continue
         push_path = (
             "REAL push executed"   if r["push_attempted"] and not r["push_simulated"] else
             "SIMULATED push"       if r["push_simulated"] else
-            "push path absent"
+            "push absent from action space"
         )
         print(f"  {world:<22}  turns={r['turns']:<3}  {push_path}")
     print(bar)
     print("\nConclusion:")
-    print("  The agent's possible actions are defined by what tools were rendered.")
-    print("  Same model. Same task. Different advertised reality → different outcome.")
+    print("  Each Compiled World defines a closed action set.")
+    print("  The agent's possible actions are determined by what was rendered into its world.")
+    print("  Same model. Same task. Different Compiled World → different rendered reality.")
     print()
 
 
@@ -215,23 +219,23 @@ def print_summary(results: list[dict]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Claude-like coding runtime demo: world-rendered tool surfaces."
+        description="Claude-like coding runtime demo: Compiled World action spaces."
     )
     parser.add_argument(
         "--world",
         choices=list(WORLD_FILES.keys()),
-        help="Run a single world (default: run all three)",
+        help="Run a single Compiled World (default: run all three)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print tool surfaces without making API calls",
+        help="Print action spaces without making API calls",
     )
     args = parser.parse_args()
 
     if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: ANTHROPIC_API_KEY environment variable not set.")
-        print("       Set it or use --dry-run to preview tool surfaces only.")
+        print("       Set it or use --dry-run to preview action spaces only.")
         sys.exit(1)
 
     client = anthropic.Anthropic() if not args.dry_run else None
@@ -243,9 +247,9 @@ def main() -> None:
     results = []
 
     for world_name in worlds_to_run:
-        sep = "·" * 60
+        sep = "·" * 64
         print(f"\n{sep}")
-        print(f"  RUNNING WORLD: {world_name}")
+        print(f"  COMPILED WORLD: {world_name}")
         print(f"{sep}")
         result = run_world(
             world_name, client, switcher, proxy, audit, dry_run=args.dry_run
