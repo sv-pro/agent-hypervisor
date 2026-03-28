@@ -165,6 +165,48 @@ Each action is individually legal. The chain is not.
 
 ---
 
+## Calibration
+
+The compiled world is not static. It evolves under evidence through the calibration loop:
+
+```
+Design → Compile → Deploy → Learn → Redesign
+```
+
+| Phase | What happens |
+|---|---|
+| **Design** | Human (+ optional synthesizer) authors the World Manifest |
+| **Compile** | `ahc build` transforms the manifest into the Compiled World |
+| **Deploy** | The compiled world governs a live agent session |
+| **Learn** | Traces, approvals, and benchmark results reveal gaps and over-reach |
+| **Redesign** | Evidence feeds back into manifest revision |
+
+Calibration is human-gated. The policy tuner (`docs/architecture/policy_tuner.md`) makes the Learn phase concrete: it analyzes runtime data and produces structured suggestions. Suggestions require human review before any manifest change. The tuner does not modify the compiled world — only the compiler does that.
+
+The LLM participates only in Design (via the synthesizer). Phases 2–5 are LLM-free.
+
+---
+
+## Simulation Mode
+
+The compiled world can be exercised without live tools. Simulation runs the same enforcement engine used in production, with real tool invocations replaced by stubs that record decisions without executing side effects.
+
+```
+ahc simulate <scenario-set> <compiled-artifacts>
+    │
+    ▼
+IRBuilder.build()       ← same enforcement engine
+    │
+    ▼
+Decision table          ← ALLOW / DENY_ABSENT / DENY_POLICY per step
+```
+
+Fidelity is guaranteed by construction: because simulation uses the compiled artifacts (not the raw manifest), the decisions it produces are identical to what the live runtime would produce for the same inputs. Simulation is not an approximation — it is the compiled world running in isolation.
+
+This makes simulation a first-class tool for the calibration loop: a manifest revision can be simulated against a known scenario set before deployment, confirming that the change has the intended effect. See ADR-002 for the fidelity model decision.
+
+---
+
 ## The Ontology Insight
 
 Most security models focus on behavior: they ask whether an action is permitted.
@@ -215,6 +257,8 @@ Raw input
 
 The agent (LLM) operates only in the intent-production step. It does not participate in trust classification, taint propagation, policy evaluation, or execution. Policy evaluation is deterministic: same input, same decision, always.
 
+The Compiled World is the central artifact in this path. The runtime loads it once at startup (`compile_world()`). Every subsequent enforcement decision is a lookup against the Compiled World — no re-reading of the manifest, no interpretation at runtime.
+
 ---
 
 ## Component Map
@@ -228,6 +272,21 @@ The agent (LLM) operates only in the intent-production step. It does not partici
 
 ---
 
-*See [`docs/architecture/technical-spec.md`](technical-spec.md) for the implementation specification.*  
-*See [`docs/architecture/threat-model.md`](threat-model.md) for the formal threat scope.*  
+*See [`docs/architecture/technical-spec.md`](technical-spec.md) for the implementation specification.*
+*See [`docs/architecture/threat-model.md`](threat-model.md) for the formal threat scope.*
 *See [`docs/concept/overview.md`](../concept/overview.md) for the five-layer conceptual model.*
+
+---
+
+## Layer Model Mapping
+
+`docs/concept/overview.md` uses a five-layer model for conceptual clarity. This document uses a four-layer model. They describe the same architecture with different granularity:
+
+| This doc (4-layer) | overview.md (5-layer) |
+|---|---|
+| Layer 0: Execution Physics | (infrastructure; not a named layer in overview) |
+| Layer 1: Base Ontology | Layer 2: Universe Definition |
+| Layer 2: Dynamic Ontology Projection | Layer 3: Agent Interface |
+| Layer 3: Execution Governance | Layer 4: World Policy + Layer 5: Execution Boundary |
+
+The overview's Layer 1 (Input Boundary) has no direct counterpart in this doc's layer numbering — it corresponds to the trust classification and taint assignment steps in the Enforcement Path above.
