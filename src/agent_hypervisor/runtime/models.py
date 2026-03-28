@@ -140,3 +140,16 @@ class ApprovalRequired(ConstructionError):
     and the capability check passes, but construction is blocked until an
     approval mechanism is implemented.
     """
+
+
+class NonSimulatableAction(RuntimeError):
+    """
+    The action has no simulation binding in the compiled policy.
+
+    Raised by SimulationExecutor when execute(ir) is called for an action
+    whose action_name is not present in policy.simulation_bindings.
+
+    This is a simulation-mode gap, not an ontological absence — the action
+    exists and the IR was validly constructed; only the surrogate response
+    is missing from the compiled artifact.
+    """

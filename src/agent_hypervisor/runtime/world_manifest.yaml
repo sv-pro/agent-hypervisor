@@ -133,3 +133,36 @@ provenance_rules:
   - id: ask-download-report
     tool: download_report
     verdict: ask
+
+# ── Simulation bindings ───────────────────────────────────────────────────────
+# Compiled into MappingProxyType[str, CompiledSimulationBinding] at startup.
+# Used ONLY by SimulationExecutor (build_simulation_runtime()).
+# The real Executor (subprocess) ignores this section entirely.
+#
+# Each binding provides a deterministic surrogate response for the action.
+# All IRBuilder constraints still apply — simulation replaces transport, not guard.
+
+simulation_bindings:
+  read_data:
+    returns:
+      data: "simulated-result"
+      rows: 42
+
+  summarize:
+    returns:
+      summary: "simulated summary"
+
+  send_email:
+    returns:
+      sent: true
+      message_id: "sim-001"
+
+  download_report:
+    returns:
+      report: "simulated report content"
+      pages: 10
+
+  post_webhook:
+    returns:
+      status: 200
+      ok: true

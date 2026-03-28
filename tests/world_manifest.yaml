@@ -72,3 +72,28 @@ provenance_rules:
   - id: ask-download-report
     tool: download_report
     verdict: ask
+
+simulation_bindings:
+  read_data:
+    returns:
+      data: "simulated-result"
+      rows: 42
+
+  summarize:
+    returns:
+      summary: "simulated summary"
+
+  send_email:
+    returns:
+      sent: true
+      message_id: "sim-001"
+
+  download_report:
+    returns:
+      report: "simulated report content"
+      pages: 10
+
+  post_webhook:
+    returns:
+      status: 200
+      ok: true

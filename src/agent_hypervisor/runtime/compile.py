@@ -17,12 +17,15 @@ Compile outputs:
                      Sealed — CallerCode cannot add or modify entries.
   capability_matrix: frozenset[tuple[TrustLevel, ActionType]]
                      O(1) membership test — no loops, no strings.
-  taint_rules:       tuple[TaintRule, ...]
-                     Immutable ordered sequence.
-  trust_map:         MappingProxyType[str, TrustLevel]
-                     Channel identity → TrustLevel, resolved at IR build time.
-  provenance_rules:  tuple[CompiledProvenanceRule, ...]
-                     Compiled provenance decision structure.
+  taint_rules:          tuple[TaintRule, ...]
+                        Immutable ordered sequence.
+  trust_map:            MappingProxyType[str, TrustLevel]
+                        Channel identity → TrustLevel, resolved at IR build time.
+  provenance_rules:     tuple[CompiledProvenanceRule, ...]
+                        Compiled provenance decision structure.
+  simulation_bindings:  MappingProxyType[str, CompiledSimulationBinding]
+                        Surrogate responses keyed by action name. Used only by
+                        SimulationExecutor — the real Executor ignores this field.
 
 Sealing mechanism for CompiledAction:
   _COMPILE_GATE is a module-private object() sentinel. CompiledAction.__init__
@@ -203,6 +206,47 @@ def _provenance_rule_matches(
     return True
 
 
+# ── CompiledSimulationBinding ─────────────────────────────────────────────────
+
+class CompiledSimulationBinding:
+    """
+    A sealed surrogate response for one action in simulation mode.
+
+    Produced at compile time from the manifest's simulation_bindings section.
+    Used exclusively by SimulationExecutor — the real Executor (subprocess)
+    ignores this object entirely.
+
+    The returns field is a MappingProxyType so callers cannot mutate it after
+    the binding is compiled. The binding itself is sealed by _COMPILE_GATE.
+
+    Fields:
+        action_name : the action this binding applies to (same as the dict key)
+        returns     : immutable surrogate result dict returned by SimulationExecutor
+    """
+
+    __slots__ = ("action_name", "returns")
+
+    def __init__(
+        self,
+        action_name: str,
+        returns: Dict[str, Any],
+        _gate: object,
+    ) -> None:
+        if _gate is not _COMPILE_GATE:
+            raise TypeError(
+                "CompiledSimulationBinding cannot be constructed outside the compile phase. "
+                "Obtain bindings from CompiledPolicy.simulation_bindings."
+            )
+        object.__setattr__(self, "action_name", action_name)
+        object.__setattr__(self, "returns", MappingProxyType(returns))
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("CompiledSimulationBinding is immutable after construction")
+
+    def __repr__(self) -> str:
+        return f"CompiledSimulationBinding({self.action_name!r}, returns={dict(self.returns)!r})"
+
+
 # ── CompiledPolicy ────────────────────────────────────────────────────────────
 
 class CompiledPolicy:
@@ -227,6 +271,7 @@ class CompiledPolicy:
         "_taint_rules",
         "_trust_map",
         "_provenance_rules",
+        "_simulation_bindings",
     )
 
     def __init__(
@@ -237,6 +282,7 @@ class CompiledPolicy:
         taint_rules: Tuple[TaintRule, ...],
         trust_map: Dict[str, TrustLevel],
         provenance_rules: Tuple["CompiledProvenanceRule", ...] = (),
+        simulation_bindings: Dict[str, "CompiledSimulationBinding"] = {},
     ) -> None:
         object.__setattr__(self, "_provenance", provenance)
         object.__setattr__(self, "_action_space", frozenset(actions.keys()))
@@ -245,6 +291,7 @@ class CompiledPolicy:
         object.__setattr__(self, "_taint_rules", taint_rules)
         object.__setattr__(self, "_trust_map", MappingProxyType(trust_map))
         object.__setattr__(self, "_provenance_rules", provenance_rules)
+        object.__setattr__(self, "_simulation_bindings", MappingProxyType(simulation_bindings))
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CompiledPolicy is immutable after construction")
@@ -362,6 +409,28 @@ class CompiledPolicy:
         """
         return self._trust_map.get(channel_identity, TrustLevel.UNTRUSTED)
 
+    # ── Simulation bindings ───────────────────────────────────────────────────
+
+    @property
+    def simulation_bindings(self) -> MappingProxyType:
+        """
+        Read-only map of action name → CompiledSimulationBinding.
+
+        Present on every CompiledPolicy. Empty when the manifest has no
+        simulation_bindings section. SimulationExecutor reads from this;
+        the real Executor (subprocess) never touches it.
+        """
+        return self._simulation_bindings
+
+    def simulation_binding_for(self, action_name: str) -> "Optional[CompiledSimulationBinding]":
+        """
+        Return the CompiledSimulationBinding for action_name, or None.
+
+        None means the action has no surrogate response in the compiled policy.
+        SimulationExecutor raises NonSimulatableAction when this returns None.
+        """
+        return self._simulation_bindings.get(action_name)
+
     def __repr__(self) -> str:
         return (
             f"CompiledPolicy("
@@ -450,6 +519,19 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
         for i, r in enumerate(raw_provenance_rules)
     )
 
+    # ── Compile simulation bindings → MappingProxyType[str, CompiledSimulationBinding] ──
+    # Source: manifest simulation_bindings section.
+    # Absent section → empty dict → simulation_binding_for() returns None for all names.
+    raw_sim_bindings: Dict[str, Any] = raw.get("simulation_bindings", {}) or {}
+    sim_bindings: Dict[str, CompiledSimulationBinding] = {
+        name: CompiledSimulationBinding(
+            action_name=name,
+            returns=dict(cfg.get("returns", {})),
+            _gate=_COMPILE_GATE,
+        )
+        for name, cfg in raw_sim_bindings.items()
+    }
+
     return CompiledPolicy(
         provenance=provenance,
         actions=actions,
@@ -457,4 +539,5 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
         taint_rules=taint_rules,
         trust_map=trust_map,
         provenance_rules=provenance_rules,
+        simulation_bindings=sim_bindings,
     )

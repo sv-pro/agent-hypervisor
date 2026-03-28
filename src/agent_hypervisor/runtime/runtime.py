@@ -60,7 +60,7 @@ from typing import Any
 from .compile import CompiledPolicy, compile_world
 from .channel import Channel
 from .ir import IRBuilder
-from .executor import Executor
+from .executor import Executor, SimulationExecutor
 
 
 def _assert_worker_registry_agrees(policy: CompiledPolicy) -> None:
@@ -167,5 +167,32 @@ def build_runtime(manifest_path: str = "world_manifest.yaml") -> Runtime:
     policy = compile_world(manifest_path)
     _assert_worker_registry_agrees(policy)
     executor = Executor()
+
+    return Runtime(policy, executor)
+
+
+def build_simulation_runtime(manifest_path: str = "world_manifest.yaml") -> Runtime:
+    """
+    Simulation entry point: compile world manifest and return a Runtime backed
+    by SimulationExecutor instead of the real subprocess Executor.
+
+    No subprocess is launched. No worker handlers run. Responses come entirely
+    from the compiled simulation_bindings in the manifest.
+
+    Worker registry agreement is NOT checked — simulation mode has no subprocess
+    handler set to agree with. IRBuilder constraints (ontological, capability,
+    taint, approval) are still enforced — simulation replaces transport, not guard.
+
+    Raises NonSimulatableAction at execute() time if an action has no compiled
+    simulation binding.
+    """
+    if not os.path.isabs(manifest_path):
+        manifest_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            manifest_path,
+        )
+
+    policy = compile_world(manifest_path)
+    executor = SimulationExecutor(policy)
 
     return Runtime(policy, executor)

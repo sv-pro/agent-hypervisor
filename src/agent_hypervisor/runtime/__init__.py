@@ -1,4 +1,4 @@
-from .runtime import Runtime, build_runtime
+from .runtime import Runtime, build_runtime, build_simulation_runtime
 from .models import (
     ActionType,
     ApprovalRequired,
@@ -6,6 +6,7 @@ from .models import (
     ConstructionError,
     ConstraintViolation,
     NonExistentAction,
+    NonSimulatableAction,
     ProvenanceVerdict,
     TaintState,
     TaintViolation,
@@ -15,19 +16,25 @@ from .taint import TaintContext, TaintedValue
 from .compile import (
     CompiledPolicy,
     CompiledProvenanceRule,
+    CompiledSimulationBinding,
     ManifestProvenance,
     compile_world,
 )
+from .executor import SimulationExecutor
 
 __all__ = [
-    # Entry point
+    # Entry points
     "Runtime",
     "build_runtime",
+    "build_simulation_runtime",
     # Policy compilation
     "CompiledPolicy",
     "CompiledProvenanceRule",
+    "CompiledSimulationBinding",
     "ManifestProvenance",
     "compile_world",
+    # Simulation executor
+    "SimulationExecutor",
     # Enumerations
     "ActionType",
     "ArgumentProvenance",
@@ -43,4 +50,6 @@ __all__ = [
     "ConstraintViolation",
     "TaintViolation",
     "ApprovalRequired",
+    # Simulation errors
+    "NonSimulatableAction",
 ]
