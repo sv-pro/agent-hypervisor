@@ -88,11 +88,16 @@ class ToolRequest(BaseModel):
     arguments:  map of argument name → ArgSpec
     call_id:    optional client-supplied identifier for correlation
     provenance: optional request-level metadata (session_id, task, etc.)
+    plan_type:  execution strategy — "direct" (default) or "program".
+                "direct" preserves the existing adapter call, unchanged.
+                "program" routes to ProgramExecutor (stub in Phase 1).
+                If omitted, behaviour is identical to before this field existed.
     """
     tool: str
     arguments: dict[str, ArgSpec] = {}
     call_id: str = ""
     provenance: dict[str, Any] = {}
+    plan_type: str = "direct"  # Program Layer extension point (Phase 1: stub)
 
 
 class GatewayResponse(BaseModel):
@@ -483,11 +488,14 @@ class ExecutionRouter:
             )
 
         # Step 6: Execute adapter (only if allow)
+        # Program Layer extension: _dispatch_execution() routes to the
+        # appropriate executor based on request.plan_type.  When plan_type is
+        # "direct" (the default), behaviour is identical to before this change.
         result = None
         result_summary = None
         if final_verdict == "allow":
             raw_args = {k: v.value for k, v in args_map.items()}
-            result = tool_def.adapter(raw_args)
+            result = self._dispatch_execution(request.plan_type, tool_def, raw_args)
             result_summary = str(result)[:200] if result else None
 
         # Step 6.5: Pre-generate approval_id for ask verdicts
@@ -670,6 +678,43 @@ class ExecutionRouter:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _dispatch_execution(
+        self,
+        plan_type: str,
+        tool_def: Any,
+        raw_args: dict,
+    ) -> Any:
+        """
+        Route execution based on plan_type.
+
+        "direct" (default):
+            Delegates to the registered tool adapter — identical to the
+            behaviour that existed before the Program Layer was introduced.
+            This path is the only one exercised in normal operation.
+
+        "program":
+            Delegates to ProgramExecutor (Phase 1 stub).
+            Currently raises NotImplementedError — real sandbox deferred.
+            All policy enforcement has already run before this is called;
+            the World Kernel's verdict is final and is not re-evaluated here.
+
+        Any unknown plan_type falls back to "direct" to preserve forward
+        compatibility with future plan types that older gateway versions
+        may not understand.
+        """
+        if plan_type == "program":
+            from ...program_layer.execution_plan import ProgramExecutionPlan
+            from ...program_layer.program_executor import ProgramExecutor
+
+            plan = ProgramExecutionPlan(
+                plan_id=f"gateway-{id(raw_args):x}",
+                program_source=None,
+            )
+            return ProgramExecutor().execute(plan, context={"args": raw_args})
+
+        # Default: direct execution via registered adapter (unchanged behaviour)
+        return tool_def.adapter(raw_args)
 
     def _build_value_refs(
         self,

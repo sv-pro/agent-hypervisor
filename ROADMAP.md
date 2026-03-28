@@ -301,6 +301,120 @@ v0.2 and v0.3 are sequential. v0.4 depends on v0.2 (for schema richness) and ben
 
 ---
 
+---
+
+## Program Layer Evolution
+
+The Program Layer is an optional execution abstraction introduced above the World
+Kernel. It allows future task execution to be driven by structured programs rather
+than single tool adapter calls, without touching the deterministic enforcement path.
+
+**Guiding constraint:** Programs may define *how* tasks are executed. They may
+never define *what* is possible. That remains defined by the World Kernel.
+
+---
+
+### Phase 0 — Locked Core *(complete)*
+
+**Goal:** Prove deterministic enforcement. Establish the World Kernel.
+
+**Scope:**
+- Runtime enforcement kernel (IRBuilder, taint, provenance, compile)
+- ProvenanceFirewall + PolicyEngine
+- Gateway with approval workflow and audit traces
+
+**Out of scope:** Any concept of programs, task compilers, or dynamic execution.
+
+---
+
+### Phase 1 — Minimal Task Compiler Scaffold *(this change)*
+
+**Goal:** Introduce extension points without changing existing behaviour.
+
+**Scope:**
+- `ExecutionPlan` hierarchy (`DirectExecutionPlan`, `ProgramExecutionPlan`)
+- `TaskCompiler`, `Executor`, `ProgramRegistry` interface definitions
+- `ProgramExecutor` stub (raises `NotImplementedError`)
+- `_dispatch_execution()` switch in `ExecutionRouter` (default: direct, unchanged)
+- `plan_type` field on `ToolRequest` (optional, defaults to `"direct"`)
+- Architectural audit and ADR-005
+
+**Out of scope:**
+- Real sandbox execution
+- LLM at runtime
+- Program generation
+- `TaskCompiler` invocation
+- `ProgramRegistry` storage
+
+---
+
+### Phase 2 — Observability and Program Extraction
+
+**Goal:** Capture execution traces in a form that can be replayed as programs.
+Begin extracting "disposable" programs from observed tool call sequences.
+
+**Scope:**
+- Trace schema extended with program-relevant structure (call sequences, arg flow)
+- Program extraction from trace replay (offline, design-time)
+- Disposable program representation
+
+**Out of scope:**
+- Sandbox execution of extracted programs
+- Review or attestation workflow
+- Persistence in `ProgramRegistry`
+
+---
+
+### Phase 3 — Review and Minimization
+
+**Goal:** Introduce a review gate for extracted programs. Produce "reviewed" programs
+that a human or automated pipeline has inspected and confirmed within-bounds.
+
+**Scope:**
+- Review workflow (offline, not on the enforcement path)
+- Program minimization (remove redundant steps from observed traces)
+- `reviewed` state in Program Ladder
+
+**Out of scope:**
+- Attestation
+- `ProgramRegistry` persistence
+- Runtime invocation of reviewed programs
+
+---
+
+### Phase 4 — Program Registry
+
+**Goal:** Implement `ProgramRegistry` storage and attestation. Allow attested
+programs to be referenced by `program_id` in `ProgramExecutionPlan`.
+
+**Scope:**
+- `ProgramRegistry.store()` and `load()` implementation
+- Attestation signing (simple: hash + signature)
+- `attested` state in Program Ladder
+- `ProgramExecutor` reads from registry when `program_id` is set
+
+**Out of scope:**
+- Real sandbox execution (program still runs as a direct adapter sequence)
+- LLM at runtime
+
+---
+
+### Phase 5 — Advanced Executors
+
+**Goal:** Replace `ProgramExecutor`'s `NotImplementedError` with real sandboxed
+execution. Programs run in an isolated environment bounded by the World Kernel.
+
+**Scope:**
+- Sandbox model (process isolation, resource limits, I/O policy)
+- `ProgramExecutor.execute()` implementation
+- Integration with `TaskCompiler` for runtime program generation (optional)
+- Latency and correctness benchmarks vs. direct execution baseline
+
+**Out of scope:** Changes to the World Kernel (runtime enforcement, taint, provenance).
+The sandbox is bounded by the Kernel — it cannot expand what is permitted.
+
+---
+
 ## Open Architectural Decisions
 
 The following decisions are unresolved and tracked in [`docs/ADR/`](docs/ADR/README.md). Each has a designated resolution trigger tied to a phase milestone.
