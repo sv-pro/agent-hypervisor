@@ -36,3 +36,39 @@ taint_rules:
   - taint: tainted
     action_type: external
     reason: "Tainted data cannot flow into external actions — IR construction blocked"
+
+provenance_rules:
+
+  - id: allow-read-data
+    tool: read_data
+    verdict: allow
+
+  - id: allow-summarize
+    tool: summarize
+    verdict: allow
+
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  - id: ask-email-declared-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask
+
+  - id: deny-webhook-external-body
+    tool: post_webhook
+    argument: body
+    provenance: external_document
+    verdict: deny
+
+  - id: ask-webhook-clean
+    tool: post_webhook
+    verdict: ask
+
+  - id: ask-download-report
+    tool: download_report
+    verdict: ask

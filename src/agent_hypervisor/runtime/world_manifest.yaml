@@ -75,3 +75,61 @@ taint_rules:
   - taint: tainted
     action_type: external
     reason: "Tainted data cannot flow into external actions — IR construction blocked"
+
+# ── Provenance rules ──────────────────────────────────────────────────────────
+# Compiled into tuple[CompiledProvenanceRule, ...] at startup.
+# Evaluated by CompiledPolicy.evaluate_provenance() — no YAML access at call time.
+#
+# Verdict precedence: deny > ask > allow.
+# No-match default: deny (fail-closed).
+#
+# Rule structure:
+#   id:         unique rule identifier (for trace logs)
+#   tool:       tool name or "*" for any tool
+#   argument:   argument name to inspect (omit for whole-call rules)
+#   provenance: provenance class that must appear in the argument chain (omit = any)
+#   verdict:    allow | deny | ask
+
+provenance_rules:
+
+  # Read-only internal actions — always allow
+  - id: allow-read-data
+    tool: read_data
+    verdict: allow
+
+  - id: allow-summarize
+    tool: summarize
+    verdict: allow
+
+  # send_email: provenance-gated on recipient argument
+  # RULE-01: external_document in recipient chain → hard deny
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  # user_declared recipient → ask for confirmation
+  - id: ask-email-declared-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask
+
+  # post_webhook: provenance-gated on body argument
+  # Data derived from external_document reaching post_webhook → deny (exfiltration)
+  - id: deny-webhook-external-body
+    tool: post_webhook
+    argument: body
+    provenance: external_document
+    verdict: deny
+
+  # post_webhook with clean data → ask for confirmation
+  - id: ask-webhook-clean
+    tool: post_webhook
+    verdict: ask
+
+  # download_report requires approval; provenance gate → ask
+  - id: ask-download-report
+    tool: download_report
+    verdict: ask

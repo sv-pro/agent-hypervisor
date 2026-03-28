@@ -16,6 +16,38 @@ Design notes:
 from enum import Enum
 
 
+class ProvenanceVerdict(Enum):
+    """
+    The verdict produced by evaluating compiled provenance rules.
+
+    Verdict precedence (highest wins when multiple rules match):
+        deny > ask > allow
+
+    Fail-closed default: if no rule matches, the runtime returns deny.
+    """
+    allow = "allow"
+    deny  = "deny"
+    ask   = "ask"
+
+
+class ArgumentProvenance(Enum):
+    """
+    Provenance class of a value argument, ordered from least to most trusted.
+
+    Mirrors hypervisor.models.ProvenanceClass but lives in the runtime kernel
+    so compile.py has no import dependency on hypervisor/.
+
+        external_document  — content from files, network, or agent outputs
+        derived            — computed/extracted from one or more parents
+        user_declared      — explicitly stated by the operator in the manifest
+        system             — hardcoded by the system (no user influence)
+    """
+    external_document = "external_document"
+    derived           = "derived"
+    user_declared     = "user_declared"
+    system            = "system"
+
+
 class TaintState(Enum):
     CLEAN = "clean"
     TAINTED = "tainted"

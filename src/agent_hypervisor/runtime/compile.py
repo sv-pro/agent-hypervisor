@@ -42,7 +42,7 @@ from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 import yaml
 
-from .models import ActionType, TaintState, TrustLevel
+from .models import ActionType, ArgumentProvenance, ProvenanceVerdict, TaintState, TrustLevel
 
 
 # ── ManifestProvenance ────────────────────────────────────────────────────────
@@ -134,6 +134,70 @@ class CompiledAction:
         return self.name == other.name
 
 
+# ── CompiledProvenanceRule ────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompiledProvenanceRule:
+    """
+    One compiled provenance rule from the world manifest.
+
+    Replaces a YAML dict entry that would otherwise be interpreted at runtime.
+    All fields are typed enums produced at compile_world() time; no string
+    comparison or enum construction occurs after compilation.
+
+    Matching semantics:
+        tool       : "*" matches any tool name, otherwise exact match
+        argument   : None means the rule applies to the whole call
+                     (not to a specific argument); otherwise exact match
+        provenance : None means any provenance; otherwise the ArgumentProvenance
+                     must appear somewhere in the argument's provenance chain
+        verdict    : the verdict to return if this rule matches
+
+    Verdict precedence (highest wins across all matching rules):
+        deny (2) > ask (1) > allow (0)
+
+    Fail-closed default: if no rule matches, evaluate_provenance() returns deny.
+    """
+    rule_id: str
+    tool: str
+    verdict: ProvenanceVerdict
+    argument: Optional[str] = None
+    provenance: Optional[ArgumentProvenance] = None
+
+
+# Precedence table used by evaluate_provenance — module-level constant.
+_VERDICT_PRECEDENCE: dict[str, int] = {"deny": 2, "ask": 1, "allow": 0}
+
+
+def _provenance_rule_matches(
+    rule: CompiledProvenanceRule,
+    tool: str,
+    argument: Optional[str],
+    chain_provenances: FrozenSet[ArgumentProvenance],
+) -> bool:
+    """
+    Return True if the compiled rule applies to (tool, argument, chain).
+
+    Module-private helper so CompiledPolicy.evaluate_provenance() stays
+    readable. Contains no I/O, no string-to-enum construction, no YAML access.
+    """
+    # Tool filter
+    if rule.tool != "*" and rule.tool != tool:
+        return False
+
+    # Argument + provenance filter
+    if rule.argument is not None:
+        # Rule targets a specific argument: caller must have provided that argument.
+        if argument != rule.argument:
+            return False
+        # If the rule also filters on a provenance class, that class must appear
+        # somewhere in the argument's provenance chain.
+        if rule.provenance is not None and rule.provenance not in chain_provenances:
+            return False
+
+    return True
+
+
 # ── CompiledPolicy ────────────────────────────────────────────────────────────
 
 class CompiledPolicy:
@@ -150,7 +214,14 @@ class CompiledPolicy:
     occurs after compile_world() returns.
     """
 
-    __slots__ = ("_provenance", "_actions", "_capability_matrix", "_taint_rules", "_trust_map")
+    __slots__ = (
+        "_provenance",
+        "_actions",
+        "_capability_matrix",
+        "_taint_rules",
+        "_trust_map",
+        "_provenance_rules",
+    )
 
     def __init__(
         self,
@@ -159,12 +230,14 @@ class CompiledPolicy:
         capability_matrix: FrozenSet[Tuple[TrustLevel, ActionType]],
         taint_rules: Tuple[TaintRule, ...],
         trust_map: Dict[str, TrustLevel],
+        provenance_rules: Tuple["CompiledProvenanceRule", ...] = (),
     ) -> None:
         object.__setattr__(self, "_provenance", provenance)
         object.__setattr__(self, "_actions", MappingProxyType(actions))
         object.__setattr__(self, "_capability_matrix", capability_matrix)
         object.__setattr__(self, "_taint_rules", taint_rules)
         object.__setattr__(self, "_trust_map", MappingProxyType(trust_map))
+        object.__setattr__(self, "_provenance_rules", provenance_rules)
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CompiledPolicy is immutable after construction")
@@ -209,6 +282,48 @@ class CompiledPolicy:
                 return rule
         return None
 
+    # ── Provenance rule evaluation ────────────────────────────────────────────
+
+    @property
+    def provenance_rules(self) -> Tuple["CompiledProvenanceRule", ...]:
+        """Immutable tuple of compiled provenance rules. Read-only."""
+        return self._provenance_rules
+
+    def evaluate_provenance(
+        self,
+        tool: str,
+        argument: Optional[str] = None,
+        chain_provenances: FrozenSet[ArgumentProvenance] = frozenset(),
+    ) -> ProvenanceVerdict:
+        """
+        Evaluate compiled provenance rules for a (tool, argument, chain) triple.
+
+        Returns the highest-precedence verdict among all matching rules.
+        Returns ProvenanceVerdict.deny if no rules match — fail-closed default.
+
+        This method operates entirely on compiled data structures.
+        No YAML parsing, no file access, no string-to-enum construction.
+
+        Args:
+            tool:             the tool name being requested
+            argument:         the specific argument being evaluated, or None for
+                              a whole-call (tool-level) evaluation
+            chain_provenances: the set of provenance classes present anywhere in
+                              the argument's value provenance chain
+        """
+        best: Optional[ProvenanceVerdict] = None
+        best_prec = -1
+
+        for rule in self._provenance_rules:
+            if not _provenance_rule_matches(rule, tool, argument, chain_provenances):
+                continue
+            prec = _VERDICT_PRECEDENCE.get(rule.verdict.value, 0)
+            if prec > best_prec:
+                best = rule.verdict
+                best_prec = prec
+
+        return best if best is not None else ProvenanceVerdict.deny
+
     # ── Trust resolution ──────────────────────────────────────────────────────
 
     def resolve_trust(self, channel_identity: str) -> TrustLevel:
@@ -225,7 +340,8 @@ class CompiledPolicy:
             f"CompiledPolicy("
             f"workflow_id={self._provenance.workflow_id!r}, "
             f"manifest_hash={self._provenance.manifest_hash[:12]!r}, "
-            f"actions={list(self._actions)})"
+            f"actions={list(self._actions)}, "
+            f"provenance_rules={len(self._provenance_rules)})"
         )
 
 
@@ -292,10 +408,26 @@ def compile_world(manifest_path: str) -> CompiledPolicy:
         for identity, trust_str in raw_trust.items()
     }
 
+    # ── Compile provenance rules → tuple[CompiledProvenanceRule, ...] ─────────
+    # Source: manifest provenance_rules section.
+    # Absent section → empty tuple → evaluate_provenance() is fail-closed (deny).
+    raw_provenance_rules: list = raw.get("provenance_rules", [])
+    provenance_rules: Tuple[CompiledProvenanceRule, ...] = tuple(
+        CompiledProvenanceRule(
+            rule_id=r.get("id", f"rule-{i:03d}"),
+            tool=r.get("tool", "*"),
+            verdict=ProvenanceVerdict(r["verdict"]),
+            argument=r.get("argument"),
+            provenance=ArgumentProvenance(r["provenance"]) if r.get("provenance") else None,
+        )
+        for i, r in enumerate(raw_provenance_rules)
+    )
+
     return CompiledPolicy(
         provenance=provenance,
         actions=actions,
         capability_matrix=capability_matrix,
         taint_rules=taint_rules,
         trust_map=trust_map,
+        provenance_rules=provenance_rules,
     )
