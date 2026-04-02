@@ -1,6 +1,6 @@
-# CLAUDE.md — Agent Hypervisor
+# CLAUDE.md
 
-This file provides guidance for AI assistants (Claude Code and similar) working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
@@ -87,6 +87,7 @@ Channel → IRBuilder → Executor → worker subprocess
 - **TaintedValue** (`runtime/taint.py`) — Every value that passes through execution is tainted. Taint is monotonically joined; it can never be removed.
 - **Process boundary** (`runtime/worker.py`) — Handlers run in a separate subprocess; policy evaluation runs in the main process. Neither can see the other's internals.
 - **SafeMCPProxy** (`runtime/proxy.py`) — In-path enforcement for all MCP tool calls.
+- **PolicyEngine** (`hypervisor/`) — Evaluates provenance firewall rules defined in `runtime/configs/default_policy.yaml`. Copy and customize this YAML to configure custom provenance verdicts (allow/ask/deny per tool × provenance source).
 
 ---
 
@@ -126,6 +127,10 @@ pytest tests/runtime/test_invariants.py
 **Test configuration** is in `pyproject.toml` under `[tool.pytest.ini_options]`:
 - `testpaths = ["tests"]`
 - `pythonpath = ["src/agent_hypervisor"]`
+
+> **Import path quirk**: `pythonpath` is set to `src/agent_hypervisor`, so tests import submodules directly (e.g., `from runtime.ir import IRBuilder`), not via the package root (`from agent_hypervisor.runtime.ir import ...`). This differs from typical Python project layout — do not change it without updating all test imports.
+
+**No linting tools are configured** (no ruff/black/mypy in `pyproject.toml`). Follow the existing code style by reading surrounding code.
 
 Tests cover: invariants, determinism, proxy enforcement, provenance firewall, approval workflows, policy engine evaluation.
 

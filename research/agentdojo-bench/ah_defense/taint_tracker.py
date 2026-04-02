@@ -60,6 +60,9 @@ class ProvTaintState:
     _tainted_channels: set[str] = field(default_factory=set, repr=False)
     _taint_reasons: list[str] = field(default_factory=list, repr=False)
     _audit_log: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    # Specific string values extracted from detected injection payloads.
+    # Used for argument-level taint checks (INV-006 refinement).
+    _tainted_values: set[str] = field(default_factory=set, repr=False)
 
     # ── Episode lifecycle ─────────────────────────────────────────────────────
 
@@ -70,6 +73,21 @@ class ProvTaintState:
         self._tainted_channels.clear()
         self._taint_reasons.clear()
         self._audit_log.clear()
+        self._tainted_values.clear()
+
+    def add_tainted_values(self, values: set[str]) -> None:
+        """Record specific string values extracted from an injection payload.
+
+        These are used by argument-level taint checks: if a proposed action's
+        arguments contain none of these values, the action may be allowed even
+        when the global taint label is TAINTED.
+        """
+        self._tainted_values.update(values)
+        self._audit_log.append({
+            "event": "add_tainted_values",
+            "count": len(values),
+            "sample": sorted(values)[:5],
+        })
 
     # ── Seeding ───────────────────────────────────────────────────────────────
 
@@ -231,6 +249,7 @@ class ProvTaintState:
             label=self._label,
             tainted_channels=frozenset(self._tainted_channels),
             taint_reasons=tuple(self._taint_reasons),
+            tainted_values=frozenset(self._tainted_values),
         )
 
     def summarize_provenance(self) -> ProvenanceSummary:

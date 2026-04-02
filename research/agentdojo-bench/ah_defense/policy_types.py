@@ -296,12 +296,17 @@ class TaintSummary:
     label: TaintLabel
     tainted_channels: frozenset[str]
     taint_reasons: tuple[str, ...]
+    # Specific string values extracted from injection payloads.
+    # When non-empty, argument-level taint checks use this set instead of
+    # blocking all external-boundary calls blindly.
+    tainted_values: frozenset[str] = field(default_factory=frozenset)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "tainted_channels": sorted(self.tainted_channels),
             "taint_reasons": list(self.taint_reasons),
+            "tainted_values": sorted(self.tainted_values),
         }
 
 
@@ -319,6 +324,9 @@ class EpisodeContext:
     trust_level: str = "untrusted"
     capabilities: frozenset[str] = field(default_factory=frozenset)
     decisions: list[ValidationResult] = field(default_factory=list)
+    # Counts how many times each action (by orig function name) has been
+    # blocked in this episode; used by AHBlockedCallInjector for retry caps.
+    blocked_action_counts: dict[str, int] = field(default_factory=dict)
 
     def is_ready(self) -> bool:
         """Return True if manifest is loaded and episode is ready."""

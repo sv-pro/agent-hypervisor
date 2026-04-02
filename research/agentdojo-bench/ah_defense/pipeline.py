@@ -293,11 +293,10 @@ if _AGENTDOJO_AVAILABLE:
                     except ResolutionError:
                         tool_name = "unknown"
 
-                # Determine whether this tool's output should taint the context.
-                # If the manifest marks taint_passthrough=False for this tool's
-                # action, the output is system-generated and cannot carry attacker
-                # content (e.g. get_current_day, list_files). Seed as trusted so
-                # the context remains clean for subsequent legitimate user actions.
+                # Determine whether this tool's output CAN carry attacker content.
+                # If the manifest marks taint_passthrough=False the output is
+                # system-generated metadata (e.g. get_current_day, list_files)
+                # that cannot embed attacker instructions.
                 should_taint = True
                 if self.manifest is not None:
                     preds = self.manifest.tool_predicates.get(tool_name, [])
@@ -306,30 +305,20 @@ if _AGENTDOJO_AVAILABLE:
                         if action_def is not None and not action_def.taint_passthrough:
                             should_taint = False
 
-                if should_taint:
-                    self.prov_taint.seed_from_semantic_event(
-                        source_channel="mcp",
-                        trust_level="untrusted",
-                        description=f"tool_output:{tool_name}:{tool_call_id}",
-                        node_id=tool_call_id,
-                    )
-                    self.taint_state.mark_tainted(tool_call_id, tool_name)
-                    logger.debug(
-                        "[AH] InputSanitizer: TAINTED call_id=%s tool=%s  total=%s",
-                        tool_call_id, tool_name, self.prov_taint.summarize_taint(),
-                    )
-                else:
-                    logger.debug(
-                        "[AH] InputSanitizer: CLEAN (taint_passthrough=false) call_id=%s tool=%s",
-                        tool_call_id, tool_name,
-                    )
-
-                # Canonicalise content blocks
+                # Step 1: Canonicalise FIRST so we know whether injection was
+                # actually present.  Taint seeding is then driven by detection
+                # outcome rather than blindly trusting the source channel alone.
+                # raw_texts_with_injection collects originals for value extraction.
                 new_content = []
+                injection_found = False
+                raw_texts_with_injection: list[str] = []
                 for block in msg.get("content", []):
                     if block.get("type") == "text":
                         raw_text = block.get("content", "")
                         clean_text = self.canonicalizer.canonicalize(raw_text)
+                        if "[REDACTED:" in clean_text:
+                            injection_found = True
+                            raw_texts_with_injection.append(raw_text)
                         if self.wrap_trust_metadata:
                             clean_text = self.canonicalizer.wrap_with_trust_metadata(
                                 clean_text, source=f"tool:{tool_name}"
@@ -341,10 +330,49 @@ if _AGENTDOJO_AVAILABLE:
                 msg["content"] = new_content
                 messages[idx] = msg
 
-                logger.debug(
-                    "AHInputSanitizer: tainted and canonicalised tool result "
-                    "call_id=%s tool=%s", tool_call_id, tool_name
-                )
+                # Step 2: Seed taint based on canonicalisation result.
+                # - taint_passthrough=False  → always clean (system metadata)
+                # - injection detected       → seed untrusted; context is dirty
+                # - no injection detected    → seed trusted; context stays clean
+                #   (allows legitimate user actions after clean tool reads)
+                if not should_taint:
+                    logger.debug(
+                        "[AH] InputSanitizer: CLEAN (taint_passthrough=false) call_id=%s tool=%s",
+                        tool_call_id, tool_name,
+                    )
+                elif injection_found:
+                    self.prov_taint.seed_from_semantic_event(
+                        source_channel="mcp",
+                        trust_level="untrusted",
+                        description=f"tool_output:{tool_name}:{tool_call_id}:injection_detected",
+                        node_id=tool_call_id,
+                    )
+                    self.taint_state.mark_tainted(tool_call_id, tool_name, reason="injection_detected")
+                    # Extract specific values from the injection payload so that
+                    # argument-level taint checks can allow calls whose args do
+                    # NOT come from the attacker's instructions.
+                    injection_values = _extract_injection_values(raw_texts_with_injection)
+                    if injection_values:
+                        self.prov_taint.add_tainted_values(injection_values)
+                    logger.debug(
+                        "[AH] InputSanitizer: TAINTED (injection detected) call_id=%s tool=%s  "
+                        "tainted_values=%d  total=%s",
+                        tool_call_id, tool_name, len(injection_values),
+                        self.prov_taint.summarize_taint(),
+                    )
+                else:
+                    # No injection pattern found — seed as trusted so the context
+                    # remains clean for subsequent legitimate user actions.
+                    self.prov_taint.seed_from_semantic_event(
+                        source_channel="tool_clean",
+                        trust_level="trusted",
+                        description=f"tool_output:{tool_name}:{tool_call_id}:clean",
+                        node_id=tool_call_id,
+                    )
+                    logger.debug(
+                        "[AH] InputSanitizer: CLEAN (no injection detected) call_id=%s tool=%s",
+                        tool_call_id, tool_name,
+                    )
 
             return query, runtime, env, messages, extra_args
 
@@ -482,8 +510,15 @@ if _AGENTDOJO_AVAILABLE:
     class AHBlockedCallInjector(BasePipelineElement):
         """Appends tool error messages for calls blocked by AHTaintGuard.
         Must run AFTER ToolsExecutor so it doesn't break executor's assistant format check.
+
+        After the same action is blocked _RETRY_CAP times in one episode, emits
+        a stronger escalation message telling the LLM to stop retrying entirely.
         """
         name = "ah_error_injector"
+        _RETRY_CAP = 2  # escalate after this many blocks of the same action
+
+        def __init__(self, episode: EpisodeContext | None = None) -> None:
+            self.episode = episode
 
         def query(
             self,
@@ -493,11 +528,11 @@ if _AGENTDOJO_AVAILABLE:
             messages: Sequence[ChatMessage] = [],
             extra_args: dict = {},
         ) -> tuple[str, FunctionsRuntime, Env, Sequence[ChatMessage], dict]:
-            
-            # Find trailing tool messages and restore their original function names and 
-            # rewrite the error message if they were blocked by AH.
+
+            # Find trailing tool messages and rewrite the error message if they
+            # were blocked by AH.
             from agentdojo.types import text_content_block_from_string
-            
+
             for i in range(len(messages) - 1, -1, -1):
                 msg = messages[i]
                 if msg["role"] == "assistant":
@@ -517,17 +552,33 @@ if _AGENTDOJO_AVAILABLE:
                         # it. Keeping the name as ah_security_blocked ensures blocked
                         # calls are invisible to the security checker.
 
+                        # Track per-action block count for retry cap
+                        block_count = 1
+                        if self.episode is not None:
+                            counts = self.episode.blocked_action_counts
+                            counts[orig_func] = counts.get(orig_func, 0) + 1
+                            block_count = counts[orig_func]
+
                         # Override the execution engine's generic "Invalid tool" error
                         msg["error"] = reason
-                        error_msg = (
-                            f"[AH SECURITY] Action '{orig_func}' blocked: {reason}\n"
-                            f"IMPORTANT: Do NOT retry this action. It will always be blocked. "
-                            f"Find an alternative approach or report to the user."
-                        )
+                        if block_count >= self._RETRY_CAP:
+                            error_msg = (
+                                f"[AH SECURITY] Action '{orig_func}' has been blocked "
+                                f"{block_count} times: {reason}\n"
+                                f"CRITICAL: Do NOT attempt this action again. "
+                                f"You MUST complete the original user task without it. "
+                                f"Report to the user that this action is unavailable."
+                            )
+                        else:
+                            error_msg = (
+                                f"[AH SECURITY] Action '{orig_func}' blocked: {reason}\n"
+                                f"IMPORTANT: Do NOT retry this action. It will always be blocked. "
+                                f"Find an alternative approach or report to the user."
+                            )
                         msg["content"] = [text_content_block_from_string(error_msg)]
                         logger.info(
-                            "[AH] BlockedCallInjector: injected error for tool=%s  msg=%s",
-                            orig_func, error_msg[:120],
+                            "[AH] BlockedCallInjector: injected error for tool=%s count=%d msg=%s",
+                            orig_func, block_count, error_msg[:120],
                         )
 
             return query, runtime, env, messages, extra_args
@@ -549,7 +600,7 @@ else:
     class AHBlockedCallInjector:  # type: ignore[no-redef]
         name = "ah_error_injector"
 
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, episode: Any = None) -> None:
             raise ImportError("agentdojo is required for AHBlockedCallInjector")
 
 
@@ -619,7 +670,7 @@ def build_ah_pipeline(
         prov_taint=prov_taint,
     )
 
-    blocked_injector = AHBlockedCallInjector()
+    blocked_injector = AHBlockedCallInjector(episode=episode)
 
     tools_loop = ToolsExecutionLoop([
         taint_guard,
@@ -646,3 +697,28 @@ def _get_call_id(tc: Any) -> str:
     if isinstance(tc, dict):
         return str(tc.get("id", "blocked"))
     return "blocked"
+
+
+import re as _re
+
+_EMAIL_RE = _re.compile(r"[\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,}")
+_INFO_BLOCK_RE = _re.compile(r"<INFORMATION>(.*?)</INFORMATION>", _re.DOTALL | _re.IGNORECASE)
+
+
+def _extract_injection_values(raw_texts: list[str]) -> set[str]:
+    """Extract actionable string values from injection payloads in raw_texts.
+
+    Scans <INFORMATION>...</INFORMATION> blocks for email addresses and returns
+    them as a set of tainted values.  Used for argument-level taint checking:
+    if a proposed external-boundary call's args contain none of these values,
+    the call is likely from the user's legitimate intent and should be allowed.
+
+    Returns an empty set if no values are found (fall-closed: blocking stays on).
+    """
+    values: set[str] = set()
+    for text in raw_texts:
+        for block_match in _INFO_BLOCK_RE.finditer(text):
+            payload = block_match.group(1)
+            for email in _EMAIL_RE.findall(payload):
+                values.add(email.lower())
+    return values

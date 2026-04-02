@@ -101,7 +101,7 @@ def validate_intent(
 
     # ── Step 5: taint containment ─────────────────────────────────────────────
     taint_summary = _get_taint_summary(taint_state)
-    step, early = check_taint_containment(action_def, taint_summary)  # type: ignore[arg-type]
+    step, early = check_taint_containment(action_def, taint_summary, intent.args)  # type: ignore[arg-type]
     steps.append(step)
     if early is not None:
         return _make_result(intent, action_def, early, steps, taint_state, None)
@@ -308,6 +308,7 @@ def check_capability(
 def check_taint_containment(
     action_def: ActionDefinition,
     taint_summary: TaintSummary | None,
+    args: dict[str, Any] | None = None,
 ) -> tuple[TraceStep, tuple | None]:
     """Step 5 — INV-006: tainted data must not cross external boundary or trigger
     irreversible internal actions.
@@ -315,6 +316,15 @@ def check_taint_containment(
     Blocks when:
       - external_boundary=True AND context is tainted (prevents exfiltration)
       - irreversible=True AND context is tainted (prevents injection-driven destruction)
+
+    Argument-level refinement (Fix 1):
+      When taint_summary.tainted_values is non-empty (specific injection targets
+      were extracted), the block only fires if at least one argument value in args
+      matches a tainted_value.  This allows legitimate user actions whose args do
+      not overlap with the attacker's payload.
+
+      When tainted_values is EMPTY (conservative / unknown), the block fires
+      unconditionally — fail-closed.
 
     Returns (step, early_result_or_None).
     """
@@ -337,6 +347,24 @@ def check_taint_containment(
             invariant=None,
         )
         return step, None
+
+    # Argument-level taint check: if we know specific injection target values,
+    # only block when the proposed call's arguments contain those values.
+    if taint_summary.tainted_values and args is not None:
+        arg_strings = _flatten_arg_strings(args)
+        matching = arg_strings & taint_summary.tainted_values
+        if not matching:
+            step = TraceStep(
+                step_name="check_taint_containment",
+                verdict="pass",
+                reason_code="TAINT_ARG_CLEAN",
+                detail=(
+                    f"Action '{action_def.name}': context is tainted but no argument "
+                    f"matches known injection values — likely legitimate user action"
+                ),
+                invariant=None,
+            )
+            return step, None
 
     if action_def.external_boundary:
         detail = (
@@ -363,6 +391,24 @@ def check_taint_containment(
         human,
         "INV-006", None,
     )
+
+
+def _flatten_arg_strings(args: dict[str, Any]) -> set[str]:
+    """Recursively collect all string values from an args dict, lowercased."""
+    result: set[str] = set()
+    _collect_strings(args, result)
+    return result
+
+
+def _collect_strings(obj: Any, out: set[str]) -> None:
+    if isinstance(obj, str):
+        out.add(obj.lower())
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_strings(v, out)
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            _collect_strings(item, out)
 
 
 def check_escalation(

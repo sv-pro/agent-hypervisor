@@ -61,6 +61,14 @@ _PROMPT_LEAK_PATTERNS = re.compile(
     re.MULTILINE,
 )
 
+# AgentDojo important_instructions injection blocks
+# These use <INFORMATION>...</INFORMATION> tags to embed injected instructions
+# inside tool outputs (e.g. calendar event descriptions, emails).
+_INJECTION_INFO_BLOCKS = re.compile(
+    r"<INFORMATION>.*?</INFORMATION>",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 class Canonicalizer:
     """
@@ -102,19 +110,23 @@ class Canonicalizer:
         # Step 2: Strip zero-width / invisible characters
         text = _ZERO_WIDTH_CHARS.sub("", text)
 
-        # Step 3: Remove system-impersonation markers
+        # Step 3: Remove AgentDojo <INFORMATION>...</INFORMATION> injection blocks
+        # (must run before other pattern stripping to neutralise the payload)
+        text = _INJECTION_INFO_BLOCKS.sub("[REDACTED:injection-info-block]", text)
+
+        # Step 4: Remove system-impersonation markers
         text = _SYSTEM_MARKERS.sub("[REDACTED:system-marker]", text)
 
-        # Step 4: Remove IMPORTANT!!! injection prefixes
+        # Step 5: Remove IMPORTANT!!! injection prefixes
         text = _IMPORTANT_PREFIX.sub("[REDACTED:injection-prefix]", text)
 
-        # Step 5: Remove instruction-override blocks
+        # Step 6: Remove instruction-override blocks
         text = _INSTRUCTION_BLOCKS.sub("[REDACTED:instruction-block]", text)
 
-        # Step 6: Remove prompt-leak exfiltration patterns
+        # Step 7: Remove prompt-leak exfiltration patterns
         text = _PROMPT_LEAK_PATTERNS.sub("[REDACTED:prompt-leak]", text)
 
-        # Step 7 (aggressive only): Remove embedded fake tool call patterns
+        # Step 8 (aggressive only): Remove embedded fake tool call patterns
         if self.aggressive:
             text = _FAKE_TOOL_CALLS.sub("[REDACTED:fake-tool-call]", text)
 

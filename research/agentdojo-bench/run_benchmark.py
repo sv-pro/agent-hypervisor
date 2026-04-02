@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Literal
 
 import click
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from rich import print as rprint
 from rich.logging import RichHandler
 
@@ -350,7 +350,7 @@ def main(
     """Run Agent Hypervisor vs. AgentDojo benchmark."""
 
     # Setup
-    if not load_dotenv(".env"):
+    if not load_dotenv(find_dotenv(usecwd=True)):
         warnings.warn("No .env file found — API keys must be in environment")
 
     log_level = logging.DEBUG if verbose else logging.INFO
