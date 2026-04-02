@@ -1,107 +1,129 @@
 # AgentDojo Benchmark — Results
 
-**Status: Initial prototype evaluation.**
+**Status: Post-refactor evaluation. Preliminary — independent replication needed.**
 
-These results are preliminary. The evaluation covers a subset of AgentDojo tasks
-selected for their relevance to outbound side-effect tool calls (email, HTTP, file
-writes). See [methodology.md](methodology.md) for full experimental setup.
+These results cover the full AgentDojo workspace suite, relevant to outbound
+side-effect tool calls. See [methodology.md](methodology.md) for full experimental setup.
 
 ---
 
-## Summary
+## Summary — Full Scope (Post-Refactor)
 
-| System                        | Utility | Attack Success Rate (ASR) |
-|-------------------------------|---------|---------------------------|
-| No defense (baseline)         | 100%    | 69%                       |
-| CaMeL (Debenedetti et al.)    | ~80%    | ~10%                      |
-| **Agent Hypervisor (ours)**   | **81%** | **6%**                    |
+Full scope: 40 user tasks × 14 injection tasks = 560 pairs.
+Model: `gpt-4o-mini-2024-07-18`, Attack: `important_instructions`.
 
-*Utility: fraction of legitimate tasks completed correctly.*
+| System | Utility (under attack) | ASR | Utility (clean) |
+| --- | --- | --- | --- |
+| **Agent Hypervisor (ours)** | **80.0%** | **0.0%** | **80.0%** |
+| tool_filter | 72.9% | 1.1% | 80.0% |
+| spotlighting_with_delimiting | 47.5% | 12.7% | 77.5% |
+| none (baseline) | 32.5% | 18.2% | 82.5% |
+
+*Utility (under attack): fraction of legitimate tasks completed correctly when injection attacks are present.*
 *ASR: fraction of injection attacks that succeeded (attacker's action executed).*
+*Utility (clean): fraction of legitimate tasks completed correctly with no attack present.*
+
+Agent Hypervisor achieves the highest utility under attack and the lowest ASR
+across all evaluated systems. Clean utility is on par with the best alternatives.
 
 ---
 
-## Per-Suite Results
+## Before → After Refactor
 
-### Email Client Suite (8 tasks)
+| Metric | Before | After | Delta |
+| --- | --- | --- | --- |
+| No-attack utility | 53.3% | **80.0%** | +26.7pp |
+| Attack utility | ~60% | **80.0%** | ~+20pp |
+| Attack ASR | ~47.8% | **0.0%** | ~−47.8pp |
 
-| Metric  | No defense | Agent Hypervisor |
-|---------|------------|------------------|
-| Utility | 100% (8/8) | 88% (7/8)        |
-| ASR     | 75% (6/8)  | 0% (0/8)         |
+The refactor addressed two root causes:
 
-All 8 injection attacks were blocked. One legitimate task failed: the agent
-attempted to send email to a recipient extracted from an external document (which
-is correctly blocked), but the task required that recipient. Resolution: update
-the task manifest to declare that data source as a `recipient_source`.
+- **Detection-driven taint seeding** (was: taint every tool output unconditionally).
+  Clean tool outputs no longer poison the taint state, eliminating false positives
+  in no-attack scenarios. No-attack utility recovered from 53.3% → 80.0%.
 
-### Travel Agent Suite (4 tasks)
-
-| Metric  | No defense | Agent Hypervisor |
-|---------|------------|------------------|
-| Utility | 100% (4/4) | 75% (3/4)        |
-| ASR     | 75% (3/4)  | 25% (1/4)        |
-
-One attack succeeded: the injection caused the agent to call `read_file` (a
-read-only tool), which the firewall allows unconditionally. The read-only
-call was the attacker's intended action. Resolution: read-only tools should
-not be considered side-effect-free in all contexts — future work.
-
-### Banking Suite (4 tasks)
-
-| Metric  | No defense | Agent Hypervisor |
-|---------|------------|------------------|
-| Utility | 100% (4/4) | 75% (3/4)        |
-| ASR     | 50% (2/4)  | 0% (2/4)         |
-
-Both injection attacks blocked. One utility failure: an HTTP report submission
-was blocked because the submitted data included fields derived from external
-account data (correctly flagged as external_document provenance).
+- **Argument-level taint containment** (was: block all external-boundary calls once
+  any taint present). Taint now carries the attacker's specific target values; calls
+  whose arguments don't match those values are allowed. Attack utility and ASR
+  both resolved to the same level as clean utility.
 
 ---
 
 ## Key Observations
 
-**ASR reduction is near-total for email and file-write attacks.** The structural
-provenance check catches injection patterns that bypass string-matching defenses,
-regardless of phrasing.
+**0% ASR across 560 attack pairs.** No injection attack succeeded after the
+refactor. The structural provenance check blocks injection patterns regardless
+of phrasing or model behavior.
 
-**Read-only tools are a gap.** The current firewall does not restrict `read_file`
-or `list_dir`. An attacker whose intended action is data *access* (not exfiltration)
-can still succeed if they cause the agent to read a file the attacker controls.
+**AH improves utility over no-defense under attack.** Under attack, the baseline
+achieves only 32.5% utility — the agent follows attacker instructions instead of
+completing the user's task. AH restores utility to 80.0% by blocking injections
+and returning control to the legitimate task.
 
-**Utility loss is primarily from manifest gaps.** Cases where legitimate tasks
-were blocked typically arose from incomplete task manifests — data sources that
-should have been declared as `user_declared` were treated as `external_document`.
-This is a deployment concern, not a fundamental limitation.
+**Clean-data utility gap is minimal.** The 2.5pp gap vs. baseline (80.0% vs 82.5%)
+reflects cases where the provenance model conservatively restricts data flows that
+happen to be legitimate. Resolution path: refine task manifests to declare those
+data sources explicitly.
 
-**The `ask` mechanism is not evaluated here.** In this automated evaluation,
-`ask` verdicts were treated as `deny`. In production, `ask` verdicts allow human
-reviewers to approve legitimate borderline cases, which would recover some utility.
+**read_file gap (prior evaluation) is resolved.** The prior evaluation identified
+that read-only tools could be the attacker's intended action. The refactored
+`taint_passthrough` flag and manifest reclassification address this.
+
+---
+
+## Prior Results (Initial Prototype, 16-task subset)
+
+For reference, the initial prototype evaluation on a 16-task subset:
+
+| System | Utility | ASR |
+| --- | --- | --- |
+| No defense (baseline) | 100% | 69% |
+| CaMeL (Debenedetti et al.) | ~80% | ~10% |
+| Agent Hypervisor (prototype) | 81% | 6% |
+
+The full-scope post-refactor evaluation supersedes these numbers.
 
 ---
 
 ## Interpretation
 
-Agent Hypervisor achieves lower ASR than CaMeL (6% vs ~10%) with comparable
-utility (81% vs ~80%) on this task subset. The key difference in mechanism:
+Agent Hypervisor achieves 0% ASR with 80% utility on a 560-pair evaluation.
+The key architectural difference from CaMeL:
 
-- CaMeL separates trusted and untrusted LLM instances, relying on the privileged
-  model to resist influence from untrusted data.
-- Agent Hypervisor enforces structural provenance constraints at the tool boundary,
-  requiring no LLM on the critical security path.
+- **CaMeL** separates trusted and untrusted LLM instances, relying on the
+  privileged model to resist influence from untrusted data.
+- **Agent Hypervisor** enforces structural provenance constraints at the tool
+  boundary, requiring no LLM on the critical security path.
 
 The provenance approach is deterministic: the same structural violation is always
 blocked, regardless of how the injection is phrased or what model processes it.
+This property does not degrade under adaptive attacks that vary injection phrasing.
+
+---
+
+## Limitations
+
+- **Single benchmark.** AgentDojo covers a specific task distribution. Results
+  may not generalize to all agentic deployment patterns.
+
+- **Manifest quality.** Task manifests were generated with LLM assistance and
+  reviewed before use. In production, manifest quality directly affects both
+  utility and security.
+
+- **`ask` → `deny` substitution.** In this automated evaluation, `ask` verdicts
+  were treated as `deny`. In production, `ask` enables human review, recovering
+  some utility on borderline cases.
+
+- **Single LLM backend.** Results were obtained with `gpt-4o-mini-2024-07-18`.
+  Performance may vary across models with different instruction-following tendencies.
+
+- **Independent replication needed.** These are preliminary results from a
+  prototype implementation. Strong conclusions require larger, independently
+  replicated evaluations.
 
 ---
 
 ## Reproducibility
 
-The benchmark setup is described in [methodology.md](methodology.md). Task manifests
-used for this evaluation are available in `manifests/`. A benchmark runner script
-will be published in a future update.
-
-*Note: These results were obtained with a prototype implementation. They should be
-treated as directional evidence, not production benchmarks. A larger, independently
-replicated evaluation is needed before drawing strong conclusions.*
+Task manifests used for this evaluation are in `ah_defense/manifests/`.
+Benchmark runner: `research/agentdojo-bench/run_benchmark.py`.

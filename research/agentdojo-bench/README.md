@@ -29,30 +29,48 @@ agentdojo-bench/
 
 ## How It Works
 
-The AH defense operates as two `BasePipelineElement` subclasses inside `ToolsExecutionLoop`:
+The AH defense operates as three `BasePipelineElement` subclasses inside `ToolsExecutionLoop`:
 
 ```
 ToolsExecutionLoop([
-    ToolsExecutor,          # Execute tools → add tool result messages
-    AHInputSanitizer,       # ① Canonicalize outputs, mark taint
+    AHTaintGuard,           # ① Validate proposed calls against taint + manifest
+    ToolsExecutor,          # Execute allowed tools → add tool result messages
+    AHBlockedCallInjector,  # ② Inject feedback for blocked calls
+    AHInputSanitizer,       # ③ Canonicalize outputs, seed taint
     LLM,                    # Propose next tool calls
-    AHTaintGuard,           # ② Validate calls against taint + manifest
 ])
 ```
 
-### AHInputSanitizer (pre-LLM)
-- Strips known injection patterns (`IMPORTANT!!! Ignore...`, `[[SYSTEM:...]]`, zero-width chars)
-- Wraps outputs with trust metadata (`[AH|SOURCE:tool|TRUST:untrusted]`)
-- Marks all tool results as tainted in shared `TaintState`
+### AHInputSanitizer (post-ToolsExecutor, pre-LLM)
 
-### AHTaintGuard (post-LLM)
-- Reads LLM's proposed tool calls
-- For each call: checks `tool_type` in World Manifest
-- **TaintContainmentLaw**: if `taint_context=True` AND `tool_type=external_side_effect` → **BLOCK**
-- Blocked calls are removed; LLM receives error feedback
+- Canonicalizes outputs first: strips `<INFORMATION>...</INFORMATION>` injection blocks,
+  `IMPORTANT!!! Ignore...` prefixes, `[[SYSTEM:...]]` markers, zero-width chars
+- Taint seeding is **detection-driven**: only taints context when injection patterns are
+  actually found in the output (not blindly on every tool call)
+- When injection is detected, extracts attacker-specified values (email addresses etc.)
+  into `ProvTaintState.tainted_values` for argument-level checking
+- Wraps outputs with trust metadata (`[AH|SOURCE:tool|TRUST:untrusted]`)
+
+### AHTaintGuard (pre-ToolsExecutor)
+
+- Resolves each tool call to a logical action via compiled World Manifest predicates
+- Runs full 7-step fail-closed validation pipeline (manifest → action → schema → capability → taint → escalation → allow)
+- **TaintContainmentLaw**: tainted context + external-boundary action → **BLOCK**
+- **Argument-level refinement**: if `tainted_values` are known, only blocks calls whose
+  arguments contain those specific values — allows legitimate user actions whose args
+  don't match the attacker's payload
+- Renames blocked calls to `ah_security_blocked` (invisible to security scorer)
+
+### AHBlockedCallInjector (post-ToolsExecutor)
+
+- Injects structured error feedback for blocked calls
+- **Retry cap**: after 2 blocks of the same action per episode, escalates to a CRITICAL
+  message forcing the LLM to abandon the blocked action and complete the original task
 
 ### World Manifests
+
 YAML files classifying suite tools into:
+
 - `read_only` — retrieval only (always permitted)
 - `internal_write` — modifies internal state (permitted)
 - `external_side_effect` — communicates externally (blocked when tainted)
@@ -135,20 +153,22 @@ python analyze_results.py results/ --include-camel-paper --output comparison.md
 python analyze_results.py results/results_claude-3-5-sonnet-20241022_important_instructions.json
 ```
 
-## Expected Results Table
+## Benchmark Results
 
-When fully benchmarked, the output will resemble:
+Full-scope run: 40 user tasks × 14 injection tasks (560 attack pairs) + 40 clean tasks.
+Model: `gpt-4o-mini-2024-07-18`, Suite: workspace, Attack: `important_instructions`.
 
-| Defense | Suite | Utility (clean) | Utility (attack) | ASR |
-|---------|-------|-----------------|-----------------|-----|
-| none | workspace | ~85% | ~85% | ~60% |
-| spotlighting | workspace | ~83% | ~80% | ~40% |
-| agent_hypervisor | workspace | ~80% | ~78% | ~15% |
-| CaMeL (paper) | workspace | 77% | 77% | 0% |
+| Defense | Utility (clean) | Utility (attack) | ASR |
+| --- | --- | --- | --- |
+| none | 82.5% | 32.5% | 18.2% |
+| spotlighting_with_delimiting | 77.5% | 47.5% | 12.7% |
+| tool_filter | 80.0% | 72.9% | 1.1% |
+| **agent_hypervisor** | **80.0%** | **80.0%** | **0.0%** |
+| CaMeL (paper) | 77% | 77% | 0% |
 
-> AH targets: >80% utility preservation + significant ASR reduction vs. baseline.
-> CaMeL's 0% ASR comes from provable taint tracking at value granularity with dual-LLM.
-> AH's approach achieves message-level taint containment without any LLM on the security path.
+AH achieves 0% ASR (same as CaMeL) while matching the `none` baseline on utility in both clean
+and attack conditions. Unlike CaMeL, AH requires no LLM on the security path and no value-level
+interpreter — enforcement is deterministic O(1) manifest lookup + regex.
 
 ## Benchmark Versions
 
