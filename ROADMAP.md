@@ -94,6 +94,11 @@ Benchmarks and demonstrations that show the architecture working against real at
 
 At the end of Stage 2, the system can demonstrate — with reproducible numbers — what attack classes are contained, what the false-positive rate is, and where the deterministic coverage ends.
 
+**M4 results (gpt-4o-mini-2024-07-18, workspace suite, 560 pairs):**
+Agent Hypervisor achieves **0.0% ASR** and **80.0% utility** under attack,
+matching CaMeL's ASR while requiring no LLM on the security path.
+Full results: `research/benchmarks/agentdojo/results.md`
+
 ---
 
 ### Stage 3 — Beta Product (M5, issues #31–#34)
@@ -118,8 +123,8 @@ Stage 3 is a mini-product, not a universal framework. The scope is bounded: one 
 | M1 Foundation (docs) | Complete |
 | M2 Core Engine | Complete |
 | M3 Tool Boundary | Complete |
-| M4 Proof | In progress — AgentDojo benchmark integration running |
-| M5 Beta Product | In progress — Docker stack, Web UI underway |
+| M4 Proof | Complete — 0% ASR, 80% utility (clean + under attack) on 560-pair workspace benchmark |
+| M5 Beta Product | In progress — Docker stack present, hello-world and positioning docs complete; Web UI (#32) pending |
 
 ---
 
@@ -327,7 +332,7 @@ never define *what* is possible. That remains defined by the World Kernel.
 
 ---
 
-### Phase 1 — Minimal Task Compiler Scaffold *(this change)*
+### Phase 1 — Minimal Task Compiler Scaffold *(complete)*
 
 **Goal:** Introduce extension points without changing existing behaviour.
 
@@ -430,7 +435,7 @@ before execution. No LLM participates in enforcement. Every cost decision is exp
 
 ---
 
-### Phase 1 — Cost Preflight *(MVP)*
+### Phase 1 — Cost Preflight *(complete — MVP)*
 
 **Goal:** Block executions that exceed their declared budget before any tool is called.
 
