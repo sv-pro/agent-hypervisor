@@ -1,0 +1,13 @@
+Supply chain attacks on AI infrastructure operate beneath the agent layer — bypassing behavioral defenses, guardrails, and component verification entirely. In March 2026, LiteLLM (the universal proxy between AI agents and every major LLM API) was compromised through a cascading supply chain campaign. The same month, Axios (100M weekly downloads) was backdoored by North Korean actors. Five projects compromised in 12 days — Trivy, KICS, LiteLLM, Telnyx, Axios. Each passed individual verification. The chain was the attack.
+
+This session introduces execution governance as the missing architectural layer. The core idea: instead of monitoring what an agent does, define what exists in its executable world. A World Manifest — a compiled specification of permitted actions, trusted components, and provenance rules — is enforced deterministically at runtime. No LLM on the critical enforcement path. Same input → same decision → always.
+We walk through the structural gap between OWASP Agentic Top 10 (which classifies how agents fail) and execution governance (which defines what cannot happen). Using a controlled demo, we show an agent that passes standard best practices yet executes a supply chain–style attack — then the same agent, under a governed execution environment, blocked at the execution boundary without any change to the agent itself.
+Attendees will leave with:
+
+A clear model for why behavioral defenses fail when attacks operate below the agent layer
+Understanding of the structural difference between detecting unsafe actions and removing their possibility by construction
+A practical framework: World Manifest → deterministic enforcement → provenance-gated execution
+Concrete mapping of OWASP ASI01–ASI10 to execution governance gaps
+An architectural mental model applicable regardless of agent framework or LLM provider
+
+This session targets developers and DevSecOps teams building or securing agentic systems. No vendor pitch — open-source proof of concept, architectural analysis grounded in OWASP frameworks and March 2026 incident data.

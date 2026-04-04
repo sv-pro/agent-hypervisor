@@ -1,0 +1,21 @@
+In March 2026, a supply chain attack compromised LiteLLM — the universal proxy between AI agents and every major LLM API. 
+The attack never reached the agent's reasoning layer. 
+It operated in the dependency beneath it. 
+
+Every behavioral defense remained active. 
+Every defense was irrelevant.
+This pattern repeats. 
+
+Attacks increasingly operate below the agent — in the execution environment, in trusted dependencies, in the composition of individually safe components. 
+The same month, Axios (100M weekly downloads) was backdoored via a compromised maintainer account. 
+Five projects compromised in 12 days. Each component passed individual verification. The chain was the attack.
+
+This talk presents execution governance as the missing architectural layer. 
+The approach does not detect unsafe behavior. It defines a World Manifest — a compiled specification of what actions and components exist in the agent's executable world. At runtime, enforcement is deterministic: same input, same decision, always. No LLM on the critical enforcement path.
+We demonstrate the gap through a controlled scenario: an agent configured with standard best practices executes a supply chain–style attack. 
+Then, under a governed execution environment — without modifying the agent — the same attack cannot execute. Not because it was blocked. 
+Because the action does not exist in the agent's world.
+
+The takeaway is architectural: OWASP Agentic Top 10 classifies how agents fail. 
+Execution governance defines what cannot happen. These are complementary layers. 
+Currently, only one exists in standard practice.
