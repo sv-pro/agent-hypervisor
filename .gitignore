@@ -34,6 +34,8 @@ CLAUDE_CODE_PROMPT*.md
 
 # Claude Code project memory (local session state)
 .claude/projects/
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
 
 # AgentDojo benchmark artifacts
 agentdojo-bench/runs/
