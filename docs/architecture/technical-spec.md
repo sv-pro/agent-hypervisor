@@ -67,57 +67,59 @@ Threat detection happens at virtualization boundary, not at agent execution.
 
 ## Architectural Layers
 
+Four layers, numbered from outermost (infrastructure) to innermost (governance). See [whitepaper.md §4.1](whitepaper.md) for the canonical definition.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 5: Reality Interface                                   │
+│ External World                                               │
 │ • External APIs, filesystems, networks                       │
 │ • Uncontrolled, untrusted, irreversible                      │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 4: Virtualization Boundary                             │
-│ • Input sanitization & classification                        │
-│ • Taint detection                                            │
-│ • Threat surface reduction                                   │
+│ Layer 0: Execution Physics                                   │
+│ • Container / network / filesystem isolation                 │
+│ • Makes dangerous actions physically impossible              │
+│ • Infrastructure configuration — not compiler output         │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 3: Universe Definition                                 │
-│ • Object catalog: what exists                                │
-│ • Action primitives: what's possible                         │
-│ • Physics rules: what laws govern behavior                   │
+│ Layer 1: Base Ontology  (design-time)                        │
+│ • Action schema registry: what actions can ever exist        │
+│ • Capability set definitions                                 │
+│ • Trust channel definitions                                  │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 2: Intent Processing                                   │
-│ • Receive agent proposals                                    │
-│ • Apply world physics                                        │
-│ • Materialize consequences                                   │
+│ Layer 2: Dynamic Ontology Projection  (runtime context)      │
+│ • Semantic Event construction from raw input                 │
+│ • Trust classification and taint assignment                  │
+│ • Capability projection to actor context                     │
+│ • Agent lives here — perceives events, proposes intents      │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+                         │  Intent Proposals
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: Agent Interface                                     │
-│ • Perceive semantic events                                   │
-│ • Reason in virtualized world                                │
-│ • Propose intents                                            │
+│ Layer 3: Execution Governance                                │
+│ • Deterministic policy evaluation — no LLM                   │
+│ • Provenance chains, taint checks, reversibility             │
+│ • Budget enforcement, approval gate triggers                 │
+│ • Decisions: allow | deny | require_approval | simulate      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Layer Responsibilities
 
-**Layer 5 (Reality)**: Anything goes. Hypervisor has no control here.
+**Layer 0 (Execution Physics)**: Infrastructure impossibility. Hypervisor controls this via container and network configuration.
 
-**Layer 4 (Boundary)**: The security frontier. Transform dangerous reality into safe abstractions.
+**Layer 1 (Base Ontology)**: Design-time vocabulary. Compiled before deployment; defines what actions can ever be proposed.
 
-**Layer 3 (Universe)**: The ontology. Defines what exists and what's possible.
+**Layer 2 (Dynamic Ontology Projection)**: The agent's perceived reality. Constructs Semantic Events, projects the base ontology to the actor's current context. Agent reasons and proposes here.
 
-**Layer 2 (Intent)**: The physics engine. Applies deterministic laws to proposals.
-
-**Layer 1 (Agent)**: Pure reasoning. No direct reality access.
+**Layer 3 (Execution Governance)**: The physics engine. Applies deterministic laws to every Intent Proposal. No LLM on this path.
 
 ---
 

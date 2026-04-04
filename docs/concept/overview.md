@@ -55,7 +55,7 @@ Four dimensions are virtualized:
 
 ## Architecture Thesis
 
-The architecture is organized in five layers:
+The architecture is organized in four layers:
 
 ```text
 ┌─────────────────────────────────┐
@@ -63,44 +63,40 @@ The architecture is organized in five layers:
 └────────────────┬────────────────┘
                  │
 ┌────────────────▼────────────────┐
-│     Layer 1: Input Boundary     │  ← all external signals enter here
+│  Layer 0: Execution Physics     │  ← infrastructure-level impossibility
+│   Container / network isolation │
+│   Makes dangerous actions       │
+│   physically unreachable        │
+└────────────────┬────────────────┘
+                 │
+┌────────────────▼────────────────┐
+│  Layer 1: Base Ontology         │  ← design-time vocabulary
+│  (compiled before deployment)   │
+│   Action schema registry        │
+│   Capability set definition     │
+│   Trust channel definitions     │
+└────────────────┬────────────────┘
+                 │
+┌────────────────▼────────────────┐
+│  Layer 2: Dynamic Ontology      │  ← agent's perceived reality
+│  Projection (runtime context)   │
 │   Semantic Event construction   │
 │   Trust classification          │
 │   Taint assignment              │
-│   Provenance initialization     │
+│   Capability projection         │
+│   ← agent lives here →          │
 └────────────────┬────────────────┘
-                 │
+                 │  (Intent Proposals)
 ┌────────────────▼────────────────┐
-│   Layer 2: Universe Definition  │  ← what exists in agent's world
-│   Object schema registry        │
-│   Capability set definition     │
-│   World Physics (laws)          │
-└────────────────┬────────────────┘
-                 │
-┌────────────────▼────────────────┐
-│     Layer 3: Agent Interface    │  ← agent's perceived reality
-│   Semantic Events               │
-│   Virtualized memory            │
-│   Available intent types        │
-└────────────────┬────────────────┘
-                 │  (Intent Proposals flow upward)
-┌────────────────▼────────────────┐
-│   Layer 4: World Policy         │  ← no LLM in this layer
+│  Layer 3: Execution Governance  │  ← no LLM in this layer
 │   World Policy evaluation       │
 │   Reversibility classification  │
 │   Budget enforcement            │
-│   Approval gate triggers        │
-└────────────────┬────────────────┘
-                 │
-┌────────────────▼────────────────┐
-│   Layer 5: Execution Boundary   │  ← only validated intents reach here
-│   Tool invocation               │
-│   External API calls            │
-│   Audit log (immutable)         │
+│   Approval gate / audit log     │
 └─────────────────────────────────┘
 ```
 
-The agent lives in Layer 3. It cannot see Layers 1, 4, or 5. Layers 1 and 5 are the only contact points with the outside world. Layer 4 is fully deterministic and unit-testable.
+The agent lives in Layer 2. It cannot see Layers 0, 1, or 3 directly. Layer 0 is infrastructure; Layer 1 defines the design-time vocabulary. Layer 3 is fully deterministic and unit-testable.
 
 Seven architectural invariants define conformance:
 
@@ -139,7 +135,7 @@ The proof-of-concept (~200 lines of Python, PyYAML only) demonstrates a subset o
 **Not yet implemented:**
 
 - ⬜ Full Semantic Event construction from raw input.
-- ⬜ Provenance chain across all five layers.
+- ⬜ Provenance chain across all four layers.
 - ⬜ Reversibility model and approval gates.
 - ⬜ World Manifest Compiler (design-time → deterministic artifacts).
 - ⬜ MCP proxy gateway integration.
@@ -159,13 +155,13 @@ Agent Hypervisor operates at the semantic layer, where boundaries are inherently
 
 The semantic gap means: **there will always be some class of attacks that require understanding meaning to detect, and a deterministic layer cannot understand meaning.** The architecture reduces the attack surface but does not eliminate it.
 
-The hypervisor resolves this with a structural constraint: all classification happens at the boundary (Layer 1), before the agent sees anything. A stricter policy admits fewer inputs and reduces the attack surface. A permissive policy admits more. The semantic gap is real — but it is bounded, explicit, and tunable.
+The hypervisor resolves this with a structural constraint: all classification happens at the virtualization boundary (Layer 2), before the agent sees anything. A stricter policy admits fewer inputs and reduces the attack surface. A permissive policy admits more. The semantic gap is real — but it is bounded, explicit, and tunable.
 
 ### 2. Intelligence at the Boundary
 
-The Input Boundary (Layer 1) must transform raw input into structured Semantic Events. This requires classifying trust, assigning taint, and extracting structure from unstructured sources. Some intelligence is needed here. If that intelligence is an LLM, we re-introduce probabilistic components. If it is purely rule-based, it may be too rigid for real-world input diversity.
+Layer 2 (Dynamic Ontology Projection) must transform raw input into structured Semantic Events. This requires classifying trust, assigning taint, and extracting structure from unstructured sources. Some intelligence is needed here. If that intelligence is an LLM, we re-introduce probabilistic components. If it is purely rule-based, it may be too rigid for real-world input diversity.
 
-The design deliberately isolates this to one layer, so that a failure at Layer 1 does not compromise the determinism of Layers 2–5. **The boundary between deterministic safety and necessary intelligence is not yet cleanly resolved.**
+The design deliberately isolates this to one layer, so that a failure at Layer 2's input processing does not compromise the determinism of Layer 3. **The boundary between deterministic safety and necessary intelligence is not yet cleanly resolved.**
 
 ### 3. Bounded Measurable Claim, Not Perfect Security
 
@@ -179,7 +175,7 @@ We trade the illusion of complete safety for a smaller set of properties with ac
 
 ## Open Questions
 
-1. **Where does the semantic boundary belong?** How much intelligence can exist at Layer 1 before it becomes a probabilistic guardrail? Can we define a formal interface between "deterministic core" and "intelligent adapter"?
+1. **Where does the semantic boundary belong?** How much intelligence can exist at Layer 2's input processing before it becomes a probabilistic guardrail? Can we define a formal interface between "deterministic core" and "intelligent adapter"?
 
 2. **Can taint propagation scale?** In a real agent with dozens of tools and complex data flows, does taint tracking remain practical without unacceptable performance or usability costs?
 
@@ -198,25 +194,25 @@ We trade the illusion of complete safety for a smaller set of properties with ac
 A system conforms to the Agent Hypervisor model if and only if all of the following invariants hold:
 
 **I-1. Input Invariant.**
-No external signal reaches the agent without passing through the Input Boundary layer. Raw text, raw tool output, and raw memory reads do not exist in the agent's interface.
+No external signal reaches the agent without passing through the virtualization boundary. Raw text, raw tool output, and raw memory reads do not exist in the agent's interface.
 
 **I-2. Provenance Invariant.**
-Every object in the agent's world has a provenance record initialized at Layer 1 and maintained through all transformations. Provenance cannot be removed or forged by the agent.
+Every object in the agent's world has a provenance record initialized at Layer 2 (Semantic Event construction) and maintained through all transformations. Provenance cannot be removed or forged by the agent.
 
 **I-3. Taint Invariant.**
-Any object derived from an untrusted source carries a taint marker. Taint propagates through all operations. A tainted object cannot reach Layer 5 without explicit sanitization at Layer 4.
+Any object derived from an untrusted source carries a taint marker. Taint propagates through all operations. A tainted object cannot cross the external execution boundary without explicit sanitization at Layer 3.
 
 **I-4. Determinism Invariant.**
-Layer 4 (World Policy) contains no probabilistic components. Given identical inputs, it always produces identical outputs. It is unit-testable without mocking.
+Layer 3 (Execution Governance) contains no probabilistic components. Given identical inputs, it always produces identical outputs. It is unit-testable without mocking.
 
 **I-5. Separation Invariant.**
-The agent has no direct access to Layers 1, 4, or 5. The agent can only receive Semantic Events (from Layer 3) and emit Intent Proposals (to Layer 4). All other interactions are mediated by the hypervisor.
+The agent has no direct access to Layers 0, 1, or 3. The agent can only receive Semantic Events (from Layer 2) and emit Intent Proposals (to Layer 3). All other interactions are mediated by the hypervisor.
 
 **I-6. Reversibility Invariant.**
-Actions classified as irreversible by the World Policy cannot reach Layer 5 without explicit approval. The classification is performed at Layer 4, not inferred by the agent.
+Actions classified as irreversible by the World Policy cannot reach external execution without explicit approval. The classification is performed at Layer 3, not inferred by the agent.
 
 **I-7. Budget Invariant.**
-Resource budgets (token count, action count, scope, time) are enforced at Layer 4. Budget exhaustion results in hard termination, not soft degradation.
+Resource budgets (token count, action count, scope, time) are enforced at Layer 3. Budget exhaustion results in hard termination, not soft degradation.
 
 **Conformance test pattern:**
 
@@ -239,13 +235,13 @@ The 12 factors describe properties a conformant agentic system must exhibit. Age
 
 | 12-Factor Agent                      | Agent Hypervisor                      |
 | ------------------------------------ | ------------------------------------- |
-| Virtualized Reality (Factor 1)       | Layer 1 + Layer 3                     |
-| Structured Input (Factor 2)          | Semantic Event construction           |
+| Virtualized Reality (Factor 1)       | Layer 0 + Layer 2                     |
+| Structured Input (Factor 2)          | Semantic Event construction (Layer 2) |
 | Provenance as Type (Factor 3)        | Provenance Invariant (I-2)            |
 | Taint by Default (Factor 4)          | Taint Invariant (I-3)                 |
 | Intent, Not Execution (Factor 5)     | Intent Proposal layer                 |
-| Deterministic Policy (Factor 6)      | Layer 4 + Determinism Invariant (I-4) |
-| Minimal Universe (Factor 7)          | Universe Definition (Layer 2)         |
+| Deterministic Policy (Factor 6)      | Layer 3 + Determinism Invariant (I-4) |
+| Minimal Universe (Factor 7)          | Base Ontology (Layer 1)               |
 | Segmented Memory (Factor 8)          | Provenance + trust-zone model         |
 | Reversibility by Default (Factor 9)  | Reversibility Invariant (I-6)         |
 | Bounded Autonomy (Factor 10)         | Separation Invariant (I-5)            |

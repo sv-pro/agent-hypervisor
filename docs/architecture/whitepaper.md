@@ -159,7 +159,8 @@ The system intercepts all perception, intercepts all actions, and defines the ph
 Layer 2 (Dynamic Ontology Projection) constructs structured events from raw input before the actor perceives anything. The actor never receives raw input. It receives structured events:
 
 - `source` — email, web, file, MCP, user
-- `trust_level` — trusted / untrusted / tainted
+- `trust_level` — trusted / untrusted (a property of the channel, not the content)
+- `taint` — present / absent (a property of the data, propagated through operations)
 - `capabilities` — what is permitted in this context
 - `sanitized_payload` — stripped of hidden instructions
 
