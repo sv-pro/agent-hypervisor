@@ -47,15 +47,15 @@ during development. Start here:
 
 | File | What it is |
 |---|---|
-| [`core/hypervisor.py`](core/hypervisor.py) | Core framework — manifest resolution, taint propagation, provenance tracking. Zero dependency on demo. |
-| [`demo/zombie_agent.py`](demo/zombie_agent.py) | ZombieAgent scenario runner. Depends on core only. |
+| [`src/core/hypervisor.py`](src/core/hypervisor.py) | Core framework — manifest resolution, taint propagation, provenance tracking. Zero dependency on any scenario. |
+| [`scenarios/zombie-agent/src/demo.py`](scenarios/zombie-agent/src/demo.py) | ZombieAgent scenario runner. Depends on `src/core` only. |
 
 ```bash
 # Run the demo (no dependencies beyond Python 3.10+)
-python demo/zombie_agent.py
+python scenarios/zombie-agent/src/demo.py
 
 # With interactive ASK dialogs
-python demo/zombie_agent.py --interactive
+python scenarios/zombie-agent/src/demo.py --interactive
 ```
 
 ### Research notes — background reading
@@ -145,8 +145,8 @@ This is **bounded, measurable security** — not perfect security.
 
 - [x] Core execution model defined (Manifest Resolution Law, three modes)
 - [x] ZombieAgent scenario: canonical document + World Manifest
-- [x] Core framework: `core/hypervisor.py` — deterministic, LLM-free, 8/8 tests pass
-- [x] Demo: `demo/zombie_agent.py` — three-step ZombieAgent scenario
+- [x] Core framework: `src/core/hypervisor.py` — deterministic, LLM-free, 8/8 tests pass
+- [x] Demo: `scenarios/zombie-agent/src/demo.py` — three-step ZombieAgent scenario
 - [ ] Manifest authoring tooling (AI Aikido pipeline)
 - [ ] AgentDojo benchmark integration
 - [ ] Additional scenarios
