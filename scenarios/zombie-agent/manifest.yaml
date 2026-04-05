@@ -1,0 +1,39 @@
+version: "1.0"
+name: "email-assistant"
+
+trust_channels:
+  user:   trusted
+  email:  untrusted
+  web:    untrusted
+  memory: derived
+
+capabilities:
+  trusted:
+    - read
+    - internal_write
+    - memory_write
+    - external_side_effects
+  untrusted:
+    - read
+  derived:
+    - read
+  tainted: []
+
+actions:
+  read_email:
+    requires: [read]
+  summarize:
+    requires: [internal_write]
+  write_memory:
+    requires: [memory_write]
+  send_email:
+    requires: [external_side_effects]
+  query_resource:
+    requires: [read]
+
+invariants:
+  - TaintContainmentLaw
+  - ProvenanceLaw
+  - CapabilityBoundaryLaw
+
+explicit_rules: {}
