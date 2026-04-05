@@ -1,230 +1,166 @@
 # Agent Hypervisor
 
-**Semantic-level isolation for AI agents.**  
+> Deterministic virtualization of reality for AI agents.
 
-Agents running against unmediated reality are structurally unsafe.
-This repository contains the architecture, implementation, and research for a governed, virtualized semantic environment where dangerous actions are impossible by construction — not blocked by policy.
-
----
-
-## The core claim
-
-Every mainstream agent framework today gives agents raw access to tools, memory, and input streams. Prompt injection, data exfiltration, and uncontrolled tool execution are not bugs — they are **architectural consequences** of operating in an open world.
-
-The answer is not better filters. It is a different abstraction layer: an **Agent Hypervisor** that mediates all contact between the agent and the real environment.
-
-> Safety is achieved by removing possibilities, not reducing their probability.
+**Status:** Proof-of-concept research project. Not a product.  
+**Author:** Personal project — does not represent Radware's position.
 
 ---
 
-## Key ideas
+## The Core Idea
 
-**World Virtualization.** Agents do not operate in the real world — they operate in their field of perception: the inputs they receive, the tools they can call, the memory they can access. Defining that field is not a guardrail. It is the foundation of safety.
+AI agent vulnerabilities are not bugs. They are architecturally predictable
+consequences of agents operating with unmediated access to inputs, memory, and tools.
 
-**Ontology-First Security.** The correct order: (1) limit what actions exist, (2) limit which are visible to this actor now, (3) evaluate whether execution is permitted. Most systems skip to step 3. Steps 1 and 2 eliminate the attack surface before the agent encounters it.
+The standard response is behavioral: detect bad actions, filter bad inputs, block bad outputs.
+All probabilistic. All bypassable.
 
-**AI Aikido.** Use the LLM's generative capability at design-time to produce deterministic security artifacts — capability vocabularies, world manifests, adversarial test suites. At runtime, only deterministic components operate. The stochastic phase produces the deterministic instruments; it does not govern execution.
+Agent Hypervisor asks a different question:
 
-**Design-Time HITL.** Human-in-the-loop belongs at manifest design and approval, not at runtime approval of individual actions. Design-time review scales; runtime approval does not.
+> **"Does this action exist in the agent's universe?"**
 
-**Tool Virtualization.** Raw tools are not exposed directly. They are first specialized into task-scoped capabilities via partial application and parameter elimination. An agent with `send_report_to_security(body)` cannot exfiltrate to an arbitrary recipient — not because a rule blocks it, but because the action does not exist in its world.
+Not "is it forbidden?" — but "does it exist?"
 
----
-
-## Why Most AI Security Fails
-
-Most AI security approaches fall into one of three categories:
-
-| Type | What it does | Deterministic | Bypassable | Scales |
-|------|-------------|---------------|------------|--------|
-| 🔴 **Crutch** | Filters outputs or classifies prompts | No | Yes — adaptive attacks | No |
-| 🟡 **Workaround** | Enforces rules at execution boundary | Mixed | Partly | Partially |
-| 🟢 **Bridge** | Defines what actions can exist at all | Yes | No (bounded) | Yes |
-
-**Crutches** (prompt filters, output scanners, LLM-as-judge) are probabilistic and bypassable.
-They operate *after* the unsafe input has entered the pipeline. Every new attack variant
-needs a new rule. The treadmill never stops.
-
-**Workarounds** (tool allow/deny lists, runtime monitoring, LangChain security layers) solve
-real problems. They are production-usable. But they operate inside an architecturally unsafe
-pipeline, and their coverage is bounded by what they explicitly enumerate.
-
-**Bridges** change what can exist, not what is permitted. The attack surface is removed
-before the agent encounters it — not by filtering, but by construction.
-
-The question shifts from:
-> "Can we stop this attack?"
-
-To:
-> "Can this action exist in this world?"
-
-> Agent Hypervisor does not block unsafe behavior.
-> It defines a world where unsafe behavior does not exist.
-
-→ Full framework: [docs/positioning/crutch_workaround_bridge.md](docs/positioning/crutch_workaround_bridge.md)
-→ Comparison table: [docs/positioning/security_comparison.md](docs/positioning/security_comparison.md)
+The agent never sees raw reality. It sees a virtualized world defined by a
+**World Manifest** — a compiled specification of what actions exist, what trust
+levels grant what capabilities, and what data can flow where.
+Dangerous actions are not prohibited. They are absent.
 
 ---
 
-## Architecture
+## How to Read This Repository
 
-```
-Layer 0 — Execution Physics
-          what is physically impossible (container, network, filesystem isolation)
+This repository contains both canonical documents and research notes accumulated
+during development. Start here:
 
-Layer 1 — Base Ontology                        [design-time]
-          what actions exist (capability construction from raw tool space)
+### Canonical — read these
 
-Layer 2 — Dynamic Ontology Projection          [runtime context]
-          what actions this actor can propose right now (role, task, state)
-
-Layer 3 — Execution Governance                 [runtime enforcement]
-          what actions may execute (provenance, policy, taint, budget)
-```
-
-Each layer eliminates a class of risk before the next layer sees it. Defense in depth by construction, not configuration.
-
-### The ontology insight
-
-```
-Raw tool space:
-  send_email(to, body)              ← any recipient, any content
-
-        ↓  capability construction (design-time)
-
-Base ontology:
-  send_report_to_security(body)     ← recipient fixed
-  send_report_to_finance(body)      ← recipient fixed
-  read_file(path)                   ← scoped to allowed directories
-```
-
-`send_email(to, body)` does not exist in the agent's world. Prompt injection attacks that attempt to redirect email to an attacker-controlled address cannot be expressed — there is no tool to call, no argument to pass. The attack surface does not exist.
-
-### OS analogy
-
-| Agent Hypervisor | Operating System |
+| Document | What it is |
 |---|---|
-| Layer 0: Execution Physics | Hardware isolation (MMU, rings) |
-| Layer 1: Base Ontology | Syscall interface |
-| Layer 2: Dynamic Ontology Projection | File descriptors, capabilities |
-| Layer 3: Execution Governance | ACL, SELinux, sandbox policies |
-| Actor | Process |
-| Action | System call |
+| This file | Entry point and navigation |
+| [`WHITEPAPER.md`](WHITEPAPER.md) | Full architecture: four-layer model, AI Aikido, World Manifest Compiler, Design-Time HITL |
+| [`GLOSSARY.md`](GLOSSARY.md) | Term definitions, derived from scenarios |
+| [`scenarios/zombie-agent/SCENARIO.md`](scenarios/zombie-agent/SCENARIO.md) | **Leading scenario document** — the ZombieAgent attack and how AH breaks it |
+| [`scenarios/zombie-agent/manifest.yaml`](scenarios/zombie-agent/manifest.yaml) | World Manifest for the ZombieAgent scenario |
 
----
+### Code — run these
 
-## Repository contents
-
-This is the single canonical home for the Agent Hypervisor architecture. It contains:
-
-### Architecture and research
-
-| Document | What it covers |
+| File | What it is |
 |---|---|
-| [docs/concept/overview.md](docs/concept/overview.md) | Shortest serious explainer — start here |
-| [docs/concept/concepts.md](docs/concept/concepts.md) | Core concepts: perception, taint, ABSENT vs POLICY |
-| [docs/architecture/whitepaper.md](docs/architecture/whitepaper.md) | Full architectural argument |
-| [docs/concept/12-factor-agent.md](docs/concept/12-factor-agent.md) | Evaluation standard for agentic systems |
-| [docs/concept/faq.md](docs/concept/faq.md) | Answers to hard objections |
-| [docs/architecture/threat-model.md](docs/architecture/threat-model.md) | Formal threat scope |
-| [docs/research/vs-existing-solutions.md](docs/research/vs-existing-solutions.md) | vs. guardrails, sandboxes, policy engines |
-| [docs/concept/positioning.md](docs/concept/positioning.md) | What this repo is and is not |
+| [`core/hypervisor.py`](core/hypervisor.py) | Core framework — manifest resolution, taint propagation, provenance tracking. Zero dependency on demo. |
+| [`demo/zombie_agent.py`](demo/zombie_agent.py) | ZombieAgent scenario runner. Depends on core only. |
 
-### Implementation
-
-| Component | Location | What it does |
-|---|---|---|
-| **Enforcement kernel** | `src/runtime/` | Deterministic `IRBuilder`, taint propagation, `SafeMCPProxy` |
-| **World Manifest compiler** | `src/compiler/` | Compile workflow → World Manifest; `awc` CLI |
-| **Capability authoring layer** | `src/authoring/` | Capability DSL, policy presets, manifest validators |
-| **Hypervisor PoC** | `src/agent_hypervisor/hypervisor/` | Gateway, policy engine, provenance firewall |
-
-### Examples and demos
-
-| Resource | Location |
-|---|---|
-| Compiler scenarios (safe / unsafe / zombie) | `examples/compiler/` |
-| Layer 3 governance demo | `examples/showcase/` |
-| Interactive world visualizer (React/TS) | `demos/playground/` |
-| Presentation decks | `demos/presentation-core/`, `demos/presentation-enterprise/` |
-
-### Research
-
-| Resource | Location |
-|---|---|
-| AgentDojo benchmark integration | `research/agentdojo-bench/` |
-| Benchmark reports | `research/reports/` |
-| Scenario traces | `research/traces/` |
-
-### Publication series — *The Missing Layer*
-
-| Article | Status |
-|---|---|
-| [01 — The Pattern](docs/pub/the-missing-layer/01-the-pattern/) | Published |
-| [02 — AI Aikido](docs/pub/the-missing-layer/02-ai-aikido/) | Published |
-| [03 — Design-Time HITL](docs/pub/the-missing-layer/03-design-time-hitl/) | Published |
-| [04 — MCP as Missing Layer](docs/pub/the-missing-layer/04-mcp-missing-layer/) | Published |
-| Articles 5–7, Taint series | Planned |
-
----
-
-## Internal components
-
-Three internal components implement the pipeline. They are not separate products — they are implementation layers of the same architecture:
-
-| Component | Former repo | Role |
-|---|---|---|
-| `src/runtime/` | `safe-agent-runtime-core` | Deterministic enforcement kernel — IRBuilder, taint, SafeMCPProxy |
-| `src/compiler/` | `agent-world-compiler` | World Manifest compiler + `awc` CLI |
-| `src/authoring/` | `safe-agent-runtime-pro` | Capability DSL, policy presets, manifest authoring |
-
-Experimental and historical material lives in `lab/` (the original proof-of-concept notebook, preserved but not maintained). Superseded source code is in `archive/experimental-poc/`.
-
----
-
-## Current implementation status
-
-| Layer | Status |
-|---|---|
-| Layer 0: Execution Physics | Architectural spec; no dedicated implementation |
-| Layer 1: Base Ontology | Schema defined; compiler working (`awc`); v2 schema planned |
-| Layer 2: Dynamic Ontology Projection | Capability DSL + presets working; dynamic projection in progress |
-| Layer 3: Execution Governance | ✅ Working — IRBuilder, taint, provenance, approvals, audit |
-
-Full status per component: [STATUS.md](STATUS.md)  
-Development plan: [ROADMAP.md](ROADMAP.md)
-
----
-
-## How to engage
-
-**Researchers and architects:**  
-Start with [docs/concept/overview.md](docs/concept/overview.md), then [docs/architecture/whitepaper.md](docs/architecture/whitepaper.md). The [docs/architecture/threat-model.md](docs/architecture/threat-model.md) defines formal scope.
-
-**Writers and presenters:**  
-The article series in [docs/pub/](docs/pub/) contains publication-ready drafts. Presentation decks in [demos/](demos/) are ready to fork.
-
-**System evaluators:**  
-Use [docs/concept/12-factor-agent.md](docs/concept/12-factor-agent.md) as a checklist. [docs/research/vs-existing-solutions.md](docs/research/vs-existing-solutions.md) covers alternatives.
-
-**Builders:**  
 ```bash
-pip install -e .
-awc run --scenario safe
-awc run --scenario unsafe --compare
-awc run --scenario zombie
+# Run the demo (no dependencies beyond Python 3.10+)
+python demo/zombie_agent.py
+
+# With interactive ASK dialogs
+python demo/zombie_agent.py --interactive
 ```
 
-Or run the Layer 3 governance demo:
-```bash
-python examples/runtime/provenance_firewall/demo.py
-```
+### Research notes — background reading
 
-See [docs/architecture/hello-world.md](docs/architecture/hello-world.md) for a guided walkthrough.  
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines — conceptual feedback is valued most.
+The following folders contain working documents, explorations, and earlier
+iterations. They are not obsolete — they record the thinking that produced
+the canonical documents above. But they are not the starting point.
+
+| Folder | Contents |
+|---|---|
+| `architecture/` | Architecture explorations, component specs, earlier whitepaper drafts |
+| `components/` | Component-level specs: compiler, runtime, authoring DSL |
+| `concept/` | Conceptual foundations: perception model, semantic space, positioning |
+| `content/` | Draft content: Crutch/Workaround/Bridge framework posts |
+| `positioning/` | Competitive positioning, security comparison |
+| `research/` | Research notes and benchmarking plans |
+| `examples/` | Additional usage examples |
+| `experiments/` | Experimental implementations |
+| `lab/` | Scratch space |
 
 ---
 
-## License
+## The Architecture in One Diagram
 
-MIT
+```
+[ Raw Reality ]
+      ↓
+┌─────────────────────────────────────┐
+│  Layer 0: Execution Physics         │  Infrastructure isolation
+│  Layer 1: Base Ontology             │  What actions exist (design-time)
+│  Layer 2: Dynamic Ontology          │  What the agent can propose now
+│  Layer 3: Execution Governance      │  Allow / Deny / Ask / Simulate
+└─────────────────────────────────────┘
+      ↓
+[ Agent — virtualized world ]
+```
+
+**Manifest Resolution Law** — the runtime decision rule:
+
+```
+proposed action
+  ├── explicit allow in manifest     → ALLOW
+  ├── explicit deny in manifest      → DENY
+  ├── invariant violation            → DENY
+  └── not covered by manifest
+        ├── interactive mode         → ASK
+        └── background mode         → DENY
+```
+
+The world is **closed-for-execution, open-for-extension.**
+
+---
+
+## The Key Distinction from CaMeL and Similar Work
+
+[CaMeL](https://arxiv.org/abs/2503.18813) (Google DeepMind, 2025) shares the
+same foundations: capability-based security, information flow control, a
+protective layer around the LLM without modifying it.
+
+The architectural difference is **when** the LLM operates:
+
+| | CaMeL | Agent Hypervisor |
+|---|---|---|
+| LLM role in enforcement | Extracts control flow at **runtime** | Generates policy artifacts at **design-time** |
+| Runtime enforcement | LLM on critical path | Deterministic lookup tables only |
+| Policy scope | Per-query | Per-workflow (World Manifest) |
+| Cross-session taint | Not addressed | Core scenario (ZombieAgent) |
+
+Agent Hypervisor's claim: **compile intent into physics** — use LLM intelligence
+at design-time to generate deterministic artifacts; never on the runtime
+enforcement path.
+
+---
+
+## Honest Constraints
+
+This is **bounded, measurable security** — not perfect security.
+
+- The World Manifest covers what was anticipated at design-time. Novel attacks require redesign.
+- Semantic ambiguity ("forward this to Alex") is not resolved — it is the open "semantic gap" problem.
+- Current input sanitization is trivial: regex + Unicode normalization. Semantic injection is not covered.
+- The manifest authoring tooling does not exist yet. It is the next thing to build.
+
+---
+
+## Current Status
+
+- [x] Core execution model defined (Manifest Resolution Law, three modes)
+- [x] ZombieAgent scenario: canonical document + World Manifest
+- [x] Core framework: `core/hypervisor.py` — deterministic, LLM-free, 8/8 tests pass
+- [x] Demo: `demo/zombie_agent.py` — three-step ZombieAgent scenario
+- [ ] Manifest authoring tooling (AI Aikido pipeline)
+- [ ] AgentDojo benchmark integration
+- [ ] Additional scenarios
+
+---
+
+## Reference
+
+- **ZombieAgent** — Radware research (January 2026): persistent memory poisoning, 90% data leakage rate
+- **CaMeL** — Debenedetti et al. (2025): capability-based defense, 77% secure task completion on AgentDojo
+- **Capability-Based Security** — Dennis & Van Horn (1966)
+- **Information Flow Control** — Denning (1976)
+
+---
+
+*Personal research project. Does not represent Radware's position.*  
+*References are to published research only.*
