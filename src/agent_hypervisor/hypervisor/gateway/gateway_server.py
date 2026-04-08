@@ -72,7 +72,7 @@ class GatewayState:
         self.policy_store = PolicyStore(storage_root / "policy_history.jsonl")
 
         # Initial policy engines + version record
-        self.policy_engine, self.firewall, self.policy_version, version_record = (
+        self.policy_engine, self.firewall, self.core_hypervisor, self.policy_version, version_record = (
             self._load_engines()
         )
 
@@ -84,6 +84,7 @@ class GatewayState:
             registry=self.registry,
             policy_engine=self.policy_engine,
             firewall=self.firewall,
+            core_hypervisor=self.core_hypervisor,
             policy_version=self.policy_version,
             max_traces=config.traces.max_entries,
             trace_store=self.trace_store,
@@ -92,13 +93,9 @@ class GatewayState:
 
         self.started_at = datetime.now(timezone.utc).isoformat()
 
-    def _load_engines(self) -> tuple[PolicyEngine, ProvenanceFirewall, str, dict]:
+    def _load_engines(self) -> tuple[PolicyEngine, ProvenanceFirewall, Any, str, dict]:
         """
-        Load PolicyEngine and ProvenanceFirewall from configured files.
-
-        Returns a 4-tuple: (engine, firewall, version_id, version_record).
-        version_id is the first 8 hex chars of SHA-256(policy_content).
-        version_record is ready to be passed to _maybe_record_version().
+        Load PolicyEngine, ProvenanceFirewall, and CoreHypervisor.
         """
         policy_engine = PolicyEngine.from_yaml(self.policy_file)
 
@@ -115,13 +112,30 @@ class GatewayState:
             "rule_count": rule_count,
         }
 
+        # Legacy Firewall load
         if self.config.task_manifest:
             firewall = ProvenanceFirewall.from_manifest(self.config.task_manifest)
         else:
             task_dict = _make_gateway_firewall_task(self.config.tools)
             firewall = ProvenanceFirewall(task=task_dict, protection_enabled=True)
 
-        return policy_engine, firewall, version_id, version_record
+        # Core Hypervisor load
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+        from core.hypervisor import Hypervisor as CoreHypervisor, WorldManifest, ExecutionMode
+        
+        if self.config.task_manifest:
+            try:
+                manifest = WorldManifest.from_yaml(self.config.task_manifest)
+                core_hv = CoreHypervisor(manifest, ExecutionMode.INTERACTIVE)
+            except Exception:
+                # Fallback to none if format doesn't match new core schema yet
+                core_hv = None
+        else:
+            core_hv = None
+
+        return policy_engine, firewall, core_hv, version_id, version_record
 
     def _maybe_record_version(self, record: dict) -> bool:
         """
@@ -141,18 +155,14 @@ class GatewayState:
     def reload_policy(self) -> dict:
         """
         Hot-reload policy rules from disk.
-
-        The PolicyEngine and ProvenanceFirewall are replaced atomically.
-        In-flight requests complete with the old engines.
-
-        Returns a dict with version info and a ``changed`` flag.
         """
-        policy_engine, firewall, new_version, version_record = self._load_engines()
+        policy_engine, firewall, core_hv, new_version, version_record = self._load_engines()
         changed = self._maybe_record_version(version_record)
         self.policy_engine = policy_engine
         self.firewall = firewall
+        self.core_hypervisor = core_hv
         self.policy_version = new_version
-        self.router.update_engines(policy_engine, firewall, new_version)
+        self.router.update_engines(policy_engine, firewall, core_hv, new_version)
         return {
             "version_id": new_version,
             "changed": changed,

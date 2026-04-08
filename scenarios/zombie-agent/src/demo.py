@@ -243,25 +243,81 @@ def step2_memory_write(hypervisor: Hypervisor, mode: ExecutionMode):
     show_result(result)
 
     if result.decision == Decision.ASK:
-        choice = ask_user(
-            f"Agent wants to write to memory:\n"
-            f"    key: user_preference_cc\n"
-            f"    value: external-partner@domain.com\n"
-            f"  Source: email (untrusted). Tainted: YES.",
-            [("o", "one-shot approval (execute once, taint preserved in record)"),
-             ("e", "extend manifest (make this permanent)"),
-             ("d", "deny")],
-        )
-        if choice == "d":
-            print(f"  {RED}User denied. Memory write blocked.{RESET}")
-        elif choice == "o":
-            print(f"  {YELLOW}One-shot approval. Executing with taint metadata preserved in record.{RESET}")
-            print(f"  {DIM}Memory record will carry: taint=true, source=email, session=s1{RESET}")
-            return True   # tainted memory was written
-        elif choice == "e":
-            print(f"  {GREEN}Manifest extended. write_memory from untrusted added with approval flag.{RESET}")
+        if result.rule_triggered == "TaintEscalation":
+            choice = ask_user(
+                f"{RED}⚠ TAINT ESCALATION WARNING ⚠{RESET}\n"
+                f"  Agent wants to write to memory:\n"
+                f"    key: user_preference_cc\n"
+                f"    value: external-partner@domain.com\n"
+                f"  Source: email (untrusted). Tainted: YES.\n"
+                f"  This action lacks the required capability and stems from a tainted source.",
+                [("i", "ignore warning and execute (taint preserved)"),
+                 ("d", "deny action"),
+                 ("f", "flag for security review")],
+            )
+            if choice == "d":
+                print(f"  {RED}User denied. Memory write blocked.{RESET}")
+            elif choice == "i":
+                print(f"  {YELLOW}Ignored warning. Executing with taint metadata preserved in record.{RESET}")
+                print(f"  {DIM}Memory record will carry: taint=true, source=email, session=s1{RESET}")
+                return True
+            elif choice == "f":
+                print(f"  {CYAN}Action denied and flagged for security review.{RESET}")
 
     return False  # memory was not written (or denied)
+
+# ---------------------------------------------------------------------------
+# Step 2c: Trusted Manifest Gap
+# ---------------------------------------------------------------------------
+
+def step2c_manifest_gap(hypervisor: Hypervisor, mode: ExecutionMode):
+    section("STEP 2c — Manifest Gap: Uncovered Action")
+
+    print(f"  {DIM}Scenario: A trusted user requests an action not in the manifest.")
+    print(f"  With Agent Hypervisor (interactive): resolves to ASK (ManifestGap).{RESET}")
+
+    subsection("2c — Trusted user proposes uncovered action")
+
+    event = hypervisor.virtualize_input(
+        event_id="e_user_02",
+        source="user",
+        raw_payload="Please set my system preference to dark mode.",
+        session_id="s1",
+    )
+    show_event(event)
+
+    print(f"\n  {DIM}Agent derives action: 'set_preference'{RESET}")
+
+    action_pref = ProposedAction(
+        action_id="a05",
+        action_type="set_preference",
+        parameters={"mode": "dark"},
+        provenance_chain=[event.provenance],
+        agent_reasoning="User explicitly requested dark mode preference.",
+    )
+
+    show_action(action_pref)
+    result = hypervisor.evaluate(action_pref)
+    show_result(result)
+
+    if result.decision == Decision.ASK:
+        if result.rule_triggered == "ManifestGap_Interactive":
+            choice = ask_user(
+                f"Agent wants to execute an uncovered action:\n"
+                f"    action: set_preference\n"
+                f"    params: {{'mode': 'dark'}}\n"
+                f"  Source: user (trusted). Tainted: NO.\n"
+                f"  This action is not defined in the current manifest.",
+                [("o", "one-shot approval (execute once)"),
+                 ("e", "extend manifest (make this permanent)"),
+                 ("d", "deny")],
+            )
+            if choice == "d":
+                print(f"  {RED}User denied. Action blocked.{RESET}")
+            elif choice == "o":
+                print(f"  {YELLOW}One-shot approval. Executing once without altering manifest.{RESET}")
+            elif choice == "e":
+                print(f"  {GREEN}Manifest extended. Action set_preference added globally.{RESET}")
 
 # ---------------------------------------------------------------------------
 # Step 3: Cross-session taint propagation
@@ -350,6 +406,12 @@ def run_tests():
     test("untrusted email → write_memory → DENY (background, CapabilityBoundaryLaw)",
          r2.decision == Decision.DENY)
 
+    # TEST 2b: untrusted email → write_memory → ASK (interactive mode, TaintEscalation)
+    hv_i_test = Hypervisor(manifest, ExecutionMode.INTERACTIVE)
+    r2b = hv_i_test.evaluate(a2)
+    test("untrusted email → write_memory → ASK (interactive, TaintEscalation)",
+         r2b.decision == Decision.ASK and r2b.rule_triggered == "TaintEscalation")
+
     # TEST 3: tainted memory → send_email → DENY (cross-session TaintContainmentLaw)
     tainted_prov = ProvenanceRecord("email", TrustLevel.UNTRUSTED, "s1", True, ["write_memory"])
     mem_prov = ProvenanceRecord("memory", TrustLevel.DERIVED, "s2", True, ["read_memory"])
@@ -428,6 +490,8 @@ def main():
         print(f"  {DIM}Run with --interactive and approve the one-shot write to see Step 3.{RESET}")
         # Show it anyway with simulated tainted memory
         step3_cross_session(hv_bg)
+
+    step2c_manifest_gap(hv_ia, mode)
 
     run_tests()
 
