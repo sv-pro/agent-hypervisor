@@ -491,7 +491,7 @@ def main():
         # Show it anyway with simulated tainted memory
         step3_cross_session(hv_bg)
 
-    step2c_manifest_gap(hv_ia, mode)
+    step2c_manifest_gap(hv_step2, mode)
 
     run_tests()
 
