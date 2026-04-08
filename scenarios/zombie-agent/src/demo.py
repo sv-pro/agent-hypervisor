@@ -12,6 +12,11 @@ No imports from core internals. If core is replaced by Rust/Go/TypeScript,
 this file changes only the import line.
 """
 
+import sys
+from pathlib import Path
+# Ensure src/ is on the path so `from core import ...` resolves to src/core/.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+
 from core import (
     Hypervisor,
     WorldManifest,
