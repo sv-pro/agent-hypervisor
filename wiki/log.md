@@ -20,3 +20,11 @@ Created:
 
 ## [2026-04-09] update | Indexed Wiki Directories
 Created summary index files for concepts, comparisons, and scenarios. Deep-linked existing docs to their respective raw source code files in src/ according to the updated PROMPT.txt schema.
+
+## [2026-04-09] update | Codebase Architectural Split
+Synthesized the conceptual differences separating the minimal pure `src/core` logic codebase against the fully heavy `src/agent_hypervisor` framework codebase into `concepts/codebase-analysis.md`.
+
+### 04-09-2026: Agent Hypervisor Gateway Shadow Mode
+- Refactored `ExecutionRouter` in `agent_hypervisor/hypervisor/gateway/execution_router.py` to use `CoreDecisionAdapter`.
+- Staged shadow migration of legacy `ProvenanceFirewall` and `PolicyEngine` alongside `core.hypervisor` resolution logic.
+- Fixed python module import masking related to `provenance` directory vs `provenance.py`.

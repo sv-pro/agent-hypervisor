@@ -11,7 +11,7 @@ Core public API:
 
 from .models import ValueRef, ToolCall, Decision, ProvenanceClass, Role, Verdict
 from .hypervisor.firewall import ProvenanceFirewall
-from .hypervisor.provenance import resolve_chain, mixed_provenance
+from .hypervisor.provenance_eval import resolve_chain, mixed_provenance
 
 __all__ = [
     "ValueRef",

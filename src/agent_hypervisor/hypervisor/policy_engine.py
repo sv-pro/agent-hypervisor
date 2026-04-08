@@ -45,7 +45,7 @@ from typing import Optional
 import yaml
 
 from .models import ProvenanceClass, Role, ToolCall, ValueRef, Verdict
-from .provenance import resolve_chain
+from .provenance_eval import resolve_chain
 
 
 class RuleVerdict(str, Enum):

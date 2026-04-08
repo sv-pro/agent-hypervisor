@@ -44,7 +44,7 @@ from typing import Any
 import yaml
 
 from .models import Decision, ProvenanceClass, Role, ToolCall, ValueRef, Verdict
-from .provenance import resolve_chain, least_trusted, provenance_summary
+from .provenance_eval import resolve_chain, least_trusted, provenance_summary
 
 
 class ProvenanceFirewall:

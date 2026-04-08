@@ -264,17 +264,29 @@ class ManifestResolver:
 
             missing = [c for c in required_caps if c not in available_caps]
             if missing:
-                return ResolutionResult(
-                    decision=Decision.DENY,
-                    rule_triggered="CapabilityBoundaryLaw",
-                    reason=(
-                        f"Action '{action.action_type}' requires capabilities {missing}, "
-                        f"which are absent at trust level '{effective_trust.value}'"
-                        + (" (tainted)" if is_tainted else "") + "."
-                    ),
-                    provenance_summary=provenance_summary,
-                    action=action,
-                )
+                if mode == ExecutionMode.INTERACTIVE and is_tainted:
+                    return ResolutionResult(
+                        decision=Decision.ASK,
+                        rule_triggered="TaintEscalation",
+                        reason=(
+                            f"Action '{action.action_type}' requires capabilities {missing}. "
+                            f"Source is tainted! Potential capability breach detected."
+                        ),
+                        provenance_summary=provenance_summary,
+                        action=action,
+                    )
+                else:
+                    return ResolutionResult(
+                        decision=Decision.DENY,
+                        rule_triggered="CapabilityBoundaryLaw",
+                        reason=(
+                            f"Action '{action.action_type}' requires capabilities {missing}, "
+                            f"which are absent at trust level '{effective_trust.value}'"
+                            + (" (tainted)" if is_tainted else "") + "."
+                        ),
+                        provenance_summary=provenance_summary,
+                        action=action,
+                    )
             # All capabilities present — allow
             return ResolutionResult(
                 decision=Decision.ALLOW,

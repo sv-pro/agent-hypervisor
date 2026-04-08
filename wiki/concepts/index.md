@@ -18,3 +18,6 @@ This directory curates synthesized concepts detailing the fundamental logic, phi
 
 - **[Manifest Resolution](manifest-resolution.md)**: The deterministic outcome law determining if a proposed action will be Allowed, Denied, or subjected to an Ask mechanism requiring human approval.
   - *Reference sources*: [`GLOSSARY.md`](../../GLOSSARY.md), [`src/core/hypervisor.py: ResolutionResult`](../../src/core/hypervisor.py)
+
+- **[Codebase Analysis](codebase-analysis.md)**: Outlines the physical separation between the pure architectural design logic and the complex integration execution layers.
+  - *Reference sources*: [`src/core/`](../../src/core/), [`src/agent_hypervisor/`](../../src/agent_hypervisor/)

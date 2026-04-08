@@ -48,12 +48,24 @@ from typing import Any, Optional
 from pydantic import BaseModel
 
 from ..models import ProvenanceClass, Role, ToolCall, ValueRef, Verdict
-from ..provenance import provenance_summary
+from ..provenance_eval import provenance_summary
 from ..firewall import ProvenanceFirewall
 from ..policy_engine import PolicyEngine, RuleVerdict
 from ..storage import ApprovalStore, TraceStore
 from .tool_registry import ToolRegistry
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
+from core.hypervisor import (
+    Hypervisor as CoreHypervisor,
+    ProposedAction,
+    ProvenanceRecord,
+    TrustLevel,
+    Decision as CoreDecision,
+)
 
 # ---------------------------------------------------------------------------
 # Request / response models (Pydantic for FastAPI integration)
@@ -311,6 +323,52 @@ def _make_gateway_firewall_task(tool_names: list[str]) -> dict:
 # ExecutionRouter
 # ---------------------------------------------------------------------------
 
+class CoreDecisionAdapter:
+    @staticmethod
+    def to_proposed_action(request: ToolRequest, call_id: str) -> ProposedAction:
+        chain = []
+        for arg_name, arg_spec in request.arguments.items():
+            source = getattr(arg_spec, "source", "external_document")
+            if source == "external_document":
+                trust = TrustLevel.UNTRUSTED
+                tainted = True
+            elif source in ("user_declared", "gateway_trusted", "system"):
+                trust = TrustLevel.TRUSTED
+                tainted = False
+            else:
+                trust = TrustLevel.DERIVED
+                tainted = True
+
+            chain.append(
+                ProvenanceRecord(
+                    source=source,
+                    trust_level=trust,
+                    session_id=request.provenance.get("session_id", "s1"),
+                    tainted=tainted,
+                )
+            )
+        
+        args_dict = {}
+        for k, v in request.arguments.items():
+            args_dict[k] = getattr(v, "value", v)
+
+        return ProposedAction(
+            action_id=call_id,
+            action_type=request.tool,
+            parameters=args_dict,
+            provenance_chain=chain,
+        )
+
+    @staticmethod
+    def to_gateway_response_fields(resolution) -> tuple[str, str, str]:
+        val = resolution.decision.value
+        if val == "allow":
+            return "allow", resolution.reason, resolution.rule_triggered
+        elif val == "deny":
+            return "deny", resolution.reason, f"core:{resolution.rule_triggered}"
+        else:
+            return "ask", resolution.reason, f"core:{resolution.rule_triggered}"
+
 class ExecutionRouter:
     """
     Core execution switch — routes tool requests through policy enforcement,
@@ -329,6 +387,7 @@ class ExecutionRouter:
         registry: ToolRegistry,
         policy_engine: PolicyEngine,
         firewall: ProvenanceFirewall,
+        core_hypervisor: Optional[CoreHypervisor] = None,
         policy_version: str = "unversioned",
         max_traces: int = 1000,
         trace_store: Optional[TraceStore] = None,
@@ -337,6 +396,7 @@ class ExecutionRouter:
         self._registry = registry
         self._policy_engine = policy_engine
         self._firewall = firewall
+        self._core_hypervisor = core_hypervisor
         self._policy_version = policy_version
         self._traces: deque[TraceEntry] = deque(maxlen=max_traces)
         self._pending_approvals: dict[str, ApprovalRecord] = {}
@@ -358,11 +418,13 @@ class ExecutionRouter:
         self,
         policy_engine: PolicyEngine,
         firewall: ProvenanceFirewall,
+        core_hypervisor: Optional[CoreHypervisor],
         policy_version: str,
     ) -> None:
         """Replace the active policy engine and firewall (used by hot reload)."""
         self._policy_engine = policy_engine
         self._firewall = firewall
+        self._core_hypervisor = core_hypervisor
         self._policy_version = policy_version
 
     def get_traces(self, limit: int = 100) -> list[dict]:
@@ -480,20 +542,33 @@ class ExecutionRouter:
         fw_decision = self._firewall.check(call, registry)
         fw_verdict = fw_decision.verdict.value
 
-        # Step 5: Combine verdicts — deny > ask > allow
-        _prec = {"deny": 2, "ask": 1, "allow": 0}
-        if _prec[pe_verdict] >= _prec[fw_verdict]:
-            final_verdict = pe_verdict
-            reason = pe_result.reason
-            matched_rule = pe_result.matched_rule
+        # Step 5: Core engine dictates authority; Legacy shadowed.
+        if self._core_hypervisor:
+            action = CoreDecisionAdapter.to_proposed_action(request, call_id)
+            resolution = self._core_hypervisor.evaluate(action)
+            final_verdict, reason, matched_rule = CoreDecisionAdapter.to_gateway_response_fields(resolution)
+
+            # Shadow Mode Logging
+            import logging
+            if final_verdict != pe_verdict or final_verdict != fw_verdict:
+                logging.warning(
+                    f"[SHADOW MISMATCH] tool={request.tool} "
+                    f"Core={final_verdict} (rule: {matched_rule}) vs PE={pe_verdict} FW={fw_verdict}"
+                )
         else:
-            final_verdict = fw_verdict
-            reason = fw_decision.reason
-            matched_rule = (
-                f"firewall:{fw_decision.violated_rules[0]}"
-                if fw_decision.violated_rules
-                else "firewall:ask"
-            )
+            _prec = {"deny": 2, "ask": 1, "allow": 0}
+            if _prec[pe_verdict] >= _prec[fw_verdict]:
+                final_verdict = pe_verdict
+                reason = pe_result.reason
+                matched_rule = pe_result.matched_rule
+            else:
+                final_verdict = fw_verdict
+                reason = fw_decision.reason
+                matched_rule = (
+                    f"firewall:{fw_decision.violated_rules[0]}"
+                    if fw_decision.violated_rules
+                    else "firewall:ask"
+                )
 
         # Step 6: Execute adapter (only if allow)
         # Program Layer extension: _dispatch_execution() routes to the
