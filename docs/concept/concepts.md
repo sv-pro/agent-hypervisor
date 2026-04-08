@@ -38,6 +38,26 @@ What the manifest contains:
 - the resource constraints on each tool (paths, remotes, commands)
 - the provenance rules governing how inputs may flow to outputs
 
+A minimal example:
+
+```yaml
+workflow_id: repo-maintenance
+version: "1.0"
+
+capabilities:
+  - tool: file_read
+    constraints:
+      paths: ["**/*.py", "**/*.md"]
+  - tool: shell_exec
+    constraints:
+      commands: ["pytest"]
+  - tool: git_push
+    constraints:
+      remotes: [origin]
+```
+
+`http_post`, `env_read`, and unrestricted `shell_exec` are not in the manifest — they do not exist in this agent's world.
+
 What the manifest is not:
 
 - a runtime filter
@@ -45,6 +65,37 @@ What the manifest is not:
 - a behavioral heuristic evaluated probabilistically
 
 The manifest is a structural definition. Capabilities outside it have no representation. Enforcement against the manifest is deterministic. **The manifest is the world** — the agent operates inside it, not alongside it.
+
+---
+
+## Compiler
+
+The compiler implements Layer 1 of the architecture. It takes a workflow definition or observed execution trace, derives the minimal capability set required, and produces the World Manifest.
+
+```
+Workflow definition / execution trace
+      ↓
+ [profile]   derive minimal capability set
+      ↓
+ World Manifest (YAML)
+      ↓
+ [render]    Manifest → Rendered Capability Surface
+      ↓
+ [enforce]   ALLOW / DENY_ABSENT / DENY_POLICY
+```
+
+The compiler is a pure transformation — no LLM calls, no runtime decisions, no mutable state. The output is a sealed artifact that cannot be expanded during execution.
+
+**Derivation vs declaration.** A manifest can be authored by hand or derived from execution traces. A derived manifest is evidence-backed: only capabilities observed in `safe=True` calls contribute to the profile. A hand-written manifest is an assertion about what a workflow needs; a derived manifest is a record of what it actually used.
+
+**CLI.** The `awc` (Agent World Compiler) tool drives the pipeline:
+
+```bash
+awc profile --trace path/to/trace.json    # derive capability set from observed trace
+awc compile --manifest manifest.yaml      # compile into sealed policy artifacts
+awc render  --manifest manifest.yaml      # inspect the rendered capability surface
+awc run     --scenario safe               # run a named end-to-end scenario
+```
 
 ---
 
@@ -113,9 +164,18 @@ This is why prompt injection and jailbreaks that operate at the language level c
 
 ## Taint and Provenance
 
-Provenance tracks where the inputs to a Step originated.
+Provenance is the record of where a value came from and how it was transformed before it reached the tool execution boundary. It is a first-class property of every value in the system — not metadata attached as an afterthought.
 
-Taint is a property of inputs that have passed through untrusted or uncontrolled channels. Taint propagates forward through the `input_sources` chain — if a tainted value feeds into a later action, that action is tainted.
+**Provenance classes.** Values are classified by trust level at their origin:
+
+| Class | Meaning | Trust |
+| --- | --- | --- |
+| `external_document` | Content from files, emails, web pages, API responses | Lowest |
+| `derived` | Computed or extracted from one or more parent values | — |
+| `user_declared` | Explicitly declared by the operator in the task manifest | High |
+| `system` | Hardcoded by the system — no user influence possible | Highest |
+
+**Taint** is the observable consequence of provenance: a value that traces to `external_document` ancestry is tainted. Taint propagates forward through the derivation chain — if a tainted value feeds into a later action, that action is tainted.
 
 A tainted Step cannot trigger external side effects, even if the action itself is present in the manifest. This produces `DENY_POLICY`.
 
@@ -129,7 +189,30 @@ send_email (external)        →  DENY  [POLICY: tainted source]
 
 Each action is individually legal. The chain is not. Taint propagation enforces this without requiring the system to understand the attacker's intent.
 
-**Taint is monotonic** — a derived value inherits the least-trusted provenance class among its parents. Wrapping an untrusted value in a derived wrapper does not launder it.
+**Provenance DAG.** When a value is derived from other values, the derivation is recorded — forming a directed acyclic graph of origins. The firewall walks this graph at evaluation time to compute effective trust. The full chain is always evaluated; provenance claims on the leaf node alone are not sufficient.
+
+**Sticky provenance (anti-laundering invariant).** A derived value inherits the least-trusted provenance class among all its ancestors. Wrapping an untrusted value in a derived wrapper does not launder it:
+
+```
+attacker embeds address in document
+    doc_ref  (external_document)
+         │
+         ▼
+agent extracts address
+    addr  (derived — parent: doc_ref)
+
+operator declares contacts file
+    contacts_ref  (user_declared)
+         │
+         ▼
+combined address  (derived — parents: addr + contacts_ref)
+    ← external_document present in ancestry
+    ← least-trusted dominates → deny
+```
+
+Even though `contacts_ref` is trusted, the `external_document` ancestor in the chain dominates. The combination does not produce a trusted value.
+
+**Taint is monotonic** — it can be joined but never removed. Any code that drops or bypasses taint propagation is a security regression.
 
 ---
 
@@ -192,3 +275,63 @@ Shifting capability definition from runtime decisions to design-time boundary de
 - reduces operational complexity (O(n) runtime review → O(1) design-time definition)
 - eliminates the class of failure where the enforcement system and the enforced system share failure modes
 - makes the security posture auditable, reproducible, and testable
+
+---
+
+## Runtime Enforcement
+
+The runtime is Layer 3 of the architecture — the deterministic enforcement kernel.
+
+The enforcement boundary is `IRBuilder.build()`. All constraint checking happens at construction time — before any execution begins. If `build()` returns an `IntentIR`, every constraint has already passed and the sealed intent is handed to the executor. If it raises, nothing executes.
+
+```text
+Agent / LLM
+    │
+    ▼
+IRBuilder.build()       ← all enforcement happens here
+    │ success → IntentIR (sealed)
+    ▼
+Executor.execute()      ← runs only validated intent
+    │
+    ▼
+TaintedValue            ← result always carries provenance
+```
+
+Four structurally distinct denial types, all subclasses of `ConstructionError`:
+
+| Exception | Meaning |
+| --- | --- |
+| `NonExistentAction` | Tool not in manifest — ontological absence |
+| `ConstraintViolation` | Trust level insufficient for this action |
+| `TaintViolation` | Tainted context cannot flow into this action |
+| `ApprovalRequired` | Action requires an explicit approval token |
+
+**IntentIR is sealed.** The `IntentIR` object cannot be constructed outside `IRBuilder`. No external code can inject an execution intent that has not passed all constraints.
+
+**Process boundary.** Handler code runs in a worker subprocess. Policy evaluation runs in the main process. Neither can see the other's internals. This is OS-level isolation — not a convention.
+
+**SafeMCPProxy.** All MCP-style tool calls pass through `SafeMCPProxy` before reaching the execution layer. Enforcement is in-path — there is no call path that bypasses evaluation.
+
+---
+
+## Tool Virtualization
+
+In the standard model, tools connect directly to agents. A compromised tool inherits the full blast radius of the agent's access. Agent Hypervisor interposes a virtualization layer:
+
+```text
+Standard model:
+    Agent ←→ MCP Tool  (direct, unmediated)
+
+Agent Hypervisor model:
+    Agent ←→ Hypervisor ←→ MCP Tool  (virtualized device)
+```
+
+**MCP tool = virtualized device.** A tool exists in the agent's world only if the World Manifest defines it. An undefined tool is not forbidden — it does not exist. The agent cannot formulate intent for a tool that has no ontological representation.
+
+**Schema = device descriptor.** Every tool has a typed schema defining accepted inputs and expected outputs, validated at compilation time. Malformed or unexpected payloads are rejected deterministically before any execution.
+
+**Capability = permission model.** The capability matrix determines which tools are available at which trust levels. If the trust level does not grant the required capability, the call does not execute — not because a filter caught it, but because the capability does not exist in that trust context.
+
+**Supply chain.** Skills require World Manifest entries to exist. An unvetted skill is not blocked — it is undefined. The agent operates in a world where that skill has never existed. There is no request to intercept.
+
+This resolves a class of attacks that filtering cannot address: even if a malicious skill or server is present in the environment, the agent has no representation of it and cannot form intent for it.
