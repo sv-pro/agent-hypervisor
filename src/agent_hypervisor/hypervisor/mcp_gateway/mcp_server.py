@@ -45,6 +45,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+# Path to the bundled default provenance firewall policy.
+# Resolved relative to this file so it works both in-tree and when installed.
+_DEFAULT_POLICY_PATH: Path = (
+    Path(__file__).parent.parent.parent / "runtime" / "configs" / "default_policy.yaml"
+)
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -127,16 +133,24 @@ def create_mcp_app(
     manifest_path: str | Path = "manifests/example_world.yaml",
     registry: Optional[ToolRegistry] = None,
     policy_engine: Optional[Any] = None,
+    use_default_policy: bool = False,
 ) -> FastAPI:
     """
     Build and return the FastAPI MCP gateway application.
 
     Args:
-        manifest_path: Path to the WorldManifest YAML file.
-                       Gateway will not start if this file cannot be loaded.
-        registry:      ToolRegistry to use. Defaults to build_default_registry().
-        policy_engine: Optional PolicyEngine for secondary enforcement.
-                       If None, only manifest + constraint checks run.
+        manifest_path:       Path to the WorldManifest YAML file.
+                             Gateway will not start if this file cannot be loaded.
+        registry:            ToolRegistry to use. Defaults to build_default_registry().
+        policy_engine:       Optional PolicyEngine for secondary enforcement.
+                             If None and use_default_policy is False, only manifest +
+                             constraint checks run.
+        use_default_policy:  If True and policy_engine is None, auto-load the bundled
+                             default provenance firewall policy from
+                             runtime/configs/default_policy.yaml. This enables
+                             provenance-aware enforcement (external_document arguments
+                             to side-effect tools are denied; read-only tools are
+                             always allowed).
 
     Returns:
         FastAPI app ready to serve with uvicorn.
@@ -146,6 +160,12 @@ def create_mcp_app(
         jsonschema.ValidationError: If the manifest YAML is invalid.
     """
     manifest_path = Path(manifest_path)
+
+    # Auto-load default policy engine when requested and none was provided.
+    if use_default_policy and policy_engine is None:
+        from agent_hypervisor.hypervisor.policy_engine import PolicyEngine
+        policy_engine = PolicyEngine.from_yaml(_DEFAULT_POLICY_PATH)
+
     state = MCPGatewayState(
         manifest_path=manifest_path,
         registry=registry,

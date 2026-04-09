@@ -1,8 +1,8 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Initial implementation  
-**Branch**: `claude/ah-mcp-gateway-impl-HLm5f`
+**Session**: Continuation — PolicyEngine wiring, deps, run script  
+**Branch**: `claude/continue-implementation-LEW4G`
 
 ---
 
@@ -80,31 +80,42 @@ All 26 tests pass. Groups:
 
 ---
 
+### Session 2 — PolicyEngine wiring, deps, run script
+
+- [x] `jsonschema` added to core deps in `pyproject.toml`
+- [x] `httpx`, `pytest-asyncio` added under `[project.optional-dependencies].test`
+- [x] `create_mcp_app(use_default_policy=True)` auto-loads `runtime/configs/default_policy.yaml`
+- [x] Explicit `policy_engine` argument never overridden by `use_default_policy`
+- [x] 6 new PolicyEngine integration tests (Group 5) — all passing
+- [x] `scripts/run_mcp_gateway.py` — single-command launcher with CLI flags
+
+**Test results**: 32 passed (was 26).
+
+---
+
 ## Pending / Not Yet Done
 
 - [ ] Full SSE transport (streaming) — out of scope for Phase 1
 - [ ] Per-session manifest selection — architecture ready, not implemented
 - [ ] Full taint propagation integration — hooks in place, not wired to runtime taint
 - [ ] Auth / TLS — not in scope for this phase
-- [ ] `pyproject.toml` dependency update for `jsonschema` and `httpx` (needed for tests)
 
 ---
 
 ## Blockers
 
-None. The implementation is clean and all tests pass.
+None.
 
 ---
 
 ## Next Recommended Step
 
-**Option A (extend)**: Wire the `ToolCallEnforcer` to the existing `PolicyEngine`
-in `hypervisor/policy_engine.py` by passing it at gateway construction time in
-`create_mcp_app()`. This enables provenance-aware policy rules to apply to
-MCP tool calls without changing the enforcement architecture.
-
-**Option B (harden)**: Add the `jsonschema` and `httpx[cli]` dependencies to
-`pyproject.toml` so the tests can run in CI without manual pip installs.
-
-**Option C (demo)**: Wire the MCP gateway to an example Claude client and run
+**Option A (demo)**: Wire the MCP gateway to an example Claude client and run
 the demo flow from `docs/implementation/mcp_gateway_demo.md`.
+
+**Option B (harden)**: Add SSE transport so the gateway can serve streaming
+responses to MCP clients that require it.
+
+**Option C (extend)**: Implement per-session manifest selection — the
+`SessionWorldResolver.resolve(session_id, context)` signature is ready; wire
+it to a session registry so different sessions can get different WorldManifests.

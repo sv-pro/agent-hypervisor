@@ -6,6 +6,14 @@ dependencies = [
     "pyyaml",
     "fastapi",
     "uvicorn",
+    "jsonschema",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "httpx",
+    "pytest-asyncio",
 ]
 
 [build-system]

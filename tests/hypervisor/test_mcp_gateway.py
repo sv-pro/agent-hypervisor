@@ -419,3 +419,97 @@ class TestSessionWorldResolver:
         bad_file.write_text("this is not valid yaml: [\n")
         with pytest.raises(Exception):
             SessionWorldResolver(bad_file)
+
+
+# ---------------------------------------------------------------------------
+# Group 5: PolicyEngine integration
+# ---------------------------------------------------------------------------
+
+class TestPolicyEngineIntegration:
+    """
+    Verify that the optional PolicyEngine wires correctly into ToolCallEnforcer
+    and that create_mcp_app(use_default_policy=True) loads the bundled policy.
+    """
+
+    def _make_allow_engine(self):
+        """PolicyEngine that allows every tool."""
+        from agent_hypervisor.hypervisor.policy_engine import PolicyEngine
+        return PolicyEngine.from_dict({"rules": [{"tool": "*", "verdict": "allow"}]})
+
+    def _make_deny_engine(self, tool_name: str):
+        """PolicyEngine that denies a specific tool."""
+        from agent_hypervisor.hypervisor.policy_engine import PolicyEngine
+        return PolicyEngine.from_dict(
+            {"rules": [{"tool": tool_name, "verdict": "deny"}]}
+        )
+
+    def test_policy_engine_deny_overrides_manifest_allow(self):
+        """A policy-engine deny on a manifest-declared tool must fail closed."""
+        from agent_hypervisor.hypervisor.mcp_gateway import ToolCallEnforcer
+        manifest = _make_manifest(["read_file"])
+        registry = _make_registry(["read_file"])
+        engine = self._make_deny_engine("read_file")
+        enforcer = ToolCallEnforcer(manifest, registry, policy_engine=engine)
+
+        decision = enforcer.enforce("read_file", {"path": "/tmp/x.txt"})
+        assert decision.denied
+        assert decision.matched_rule.startswith("policy:")
+
+    def test_policy_engine_allow_passes_to_constraint_check(self):
+        """A policy-engine allow on a manifest-declared tool proceeds to constraint check."""
+        from agent_hypervisor.hypervisor.mcp_gateway import ToolCallEnforcer
+        manifest = _make_manifest(["read_file"])
+        registry = _make_registry(["read_file"])
+        engine = self._make_allow_engine()
+        enforcer = ToolCallEnforcer(manifest, registry, policy_engine=engine)
+
+        decision = enforcer.enforce("read_file", {"path": "/tmp/x.txt"})
+        assert decision.allowed
+
+    def test_policy_engine_error_fails_closed(self):
+        """If the policy engine raises, the enforcer must fail closed."""
+        from agent_hypervisor.hypervisor.mcp_gateway import ToolCallEnforcer
+        from unittest.mock import MagicMock
+        manifest = _make_manifest(["read_file"])
+        registry = _make_registry(["read_file"])
+        bad_engine = MagicMock()
+        bad_engine.evaluate.side_effect = RuntimeError("policy engine boom")
+        enforcer = ToolCallEnforcer(manifest, registry, policy_engine=bad_engine)
+
+        decision = enforcer.enforce("read_file", {"path": "/tmp/x.txt"})
+        assert decision.denied
+        assert decision.matched_rule == "policy:evaluation_error"
+
+    def test_use_default_policy_loads_bundled_policy(self, tmp_path):
+        """create_mcp_app(use_default_policy=True) must load the bundled policy."""
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+        manifest_file = tmp_path / "world.yaml"
+        manifest_file.write_text(
+            "workflow_id: policy-test\ncapabilities:\n  - tool: read_file\n"
+        )
+        app = create_mcp_app(manifest_file, use_default_policy=True)
+        gw = app.state.gw
+        assert gw.policy_engine is not None
+
+    def test_use_default_policy_false_leaves_engine_none(self, tmp_path):
+        """create_mcp_app() without use_default_policy must leave policy_engine as None."""
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+        manifest_file = tmp_path / "world.yaml"
+        manifest_file.write_text(
+            "workflow_id: no-policy\ncapabilities:\n  - tool: read_file\n"
+        )
+        app = create_mcp_app(manifest_file)
+        gw = app.state.gw
+        assert gw.policy_engine is None
+
+    def test_explicit_policy_engine_is_not_overridden(self, tmp_path):
+        """Passing an explicit policy_engine must not be replaced even if use_default_policy=True."""
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+        manifest_file = tmp_path / "world.yaml"
+        manifest_file.write_text(
+            "workflow_id: explicit\ncapabilities:\n  - tool: read_file\n"
+        )
+        custom_engine = self._make_allow_engine()
+        app = create_mcp_app(manifest_file, policy_engine=custom_engine, use_default_policy=True)
+        gw = app.state.gw
+        assert gw.policy_engine is custom_engine
