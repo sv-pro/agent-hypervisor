@@ -513,3 +513,265 @@ class TestPolicyEngineIntegration:
         app = create_mcp_app(manifest_file, policy_engine=custom_engine, use_default_policy=True)
         gw = app.state.gw
         assert gw.policy_engine is custom_engine
+
+
+# ---------------------------------------------------------------------------
+# Group 6: Per-session manifest bindings
+# ---------------------------------------------------------------------------
+
+class TestPerSessionManifests:
+    """
+    Tests for per-session WorldManifest bindings.
+
+    Core invariant: different sessions can operate in different worlds
+    simultaneously. Sessions without an explicit binding fall back to the
+    gateway-level default.
+    """
+
+    def _write_manifest(self, path, workflow_id: str, tools: list[str]) -> None:
+        caps = "\n".join(f"  - tool: {t}" for t in tools)
+        path.write_text(f"workflow_id: {workflow_id}\ncapabilities:\n{caps}\n")
+
+    # --- SessionWorldResolver unit tests ---
+
+    def test_unregistered_session_gets_default(self, tmp_path):
+        """Sessions without a binding must use the default manifest."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        resolver = SessionWorldResolver(default_file)
+
+        manifest = resolver.resolve(session_id="unknown-session")
+        assert manifest.workflow_id == "default-world"
+
+    def test_registered_session_gets_own_manifest(self, tmp_path):
+        """A session with a registered manifest must receive that manifest."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        session_file = tmp_path / "session.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        self._write_manifest(session_file, "session-world", ["send_email"])
+        resolver = SessionWorldResolver(default_file)
+
+        resolver.register_session("s1", session_file)
+        manifest = resolver.resolve(session_id="s1")
+        assert manifest.workflow_id == "session-world"
+
+    def test_registered_session_does_not_affect_other_sessions(self, tmp_path):
+        """Per-session binding must not affect sessions without a binding."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        session_file = tmp_path / "session.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        self._write_manifest(session_file, "session-world", ["send_email"])
+        resolver = SessionWorldResolver(default_file)
+
+        resolver.register_session("s1", session_file)
+        assert resolver.resolve(session_id="s2").workflow_id == "default-world"
+        assert resolver.resolve(session_id=None).workflow_id == "default-world"
+
+    def test_unregister_session_reverts_to_default(self, tmp_path):
+        """Unregistering a session must revert it to the default manifest."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        session_file = tmp_path / "session.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        self._write_manifest(session_file, "session-world", ["send_email"])
+        resolver = SessionWorldResolver(default_file)
+
+        resolver.register_session("s1", session_file)
+        assert resolver.resolve(session_id="s1").workflow_id == "session-world"
+
+        removed = resolver.unregister_session("s1")
+        assert removed is True
+        assert resolver.resolve(session_id="s1").workflow_id == "default-world"
+
+    def test_unregister_nonexistent_session_is_idempotent(self, tmp_path):
+        """Unregistering a session that was never bound must return False safely."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        resolver = SessionWorldResolver(default_file)
+
+        removed = resolver.unregister_session("does-not-exist")
+        assert removed is False
+
+    def test_register_session_fails_closed_on_bad_manifest(self, tmp_path):
+        """register_session must raise and NOT register if the manifest is invalid."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        bad_file = tmp_path / "bad.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        bad_file.write_text("this: [is: invalid yaml:\n")
+        resolver = SessionWorldResolver(default_file)
+
+        with pytest.raises(Exception):
+            resolver.register_session("s1", bad_file)
+
+        # Session must NOT have been registered
+        assert resolver.resolve(session_id="s1").workflow_id == "default-world"
+
+    def test_session_registry_returns_snapshot(self, tmp_path):
+        """session_registry() must return a snapshot of current bindings."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SessionWorldResolver
+        default_file = tmp_path / "default.yaml"
+        s1_file = tmp_path / "s1.yaml"
+        s2_file = tmp_path / "s2.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        self._write_manifest(s1_file, "world-s1", ["send_email"])
+        self._write_manifest(s2_file, "world-s2", ["read_file"])
+        resolver = SessionWorldResolver(default_file)
+
+        resolver.register_session("alice", s1_file)
+        resolver.register_session("bob", s2_file)
+        registry = resolver.session_registry()
+
+        assert registry == {"alice": "world-s1", "bob": "world-s2"}
+
+    # --- HTTP endpoint tests ---
+
+    @pytest.fixture
+    def two_world_client(self, tmp_path):
+        """
+        Client with a gateway that has two manifests on disk:
+          - default_world.yaml: read_file only
+          - email_world.yaml: send_email only
+        """
+        pytest.importorskip("httpx")
+        from httpx import AsyncClient, ASGITransport
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+
+        default_file = tmp_path / "default_world.yaml"
+        email_file = tmp_path / "email_world.yaml"
+        self._write_manifest(default_file, "default-world", ["read_file"])
+        self._write_manifest(email_file, "email-world", ["send_email"])
+
+        app = create_mcp_app(default_file)
+        # Attach paths for use in tests
+        app.state.email_manifest_path = str(email_file)
+        client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        return client
+
+    @pytest.mark.asyncio
+    async def test_bind_session_changes_visible_tools(self, two_world_client):
+        """After binding, tools/list for that session must show the bound world's tools."""
+        async with two_world_client as c:
+            email_path = c._transport.app.state.email_manifest_path
+
+            # Bind session "s1" to email world
+            bind_resp = await c.post(
+                "/mcp/sessions/s1/bind",
+                json={"manifest_path": email_path},
+            )
+            assert bind_resp.status_code == 200
+            bind_data = bind_resp.json()
+            assert bind_data["status"] == "bound"
+            assert bind_data["workflow_id"] == "email-world"
+            assert "send_email" in bind_data["visible_tools"]
+
+            # tools/list with session s1 must show send_email
+            tools_resp = await c.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {
+                    "_meta": {"session_id": "s1"}
+                }},
+            )
+            assert tools_resp.status_code == 200
+            tool_names = [t["name"] for t in tools_resp.json()["result"]["tools"]]
+            assert "send_email" in tool_names
+            assert "read_file" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_session_binding_does_not_affect_default(self, two_world_client):
+        """Binding one session must not change another session's visible tools."""
+        async with two_world_client as c:
+            email_path = c._transport.app.state.email_manifest_path
+
+            # Bind session "s1" to email world
+            await c.post("/mcp/sessions/s1/bind", json={"manifest_path": email_path})
+
+            # tools/list without session_id still shows default world
+            tools_resp = await c.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            )
+            tool_names = [t["name"] for t in tools_resp.json()["result"]["tools"]]
+            assert "read_file" in tool_names
+            assert "send_email" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_unbind_session_reverts_to_default(self, two_world_client):
+        """DELETE /mcp/sessions/{id} must revert the session to the default world."""
+        async with two_world_client as c:
+            email_path = c._transport.app.state.email_manifest_path
+
+            # Bind then unbind
+            await c.post("/mcp/sessions/s1/bind", json={"manifest_path": email_path})
+            del_resp = await c.delete("/mcp/sessions/s1")
+            assert del_resp.status_code == 200
+            assert del_resp.json()["status"] == "unbound"
+
+            # tools/list for s1 must now show default world
+            tools_resp = await c.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {
+                    "_meta": {"session_id": "s1"}
+                }},
+            )
+            tool_names = [t["name"] for t in tools_resp.json()["result"]["tools"]]
+            assert "read_file" in tool_names
+            assert "send_email" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_endpoint(self, two_world_client):
+        """GET /mcp/sessions must list all active bindings."""
+        async with two_world_client as c:
+            email_path = c._transport.app.state.email_manifest_path
+
+            # Initially empty
+            list_resp = await c.get("/mcp/sessions")
+            assert list_resp.status_code == 200
+            data = list_resp.json()
+            assert data["session_count"] == 0
+            assert data["sessions"] == {}
+
+            # Bind a session
+            await c.post("/mcp/sessions/alice/bind", json={"manifest_path": email_path})
+
+            list_resp2 = await c.get("/mcp/sessions")
+            data2 = list_resp2.json()
+            assert data2["session_count"] == 1
+            assert data2["sessions"]["alice"] == "email-world"
+
+    @pytest.mark.asyncio
+    async def test_bind_bad_manifest_returns_400(self, two_world_client):
+        """Binding a session to a nonexistent manifest must return 400 (fail closed)."""
+        async with two_world_client as c:
+            resp = await c.post(
+                "/mcp/sessions/s1/bind",
+                json={"manifest_path": "/nonexistent/path/manifest.yaml"},
+            )
+            assert resp.status_code == 400
+            assert resp.json()["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_session_tool_call_enforced_against_session_world(self, two_world_client):
+        """tools/call must be enforced against the session's bound manifest."""
+        async with two_world_client as c:
+            email_path = c._transport.app.state.email_manifest_path
+
+            # Bind s1 to email world (only send_email)
+            await c.post("/mcp/sessions/s1/bind", json={"manifest_path": email_path})
+
+            # read_file is not in email world → must be denied for s1
+            call_resp = await c.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+                    "name": "read_file",
+                    "arguments": {"path": "/tmp/x.txt"},
+                    "_meta": {"session_id": "s1"},
+                }},
+            )
+            data = call_resp.json()
+            assert "error" in data, f"Expected denial for s1, got: {data}"
+            assert data["error"]["code"] in (-32001, -32002)

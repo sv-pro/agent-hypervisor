@@ -4,9 +4,12 @@ mcp_server.py — Agent Hypervisor MCP Gateway.
 Implements a JSON-RPC 2.0 server that speaks the Model Context Protocol.
 
 Endpoints:
-  POST /mcp          — JSON-RPC 2.0 dispatcher (tools/list, tools/call, initialize)
-  GET  /mcp/health   — health check + world summary
-  POST /mcp/reload   — hot-reload manifest from disk
+  POST /mcp                            — JSON-RPC 2.0 dispatcher
+  GET  /mcp/health                     — health check + world summary
+  POST /mcp/reload                     — hot-reload default manifest from disk
+  POST /mcp/sessions/{session_id}/bind — bind a session to a specific manifest
+  DELETE /mcp/sessions/{session_id}    — unbind a session (revert to default)
+  GET  /mcp/sessions                   — list all active session bindings
 
 MCP methods handled:
   initialize         — MCP handshake (returns server capabilities)
@@ -16,15 +19,21 @@ MCP methods handled:
 Request flow:
   Client → POST /mcp → dispatch_jsonrpc()
     ├── method=tools/list
-    │     → SessionWorldResolver.resolve()
+    │     → SessionWorldResolver.resolve(session_id)  ← per-session manifest
     │     → ToolSurfaceRenderer.render()
-    │     → [MCPTool, ...]  (only manifest-visible tools)
+    │     → [MCPTool, ...]  (only manifest-visible tools for this session)
     │
     └── method=tools/call
-          → SessionWorldResolver.resolve()
+          → SessionWorldResolver.resolve(session_id)  ← per-session manifest
           → ToolCallEnforcer.enforce()  (manifest check → policy → allow/deny)
           → ToolRegistry.get_tool().adapter(args)  (only on allow)
           → MCPToolResult
+
+Per-session manifests:
+  Sessions without an explicit binding use the gateway-level default manifest.
+  Bind a session via POST /mcp/sessions/{session_id}/bind with a manifest_path
+  in the request body. Different agents/users can operate in different worlds
+  simultaneously without gateway restart.
 
 Usage::
 
@@ -53,6 +62,11 @@ _DEFAULT_POLICY_PATH: Path = (
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+
+class _BindSessionRequest(BaseModel):
+    manifest_path: str
 
 from ..gateway.tool_registry import ToolRegistry, build_default_registry
 from .protocol import (
@@ -107,10 +121,32 @@ class MCPGatewayState:
         self.started_at = datetime.now(timezone.utc).isoformat()
 
     def _rebuild_components(self) -> None:
-        """Rebuild renderer and enforcer from the current manifest."""
+        """Rebuild default renderer and enforcer from the gateway-level manifest."""
         manifest = self.resolver.manifest
         self.renderer = ToolSurfaceRenderer(manifest, self.registry)
         self.enforcer = ToolCallEnforcer(manifest, self.registry, self.policy_engine)
+
+    def renderer_for(self, manifest) -> "ToolSurfaceRenderer":
+        """
+        Return a ToolSurfaceRenderer for the given manifest.
+
+        If manifest is the gateway-level default, returns the cached renderer.
+        Otherwise builds a new one (lightweight).
+        """
+        if manifest is self.resolver.manifest:
+            return self.renderer
+        return ToolSurfaceRenderer(manifest, self.registry)
+
+    def enforcer_for(self, manifest) -> "ToolCallEnforcer":
+        """
+        Return a ToolCallEnforcer for the given manifest.
+
+        If manifest is the gateway-level default, returns the cached enforcer.
+        Otherwise builds a new one (lightweight).
+        """
+        if manifest is self.resolver.manifest:
+            return self.enforcer
+        return ToolCallEnforcer(manifest, self.registry, self.policy_engine)
 
     def reload_manifest(self) -> bool:
         """
@@ -279,7 +315,7 @@ def create_mcp_app(
 
     @app.post("/mcp/reload")
     async def reload_manifest() -> JSONResponse:
-        """Hot-reload the WorldManifest from disk."""
+        """Hot-reload the default WorldManifest from disk."""
         gw: MCPGatewayState = app.state.gw
         ok = gw.reload_manifest()
         manifest = gw.resolver.manifest
@@ -288,6 +324,71 @@ def create_mcp_app(
             "manifest_path": str(gw.manifest_path),
             "workflow_id": manifest.workflow_id if manifest else None,
             "visible_tools": [t.name for t in gw.renderer.render()] if ok else [],
+        })
+
+    # ------------------------------------------------------------------
+    # Per-session manifest management
+    # ------------------------------------------------------------------
+
+    @app.post("/mcp/sessions/{session_id}/bind")
+    async def bind_session(session_id: str, body: _BindSessionRequest) -> JSONResponse:
+        """
+        Bind a session to a specific WorldManifest.
+
+        After binding, tools/list and tools/call for this session_id will use
+        the specified manifest instead of the gateway-level default.
+
+        The manifest is loaded immediately. Returns 400 if the manifest file
+        cannot be loaded (fail closed — no silent fallback to default).
+        """
+        gw: MCPGatewayState = app.state.gw
+        try:
+            manifest = gw.resolver.register_session(session_id, Path(body.manifest_path))
+        except Exception as exc:
+            return JSONResponse(
+                {"status": "error", "session_id": session_id, "error": str(exc)},
+                status_code=400,
+            )
+        renderer = gw.renderer_for(manifest)
+        return JSONResponse({
+            "status": "bound",
+            "session_id": session_id,
+            "manifest_path": body.manifest_path,
+            "workflow_id": manifest.workflow_id,
+            "visible_tools": [t.name for t in renderer.render()],
+        })
+
+    @app.delete("/mcp/sessions/{session_id}")
+    async def unbind_session(session_id: str) -> JSONResponse:
+        """
+        Remove a session's manifest binding, reverting it to the default.
+
+        Safe to call even if the session is not currently bound.
+        """
+        gw: MCPGatewayState = app.state.gw
+        removed = gw.resolver.unregister_session(session_id)
+        default_manifest = gw.resolver.manifest
+        return JSONResponse({
+            "status": "unbound" if removed else "not_bound",
+            "session_id": session_id,
+            "default_workflow_id": default_manifest.workflow_id if default_manifest else None,
+        })
+
+    @app.get("/mcp/sessions")
+    async def list_sessions() -> JSONResponse:
+        """
+        List all active per-session manifest bindings.
+
+        Returns a dict of session_id → workflow_id for all explicitly bound
+        sessions. Sessions not listed are using the gateway-level default.
+        """
+        gw: MCPGatewayState = app.state.gw
+        registry = gw.resolver.session_registry()
+        default_manifest = gw.resolver.manifest
+        return JSONResponse({
+            "sessions": registry,
+            "default_workflow_id": default_manifest.workflow_id if default_manifest else None,
+            "session_count": len(registry),
         })
 
     return app
@@ -329,10 +430,13 @@ def _handle_tools_list(
     """
     Handle tools/list.
 
-    Returns only the tools visible in the current manifest world.
-    The MCP client will see only these tools — undeclared tools do not exist.
+    Returns only the tools visible in the session's manifest world.
+    If the session has a registered manifest, that world is used; otherwise
+    the gateway-level default is used. The MCP client sees only these tools —
+    undeclared tools do not exist.
     """
-    tools = state.renderer.render()
+    manifest = state.resolver.resolve(session_id=provenance.session_id)
+    tools = state.renderer_for(manifest).render()
     return {
         "tools": [t.model_dump() for t in tools],
     }
@@ -347,9 +451,9 @@ def _handle_tools_call(
     """
     Handle tools/call.
 
-    Enforces the call against the manifest. On denial, returns a JSON-RPC
-    error response (the tool is absent or forbidden). On allow, dispatches
-    to the registered adapter and returns the result.
+    Enforces the call against the session's manifest. On denial, returns a
+    JSON-RPC error response (the tool is absent or forbidden). On allow,
+    dispatches to the registered adapter and returns the result.
     """
     # Validate params
     tool_name = params.get("name")
@@ -367,8 +471,9 @@ def _handle_tools_call(
             "'arguments' must be an object",
         )
 
-    # Enforce
-    decision = state.enforcer.enforce(tool_name, arguments, provenance)
+    # Resolve per-session manifest and enforce
+    manifest = state.resolver.resolve(session_id=provenance.session_id)
+    decision = state.enforcer_for(manifest).enforce(tool_name, arguments, provenance)
 
     if decision.denied:
         # Choose error code: not-in-world vs. policy-denied
