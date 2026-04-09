@@ -1,16 +1,15 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 6 — Taint propagation  
+**Session**: Session 7 — SSE integration tests (Option E)  
 **Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## Session Summary
 
-Session 6: Taint propagation from `InvocationProvenance.trust_level` through
-`EnforcementDecision` and into tool results (Option D from Session 5 handoff).
-78 tests passing (was 58).
+Session 7: Full SSE streaming round-trip tests against a real uvicorn server
+(Option E from Session 6 handoff). 83 tests passing (was 78).
 
 ---
 
@@ -78,10 +77,10 @@ Session 6: Taint propagation from `InvocationProvenance.trust_level` through
 ## Test Results
 
 ```
-78 passed
+83 passed
 ```
 
-All 78 tests pass. Groups:
+All 83 tests pass. Groups:
 - `TestToolSurfaceRenderer` (7 tests) — tools/list invariants
 - `TestToolCallEnforcer` (8 tests) — enforcement invariants
 - `TestMCPGatewayHTTP` (6 tests) — HTTP integration
@@ -90,6 +89,7 @@ All 78 tests pass. Groups:
 - Group 6 per-session bindings (13 tests) — session registry
 - Group 7 SSE transport (13 tests) — SSE session store, stream, HTTP endpoints
 - `TestTaintPropagation` (20 tests) — taint from provenance through decision to result
+- `TestSSEIntegration` (5 tests) — full SSE streaming round-trip vs. real uvicorn
 
 ---
 
@@ -114,6 +114,23 @@ All 78 tests pass. Groups:
 - [x] `scripts/run_mcp_gateway.py` — single-command launcher with CLI flags
 
 **Test results**: 32 passed (was 26).
+
+---
+
+### Session 7 — SSE integration tests (Option E)
+
+- [x] `TestSSEIntegration` (Group 8, 5 tests) in `test_mcp_gateway.py`
+- [x] `live_server` fixture: starts real uvicorn in daemon thread, polls `/mcp/health` for readiness, scope=class (one server per class)
+- [x] `_collect_sse_events` static helper: `http.client` + daemon thread + `queue.Queue`, reads line-by-line, parses SSE events
+- [x] `_post_json` static helper: `http.client` POST to live server
+- [x] `test_sse_content_type` — verifies `text/event-stream` header
+- [x] `test_sse_first_event_is_endpoint` — first event is `endpoint` with session URL
+- [x] `test_sse_endpoint_url_has_uuid_session_id` — session_id matches UUID pattern
+- [x] `test_sse_full_round_trip` — open SSE → read endpoint → POST → read message event (uses direct streaming reader thread to avoid deadlock)
+- [x] `test_sse_session_removed_after_disconnect` — after abrupt close, POST returns 404
+- [x] Fixed deadlock: round-trip test uses a direct reader thread that emits events into `queue.Queue` immediately (not after batching n events)
+
+**Test results**: 83 passed (was 78).
 
 ---
 
@@ -162,7 +179,6 @@ All 78 tests pass. Groups:
 
 ## Pending / Not Yet Done
 
-- [ ] SSE integration test via real uvicorn server (Option E) — full streaming round-trip
 - [ ] Auth / TLS — not in scope for this phase
 
 ---
@@ -175,9 +191,14 @@ None.
 
 ## Next Recommended Step
 
-**Option E (SSE integration test via real server)**: The SSE transport is
-implemented and unit-tested, but the full streaming round-trip (open SSE stream
-→ POST request → read response event) can only be tested against a real
-uvicorn server. Add a pytest fixture that starts uvicorn in a daemon thread and
-tests the full SSE round-trip with `urllib.request` + line-by-line iteration
-of the response stream, following the pattern in `examples/mcp_gateway/main.py`.
+All planned options (C, B/SSE, D, E) are complete. The MCP gateway now has:
+- Manifest-driven tool surface rendering and enforcement
+- Per-session WorldManifest bindings
+- SSE transport (GET /mcp/sse + POST /mcp/messages)
+- Taint propagation from InvocationProvenance through EnforcementDecision
+- Full SSE streaming integration tests via real uvicorn
+
+Possible further work:
+- Auth / TLS hardening for production use
+- Rate limiting or budget enforcement at the gateway layer
+- Streaming tool results (chunked SSE events for long-running tools)

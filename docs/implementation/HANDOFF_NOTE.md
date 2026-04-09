@@ -1,89 +1,88 @@
 # Handoff Note
 
 **Date**: 2026-04-09  
-**Session**: Session 6 — Taint propagation  
+**Session**: Session 7 — SSE integration tests (Option E)  
 **Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## What Was Just Done
 
-Implemented Option D from the Session 5 handoff: taint propagation from
-`InvocationProvenance.trust_level` through `EnforcementDecision` into tool results.
+Implemented Option E from the Session 6 handoff: full SSE streaming round-trip
+tests against a real uvicorn server.
 
-### Changes to `tool_call_enforcer.py`
+### New test class: `TestSSEIntegration` (Group 8)
 
-- `_taint_context_from_provenance(prov)` — new module-level helper.
-  Only `trust_level="trusted"` produces `TaintContext.clean()`.
-  All other values (including `"derived"`, `"untrusted"`, and unknown/empty)
-  produce `TaintContext(TaintState.TAINTED)`. Conservative by design.
+5 tests in `tests/hypervisor/test_mcp_gateway.py`, all using a real uvicorn
+server in a daemon thread rather than httpx ASGI transport (which cannot test
+infinite SSE streams).
 
-- `EnforcementDecision.taint_context: TaintContext` — new field.
-  Default is `TaintContext(TaintState.TAINTED)` (fail tainted, not fail open).
-  Every branch of `enforce()` passes `taint_context=taint_ctx`.
+**`live_server` fixture** (`scope="class"`):
+- Starts uvicorn with a minimal read_file world manifest
+- Polls `/mcp/health` until ready (max 5 s)
+- Yields `(host, port, base_url)` to all tests in the class
+- Sets `server.should_exit = True` on teardown (daemon thread, clean shutdown)
 
-- `EnforcementDecision.taint_state` — convenience property:
-  `return self.taint_context.taint`. Callers can use this directly.
+**Static helpers**:
+- `_collect_sse_events(host, port, path, n_events, timeout)` — opens SSE connection
+  in a daemon thread using `http.client`, reads line-by-line, parses
+  `event:` / `data:` lines into dicts, forwards parsed events via `queue.Queue`
+- `_post_json(host, port, path, body)` — `http.client` POST, returns `(status_code, dict)`
 
-### Changes to `mcp_server.py`
+**Tests**:
 
-- `from agent_hypervisor.runtime.taint import TaintedValue` imported.
-- In `_handle_tools_call`, every tool result is now wrapped:
-  ```python
-  tainted = TaintedValue(value=text, taint=decision.taint_state)
-  result_dict["_taint"] = tainted.taint.value   # "clean" | "tainted"
-  ```
-- This makes the taint state visible to callers over the JSON-RPC wire.
+1. `test_sse_content_type` — verifies `GET /mcp/sse` returns `Content-Type: text/event-stream`
+2. `test_sse_first_event_is_endpoint` — first SSE event is `event: endpoint` with `data: /mcp/messages?session_id=<uuid>`
+3. `test_sse_endpoint_url_has_uuid_session_id` — session_id in endpoint data matches UUID regex
+4. `test_sse_full_round_trip` — full protocol sequence:
+   - Opens SSE in a direct streaming reader thread (emits events immediately)
+   - Main thread reads the `endpoint` event → extracts `messages_path`
+   - Main thread POSTs `tools/list` to `messages_path` → 202 Accepted
+   - Main thread reads `message` event → verifies JSON-RPC result contains `read_file`
+5. `test_sse_session_removed_after_disconnect` — opens SSE, reads endpoint, closes abruptly, waits 0.3 s, verifies POST returns 404
 
-### New file: `tests/hypervisor/test_taint_propagation.py`
+**Key design decision — direct streaming reader thread**:
+The initial round-trip implementation used `_collect_sse_events(n_events=2)` in a
+wrapper thread that forwarded events to the main thread only after collecting both.
+This deadlocked: the reader waited for event 2, but the main thread needed event 1
+(endpoint) first before it could POST to trigger event 2.
 
-20 tests across 4 groups:
-- **Group A** (6 tests) — `_taint_context_from_provenance` unit tests:
-  trusted→CLEAN, derived→TAINTED, untrusted→TAINTED, empty→TAINTED,
-  unknown→TAINTED, default→TAINTED.
-- **Group B** (6 tests) — `EnforcementDecision` unit tests:
-  trusted allow→CLEAN, untrusted allow→TAINTED, trusted deny→CLEAN,
-  untrusted deny→TAINTED, `taint_state` accessor, default field is TAINTED.
-- **Group C** (4 tests) — Taint monotonicity:
-  `TaintContext.from_outputs()` on tainted decision, join of clean+tainted,
-  CLEAN alone stays CLEAN, `TaintedValue.map()` preserves taint.
-- **Group D** (4 tests) — HTTP integration:
-  `POST /mcp` with untrusted caller → `"_taint": "tainted"`,
-  trusted caller → `"_taint": "clean"`,
-  denied tool call → taint on decision, default provenance → TAINTED.
+Fixed by using a direct `_streaming_reader` function (defined inline) that emits
+each parsed event to `queue.Queue` immediately after parsing, without batching.
+The main thread then interleaves: get event 1 → POST → get event 2.
 
-**Key fix**: All test imports use full package path (`from agent_hypervisor.runtime.models import TaintState`)
-rather than the pythonpath-relative shortcut (`from runtime.models import TaintState`).
-The pythonpath shortcut causes the production code and test code to load two separate
-module objects with two separate enum classes, breaking identity comparison
-(`ctx.taint == TaintState.CLEAN` evaluates False even though both show CLEAN).
-
-### Test results: 78 passed (was 58)
+### Test results: 83 passed (was 78)
 
 ---
 
 ## What to Do Next
 
-**Option E (SSE integration test via real server)**: Add a pytest fixture
-that starts uvicorn in a daemon thread and tests the full SSE round-trip
-with `urllib.request` + line-by-line iteration of the response stream.
-See `examples/mcp_gateway/main.py` for the pattern — it already does this.
+All planned implementation options (C, B/SSE, D, E) are complete.
 
-The test should verify:
-1. `GET /mcp/sse` returns `text/event-stream` content type
-2. The first event is `event: endpoint` with `data: /mcp/messages?session_id=<uuid>`
-3. A subsequent `POST /mcp/messages?session_id=<uuid>` with a `tools/list` call
-   causes a `event: message` to appear on the SSE stream with the JSON-RPC response
-4. The session is cleaned up (404) after the SSE connection closes
+Remaining work is either production-hardening or new feature areas:
+
+- **Auth / TLS**: The gateway currently accepts any request. Adding bearer token
+  auth or mTLS would be needed before production deployment.
+
+- **Rate limiting / budget enforcement**: The economic layer (`src/agent_hypervisor/economic/`)
+  exists but is not wired into the MCP gateway. Integrating budget enforcement at
+  the gateway layer would let manifests declare per-tool cost limits.
+
+- **Streaming tool results**: Currently, tool results are returned as a single JSON
+  blob. Long-running tools (e.g., code execution) could benefit from streaming
+  partial results back as additional SSE events.
 
 ---
 
 ## Key Invariants to Preserve
 
-- `taint_context` is always set — callers never need to handle `None`
-- Only `"trusted"` trust_level yields CLEAN taint — all other values are TAINTED
-- Taint is monotonic — `TaintContext.from_outputs()` can only increase taint, never decrease
-- The `"_taint"` field in JSON responses is informational; it does not affect enforcement
-- POST /mcp/messages returns 202 Accepted — the response ALWAYS goes over the SSE stream
-- `_dispatch_rpc_body` is the single source of truth for JSON-RPC dispatch logic
-- `_BindSessionRequest` must remain at module level (FastAPI constraint)
+- `live_server` fixture must be `scope="class"` — one server per class, shared
+  across tests (not per-test, which would be too slow)
+- The streaming reader thread must emit events immediately (not batch by n_events)
+  to avoid the deadlock in the round-trip test
+- `http.client.HTTPConnection.readline()` is the correct primitive for SSE — it
+  reads one line at a time without buffering the entire response
+- Daemon threads are safe here: they naturally die when the test process exits
+- 0.3 s sleep in `test_sse_session_removed_after_disconnect` gives uvicorn time to
+  run the `finally` block in `sse_stream` after TCP close — this is a real timing
+  dependency but 0.3 s is conservative enough for any CI environment
