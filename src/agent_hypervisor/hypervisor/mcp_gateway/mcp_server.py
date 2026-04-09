@@ -61,6 +61,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from agent_hypervisor.runtime.taint import TaintedValue
 from .sse_transport import SSESessionStore, sse_stream
 
 
@@ -604,24 +605,34 @@ def _handle_tools_call(
     try:
         raw_result = tool_def.adapter(arguments)
     except Exception as exc:
-        # Adapter error — protocol-level success, tool-level error
+        # Adapter error — protocol-level success, tool-level error.
+        # The result is still tainted by the invocation provenance.
+        tainted = TaintedValue(value=f"Tool error: {exc}", taint=decision.taint_state)
         result_obj = MCPToolResult(
-            content=[MCPContent(type="text", text=f"Tool error: {exc}")],
+            content=[MCPContent(type="text", text=tainted.value)],
             isError=True,
         )
         return make_result(request_id, result_obj.model_dump())
 
-    # Format result
+    # Format result, wrapping it in TaintedValue to carry provenance taint.
+    # taint_state reflects the trust level of the caller:
+    #   CLEAN  — caller is trusted; result may be used in external operations
+    #   TAINTED — caller is untrusted/derived; result must not flow unchecked
     if isinstance(raw_result, str):
         text = raw_result
     else:
         text = json.dumps(raw_result, default=str)
 
+    tainted = TaintedValue(value=text, taint=decision.taint_state)
+
     result_obj = MCPToolResult(
-        content=[MCPContent(type="text", text=text)],
+        content=[MCPContent(type="text", text=tainted.value)],
         isError=False,
     )
-    return make_result(request_id, result_obj.model_dump())
+    # Include taint metadata in the MCP result so callers can inspect it.
+    result_dict = result_obj.model_dump()
+    result_dict["_taint"] = tainted.taint.value  # "clean" | "tainted"
+    return make_result(request_id, result_dict)
 
 
 # ---------------------------------------------------------------------------
