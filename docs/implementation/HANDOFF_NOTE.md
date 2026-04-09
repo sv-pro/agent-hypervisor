@@ -1,143 +1,137 @@
-# Handoff Note — Session 9
+# Handoff Note — Session 10
 
 **Date**: 2026-04-09  
 **Branch**: `claude/control-plane-scaffolding-ugZhz`  
-**Session**: Control Plane API + Demo (Phases 5–6)
+**Session**: Gateway Wiring (Phase 7)
 
 ---
 
 ## What Was Done
 
-Added the control plane HTTP API (Phase 5) and demo documentation (Phase 6).
+Wired the control plane into the MCP gateway enforcement loop. This is the bridge
+between the data plane (`ToolCallEnforcer`, `ToolSurfaceRenderer`) and the control
+plane services (`ApprovalService`, `OverlayService`, `WorldStateResolver`).
+
+### Files Modified
+
+```
+src/agent_hypervisor/hypervisor/mcp_gateway/tool_call_enforcer.py
+src/agent_hypervisor/hypervisor/mcp_gateway/mcp_server.py
+```
 
 ### Files Created
 
 ```
-src/agent_hypervisor/control_plane/api.py   ← FastAPI router + ControlPlaneState
-tests/control_plane/test_api.py             ← 44 API endpoint tests
-docs/implementation/control_plane_demo.md   ← 8-step curl walkthrough
+tests/hypervisor/test_gateway_wiring.py   ← 23 integration tests, all passing
 ```
 
-### api.py summary
+---
 
-- `ControlPlaneState` — dataclass holding SessionStore, EventStore, ApprovalService,
-  OverlayService, WorldStateResolver, and optional `get_base_manifest` callback.
-- `ControlPlaneState.create(...)` — factory for fresh in-memory state.
-- `create_control_plane_router(state)` — returns `APIRouter(prefix="/control")`.
-- `create_control_plane_app(...)` — standalone FastAPI app (for testing/demo).
-- Endpoints: sessions CRUD, world state, event log, approval resolution, overlay attach/detach.
+## Changes in Detail
+
+### tool_call_enforcer.py
+
+- Added `asked` property to `EnforcementDecision`:
+  ```python
+  @property
+  def asked(self) -> bool:
+      """True when the policy engine returned 'ask' and a control plane can handle it."""
+      return self.verdict == "ask"
+  ```
+- Changed `_evaluate_policy()` to return a real `EnforcementDecision(verdict="ask")`
+  instead of collapsing it to "deny". This is the key change that makes "ask" verdicts
+  routable to an approval workflow rather than silently denied.
+
+### mcp_server.py
+
+- `MCPGatewayState.__init__` now accepts `control_plane: Optional[ControlPlaneState]`
+- `create_mcp_app()` accepts `control_plane` and:
+  - Auto-configures the `get_base_manifest` bridge if not already set
+  - Mounts `create_control_plane_router(control_plane)` on the same FastAPI app
+- `sse_endpoint` auto-registers new SSE sessions with `control_plane.session_store`
+- `_handle_tools_list()` checks for active overlays via `WorldStateResolver` when
+  a control plane is wired; if overlays are active, synthesizes a modified manifest
+  via `world_state_to_manifest_dict()` and feeds it to `ToolSurfaceRenderer`
+- `_handle_tools_call()` checks `decision.asked`:
+  - With control plane + session_id: routes to `ApprovalService.request_approval()`,
+    returns `{"status": "pending_approval", "approval_id": ...}` to caller
+  - Without control plane or session_id: fails closed (deny)
 
 ---
 
 ## Current Test Count
 
 ```
-pytest tests/control_plane/  →  101 passed (57 domain/service + 44 API)
+pytest tests/control_plane/   →  101 passed (57 domain/service + 44 API)
+pytest tests/hypervisor/test_gateway_wiring.py  →  23 passed
+```
+
+Note: `tests/hypervisor/test_mcp_gateway.py` has 21 pre-existing failures due to
+`pytest-asyncio` not being installed (async test functions). These predate this
+session and are not caused by our changes.
+
+---
+
+## Architecture (Final State)
+
+```
+HTTP Client (operator/UI)
+        ↓
+FastAPI Control Plane Router (/control/*)   ← mounted on same app
+        ↓
+ControlPlaneState
+  ├── SessionStore       ← auto-populated by SSE session creation
+  ├── EventStore         ← append-only audit log
+  ├── ApprovalService    ← receives "ask" verdicts from enforcement
+  ├── OverlayService     ← session-scoped world augmentation
+  └── WorldStateResolver ← base_tools + overlays → WorldStateView
+        ↓ get_base_manifest bridge
+MCPGatewayState
+  ├── resolver           → WorldManifest
+  ├── enforcer           → EnforcementDecision (allow | deny | ask)
+  └── control_plane      → ControlPlaneState (new)
+        ↓
+ToolSurfaceRenderer / ToolCallEnforcer   [data plane]
+  ↑
+  WorldStateView (via world_state_to_manifest_dict) when overlays active
 ```
 
 ---
 
 ## What Remains
 
-### 1. Gateway Wiring (highest value next step)
+### High Value
 
-Connect the control plane to the MCP gateway enforcement loop.
+1. **Approval resolution feedback loop** — when an approval is resolved via
+   `PATCH /control/approvals/{id}`, the MCP session should be notified so it can
+   retry the tool call. Currently the caller must re-issue the tool call manually.
 
-**File to modify**: `src/agent_hypervisor/hypervisor/mcp_gateway/mcp_server.py`
+2. **Persistent storage** — all stores are in-memory. A SQLite or Redis backend
+   would survive restarts.
 
-**Changes needed**:
-- `MCPGatewayState` should optionally hold a `ControlPlaneState`
-- In `_handle_tools_call()`, when `ToolCallEnforcer` returns `verdict = ask`:
-  ```python
-  approval = cp_state.approval_service.request_approval(
-      session_id=provenance.session_id,
-      tool_name=tool_name,
-      arguments=arguments,
-      requested_by=provenance.source,
-      event_store=cp_state.event_store,
-  )
-  # Return pending response to caller
-  return make_result(request_id, {
-      "status": "pending_approval",
-      "approval_id": approval.approval_id,
-  })
-  ```
-- In `_handle_tools_list()`, when a ControlPlaneState is present:
-  ```python
-  manifest = state.resolver.resolve(session_id)
-  base_tools = manifest.tool_names()
-  base_constraints = {c.tool: c.constraints for c in manifest.capabilities}
-  view = cp_state.resolver.resolve(session_id, base_tools, base_constraints)
-  # Use view.visible_tools to drive ToolSurfaceRenderer
-  ```
+### Lower Priority
 
-**Note**: The `MCPGatewayState.policy_engine` can return `ask` verdicts. The existing
-`ToolCallEnforcer` propagates the policy verdict but does not have a hook for ASK. The
-simplest approach is to check `decision.verdict == "ask"` after `enforcer.enforce()`.
+3. **WebSocket live updates** — currently the operator must poll `/control/sessions/{id}/world`
+   to see overlay changes reflected in real time.
 
-### 2. Mount on MCP Gateway App
+4. **Auth layer** — control plane endpoints have no auth. Fine for local/demo; needs
+   API key or JWT for production.
 
-In `create_mcp_app()` in `mcp_server.py`:
-
-```python
-from agent_hypervisor.control_plane.api import ControlPlaneState, create_control_plane_router
-
-cp_state = ControlPlaneState.create(
-    get_base_manifest=lambda sid: (
-        state.resolver.resolve(sid).tool_names(),
-        {c.tool: c.constraints for c in state.resolver.resolve(sid).capabilities},
-    )
-)
-app.state.control_plane = cp_state
-app.include_router(create_control_plane_router(cp_state))
-```
-
-This makes both `/mcp/*` and `/control/*` available on the same server.
-
-### 3. Session Creation Hook
-
-When a new SSE session is created in `GET /mcp/sse`, auto-register it with the control plane:
-
-```python
-# In sse_endpoint():
-cp_state = app.state.control_plane
-cp_state.session_store.create(
-    manifest_id=gw.resolver.resolve(session_id).workflow_id,
-    session_id=session_id,
-)
-```
+5. **RBAC** — distinguish "end user" (can resolve own approvals) from "operator"
+   (can attach overlays and manage sessions).
 
 ---
 
-## Key Invariants to Preserve
+## Key Invariants Preserved
 
-1. `ControlPlaneState` is a dataclass — do not add mutable default values.
-2. `get_base_manifest` is a callable, not a stored manifest — keeps it lazy.
-3. `list_pending_approvals` calls `check_expired()` — this is intentional (sweep before list).
-4. `PATCH /control/sessions/{id}/mode` emits a `mode_changed` event — keep this.
-5. The `/world` endpoint does not cache — always recomputes (deterministic resolver).
-6. `DELETE /control/sessions/{id}/overlays/{oid}` returns 404 for already-detached — keep (idempotency would hide bugs).
-
----
-
-## Architecture (Final Phase 5 state)
-
-```
-HTTP Client (operator/UI)
-        ↓
-FastAPI Control Plane Router (/control/*)
-        ↓
-ControlPlaneState
-  ├── SessionStore       ← session lifecycle
-  ├── EventStore         ← append-only audit log
-  ├── ApprovalService    ← fingerprint-bound TTL approvals
-  ├── OverlayService     ← session-scoped world augmentation
-  └── WorldStateResolver ← base_tools + overlays → WorldStateView
-        ↓ get_base_manifest (bridge)
-MCPGatewayState.resolver.resolve(session_id) → WorldManifest
-        ↓
-ToolSurfaceRenderer / ToolCallEnforcer   [data plane, unchanged]
-```
+1. No LLM in enforcement path ✅
+2. Base manifest never mutated at runtime ✅
+3. All runtime world changes are session-scoped overlays ✅
+4. One-off approvals do not widen the world ✅
+5. Operator augmentation is explicit and auditable ✅
+6. Unknown capabilities still fail closed ✅
+7. Control plane ≠ data plane ✅
+8. "ask" without a control plane still fails closed ✅
 
 ---
 
@@ -146,4 +140,4 @@ ToolSurfaceRenderer / ToolCallEnforcer   [data plane, unchanged]
 - `tests/control_plane/test_control_plane.py` — domain + service invariants
 - `tests/control_plane/test_api.py` — API contract tests
 - `domain.py` — stable types; downstream code imports from here
-- `src/agent_hypervisor/hypervisor/mcp_gateway/` — only ADD the wiring, don't rewrite
+- `tests/hypervisor/test_gateway_wiring.py` — gateway wiring invariants

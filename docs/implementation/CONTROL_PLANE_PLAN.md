@@ -94,6 +94,21 @@ Files created:
 - `docs/implementation/control_plane_demo.md` — 8-step curl walkthrough
 - Covers: session creation → approval → operator attach → overlay → world state → detach → audit
 
+### Phase 7 — Gateway Wiring ✅
+Files modified:
+- `src/agent_hypervisor/hypervisor/mcp_gateway/tool_call_enforcer.py`
+  - Added `EnforcementDecision.asked` property
+  - Policy "ask" verdicts now return real `verdict="ask"` (previously collapsed to deny)
+- `src/agent_hypervisor/hypervisor/mcp_gateway/mcp_server.py`
+  - `MCPGatewayState` optionally holds `ControlPlaneState`
+  - `create_mcp_app()` mounts `/control/*` router when control plane provided
+  - SSE sessions auto-registered with `SessionStore`
+  - `_handle_tools_list()` uses `WorldStateResolver` when overlays are active
+  - `_handle_tools_call()` routes `ask` verdicts to `ApprovalService`
+
+Files created:
+- `tests/hypervisor/test_gateway_wiring.py` — 23 integration tests
+
 ---
 
 ## Non-Goals (this phase)

@@ -109,6 +109,11 @@ class EnforcementDecision:
         return self.verdict == "deny"
 
     @property
+    def asked(self) -> bool:
+        """True when the policy engine returned 'ask' and a control plane can handle it."""
+        return self.verdict == "ask"
+
+    @property
     def taint_state(self) -> TaintState:
         """Convenience accessor for the taint state carried by this decision."""
         return self.taint_context.taint
@@ -228,7 +233,9 @@ class ToolCallEnforcer:
         Run the PolicyEngine and return a deny decision if the verdict is deny.
 
         Returns None if the policy engine allows the call (do not short-circuit).
-        "ask" verdicts are treated as deny for now (fail closed for unresolved asks).
+        "ask" verdicts return a real EnforcementDecision(verdict="ask") so that
+        callers with a control plane can route to an approval workflow.
+        Callers without a control plane must treat "ask" as "deny" (fail closed).
         """
         try:
             from agent_hypervisor.hypervisor.models import (
@@ -254,9 +261,20 @@ class ToolCallEnforcer:
             result = self._policy_engine.evaluate(call, registry_map)
 
             verdict = result.verdict.value if hasattr(result.verdict, "value") else str(result.verdict)
-            if verdict in ("deny", "ask"):
+            if verdict == "deny":
                 return EnforcementDecision(
                     verdict="deny",
+                    reason=result.reason,
+                    matched_rule=f"policy:{result.matched_rule}",
+                    provenance=prov,
+                    taint_context=taint_ctx,
+                )
+            if verdict == "ask":
+                # Return a real "ask" decision so callers with a control plane
+                # can route this to an approval workflow instead of failing closed.
+                # Callers WITHOUT a control plane must treat "ask" as "deny".
+                return EnforcementDecision(
+                    verdict="ask",
                     reason=result.reason,
                     matched_rule=f"policy:{result.matched_rule}",
                     provenance=prov,
