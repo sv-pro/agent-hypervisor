@@ -75,6 +75,27 @@ When ingesting Python code:
 5. Update `wiki/code/index.md` with any new entries.
 6. Update `wiki/index.md` to catalog the `wiki/code/` section.
 7. Add an entry to `wiki/log.md`.
+8. Regenerate `README.md` files for affected directories using a **depth-first walk** (see below).
+
+### README Generation (Depth-First Walk)
+
+Every subdirectory under `wiki/code/` must have a `README.md` that summarises its contents. Write these bottom-up so that each parent README can reference its children accurately:
+
+1. **Leaf directories first** (e.g., `wiki/code/modules/README.md`):
+   - One-paragraph overview of what this directory contains.
+   - A table listing every `.md` file with its key component and one-line description.
+   - Thematic groupings if the modules share cross-cutting concerns.
+   - "See Also" links to parent pages and related concept pages.
+
+2. **Then parent directories** (e.g., `wiki/code/README.md`):
+   - One-paragraph overview of the whole code section.
+   - Package summary table (name, page link, layer, one-line summary).
+   - Module deep-dives table (module path, page link, key security property).
+   - Architectural patterns table (pattern, description, key modules).
+   - Execution-flow summary (brief ASCII diagram if helpful).
+   - "See Also" links to concept pages and `index.md`.
+
+**Rule:** A README summarises *its own directory's contents* and references its children's READMEs for deeper detail — it does not duplicate information already in child READMEs verbatim. Update an existing README rather than recreating it from scratch when only a few entries change.
 
 ## Core Domain Context
 When writing, synthesize knowledge through the lens of the Agent Hypervisor architecture:
