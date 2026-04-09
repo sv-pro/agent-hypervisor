@@ -1,0 +1,13 @@
+# read_only_world.yaml — Minimal WorldManifest: read_file only.
+#
+# Used in tests and as a minimal demo world.
+# An agent in this world can only read files — no email, no HTTP, no writes.
+
+workflow_id: read-only-v1
+version: "1.0"
+metadata:
+  description: "Read-only world — file reads only, no side effects."
+
+capabilities:
+  - tool: read_file
+    constraints: {}

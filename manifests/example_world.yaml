@@ -1,0 +1,28 @@
+# example_world.yaml — Example WorldManifest for the AH MCP Gateway demo.
+#
+# This manifest defines the visible tool surface for an "email assistant" world.
+# An agent operating in this world can only see and call these two tools.
+# Any other tool (http_post, write_file, etc.) does not exist in this world.
+#
+# Usage:
+#   from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+#   app = create_mcp_app("manifests/example_world.yaml")
+#
+# To customize: copy this file and adjust capabilities. The gateway will only
+# expose tools listed here that also have registered adapters.
+
+workflow_id: email-assistant-v1
+version: "1.0"
+metadata:
+  description: "Safe email assistant — can read files and send emails. Cannot make HTTP requests."
+  owner: demo
+  created: "2026-04-09"
+
+capabilities:
+  - tool: read_file
+    constraints: {}
+    # No path restrictions in this example. Add paths: ["/tmp/**"] to restrict.
+
+  - tool: send_email
+    constraints: {}
+    # In a real deployment, add allowed_domains: ["@example.com"] to restrict recipients.
