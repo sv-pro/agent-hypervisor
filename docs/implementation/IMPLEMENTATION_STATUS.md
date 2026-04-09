@@ -1,16 +1,16 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 5 — MCP SSE transport  
+**Session**: Session 6 — Taint propagation  
 **Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## Session Summary
 
-Session 5: MCP SSE transport (Option B from Session 3 handoff).
-GET /mcp/sse + POST /mcp/messages enable streaming-compatible MCP clients.
-58 tests passing (was 45).
+Session 6: Taint propagation from `InvocationProvenance.trust_level` through
+`EnforcementDecision` and into tool results (Option D from Session 5 handoff).
+78 tests passing (was 58).
 
 ---
 
@@ -56,7 +56,15 @@ GET /mcp/sse + POST /mcp/messages enable streaming-compatible MCP clients.
 - [x] `InvocationProvenance` dataclass captures source, session_id, trust_level, timestamp
 - [x] `_extract_provenance()` reads from request headers and `_meta` params
 - [x] Provenance attached to every `EnforcementDecision`
-- [x] Extension point: `trust_level` ready for future taint-aware enforcement
+- [x] `trust_level` wired to `TaintContext` — taint propagated through full enforcement pipeline
+
+### Phase 7 — Taint Propagation
+- [x] `_taint_context_from_provenance()` — `"trusted"` → CLEAN, all other trust levels → TAINTED
+- [x] `EnforcementDecision.taint_context: TaintContext` — always set; callers propagate into `TaintedValue`s
+- [x] `EnforcementDecision.taint_state` — convenience accessor for `taint_context.taint`
+- [x] `mcp_server.py` — tool results wrapped in `TaintedValue`, taint state emitted as `"_taint"` field in JSON response
+- [x] `TaintContext.from_outputs()` — downstream contexts correctly inherit taint from gateway results
+- [x] 20 new tests in `tests/hypervisor/test_taint_propagation.py` — all passing
 
 ### Phase 6 — Docs, Tests, Demo
 - [x] 26 tests across 4 groups: all passing
@@ -70,14 +78,18 @@ GET /mcp/sse + POST /mcp/messages enable streaming-compatible MCP clients.
 ## Test Results
 
 ```
-26 passed in 0.40s
+78 passed
 ```
 
-All 26 tests pass. Groups:
+All 78 tests pass. Groups:
 - `TestToolSurfaceRenderer` (7 tests) — tools/list invariants
 - `TestToolCallEnforcer` (8 tests) — enforcement invariants
 - `TestMCPGatewayHTTP` (6 tests) — HTTP integration
 - `TestSessionWorldResolver` (5 tests) — manifest binding
+- Group 5 PolicyEngine (6 tests) — policy wiring
+- Group 6 per-session bindings (13 tests) — session registry
+- Group 7 SSE transport (13 tests) — SSE session store, stream, HTTP endpoints
+- `TestTaintPropagation` (20 tests) — taint from provenance through decision to result
 
 ---
 
@@ -102,6 +114,19 @@ All 26 tests pass. Groups:
 - [x] `scripts/run_mcp_gateway.py` — single-command launcher with CLI flags
 
 **Test results**: 32 passed (was 26).
+
+---
+
+### Session 6 — Taint propagation
+
+- [x] `_taint_context_from_provenance(prov)` — maps `trust_level` to `TaintContext`; only `"trusted"` yields CLEAN
+- [x] `EnforcementDecision.taint_context` — `TaintContext` field always set; default is TAINTED
+- [x] `EnforcementDecision.taint_state` — convenience accessor for callers
+- [x] `mcp_server.py` — `TaintedValue(value=text, taint=decision.taint_state)` wraps every tool result; `"_taint": "clean"|"tainted"` added to JSON response
+- [x] `test_taint_propagation.py` — 20 tests: helper unit, decision unit, monotonicity, HTTP integration
+- [x] Fixed enum double-import identity bug: all taint tests import via `agent_hypervisor.runtime.*` (full package path, not `pythonpath`-relative `runtime.*`)
+
+**Test results**: 78 passed (was 58).
 
 ---
 
@@ -137,7 +162,7 @@ All 26 tests pass. Groups:
 
 ## Pending / Not Yet Done
 
-- [ ] Full taint propagation integration — hooks in place, not wired to runtime taint
+- [ ] SSE integration test via real uvicorn server (Option E) — full streaming round-trip
 - [ ] Auth / TLS — not in scope for this phase
 
 ---
@@ -150,15 +175,9 @@ None.
 
 ## Next Recommended Step
 
-**Option D (taint propagation)**: Wire `InvocationProvenance.trust_level` and
-`session_id` into the runtime `TaintContext` so values that arrive through the
-MCP gateway carry taint that is visible to the provenance firewall. The hook is
-already in place in the enforcer; the runtime taint layer needs to be imported
-and updated from the gateway.
-
 **Option E (SSE integration test via real server)**: The SSE transport is
 implemented and unit-tested, but the full streaming round-trip (open SSE stream
 → POST request → read response event) can only be tested against a real
-uvicorn server. Add a test fixture that starts uvicorn in a thread and uses
-`requests` + `sseclient` (or stdlib `urllib.request`) to verify the full
-round-trip, similar to `examples/mcp_gateway/main.py`.
+uvicorn server. Add a pytest fixture that starts uvicorn in a daemon thread and
+tests the full SSE round-trip with `urllib.request` + line-by-line iteration
+of the response stream, following the pattern in `examples/mcp_gateway/main.py`.
