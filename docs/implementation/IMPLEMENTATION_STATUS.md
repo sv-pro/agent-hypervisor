@@ -1,8 +1,8 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Continuation — PolicyEngine wiring, deps, run script  
-**Branch**: `claude/continue-implementation-LEW4G`
+**Session**: Session 3 — End-to-end demo  
+**Branch**: `claude/continue-implementation-TsEYr`
 
 ---
 
@@ -80,6 +80,17 @@ All 26 tests pass. Groups:
 
 ---
 
+### Session 3 — End-to-end demo
+
+- [x] `examples/mcp_gateway/main.py` — runnable demo (5 scenarios, all passing)
+- [x] No extra dependencies required (stdlib urllib + existing pyproject.toml deps)
+- [x] Starts a real uvicorn server in a background thread
+- [x] Covers: initialize handshake, world rendering, fail-closed, allow path, world switch
+
+**Test results**: 32 passed (unchanged).
+
+---
+
 ### Session 2 — PolicyEngine wiring, deps, run script
 
 - [x] `jsonschema` added to core deps in `pyproject.toml`
@@ -110,12 +121,14 @@ None.
 
 ## Next Recommended Step
 
-**Option A (demo)**: Wire the MCP gateway to an example Claude client and run
-the demo flow from `docs/implementation/mcp_gateway_demo.md`.
+**Option A (done)**: `examples/mcp_gateway/main.py` — complete, runnable, all
+5 scenarios passing.
 
-**Option B (harden)**: Add SSE transport so the gateway can serve streaming
-responses to MCP clients that require it.
+**Option B (SSE transport)**: Add SSE streaming transport so the gateway is
+compatible with MCP clients that require streaming. FastAPI supports SSE via
+`StreamingResponse` and `EventSourceResponse` (sse-starlette). The HTTP POST
+endpoint remains as-is; SSE is additive.
 
-**Option C (extend)**: Implement per-session manifest selection — the
-`SessionWorldResolver.resolve(session_id, context)` signature is ready; wire
-it to a session registry so different sessions can get different WorldManifests.
+**Option C (per-session manifests)**: `SessionWorldResolver.resolve(session_id, context)`
+already accepts a `session_id` argument. Wire it to a session registry (dict or
+Redis) so different sessions can be bound to different WorldManifests at runtime.
