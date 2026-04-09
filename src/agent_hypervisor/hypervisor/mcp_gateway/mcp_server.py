@@ -4,7 +4,9 @@ mcp_server.py — Agent Hypervisor MCP Gateway.
 Implements a JSON-RPC 2.0 server that speaks the Model Context Protocol.
 
 Endpoints:
-  POST /mcp                            — JSON-RPC 2.0 dispatcher
+  POST /mcp                            — JSON-RPC 2.0 dispatcher (HTTP transport)
+  GET  /mcp/sse                        — MCP SSE transport: opens stream, sends endpoint event
+  POST /mcp/messages                   — MCP SSE transport: receives requests, routes over SSE
   GET  /mcp/health                     — health check + world summary
   POST /mcp/reload                     — hot-reload default manifest from disk
   POST /mcp/sessions/{session_id}/bind — bind a session to a specific manifest
@@ -16,18 +18,13 @@ MCP methods handled:
   tools/list         — returns only manifest-declared tools (world rendering)
   tools/call         — deterministic enforcement, then adapter dispatch
 
-Request flow:
-  Client → POST /mcp → dispatch_jsonrpc()
-    ├── method=tools/list
-    │     → SessionWorldResolver.resolve(session_id)  ← per-session manifest
-    │     → ToolSurfaceRenderer.render()
-    │     → [MCPTool, ...]  (only manifest-visible tools for this session)
-    │
-    └── method=tools/call
-          → SessionWorldResolver.resolve(session_id)  ← per-session manifest
-          → ToolCallEnforcer.enforce()  (manifest check → policy → allow/deny)
-          → ToolRegistry.get_tool().adapter(args)  (only on allow)
-          → MCPToolResult
+HTTP transport (POST /mcp):
+  Client → POST /mcp → dispatch_jsonrpc() → JSONResponse
+
+SSE transport (GET /mcp/sse + POST /mcp/messages):
+  Client → GET /mcp/sse   → server sends endpoint event: "/mcp/messages?session_id=<uuid>"
+        → POST /mcp/messages?session_id=<uuid>  → server returns 202, pushes response to SSE stream
+        → SSE stream delivers "message" event with the JSON-RPC response
 
 Per-session manifests:
   Sessions without an explicit binding use the gateway-level default manifest.
@@ -61,8 +58,10 @@ _DEFAULT_POLICY_PATH: Path = (
 )
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+
+from .sse_transport import SSESessionStore, sse_stream
 
 
 class _BindSessionRequest(BaseModel):
@@ -227,6 +226,8 @@ def create_mcp_app(
 
     # Attach state early for sync test access
     app.state.gw = state
+    sse_store = SSESessionStore()
+    app.state.sse_store = sse_store
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 dispatcher
@@ -235,57 +236,23 @@ def create_mcp_app(
     @app.post("/mcp")
     async def dispatch_jsonrpc(request: Request) -> JSONResponse:
         """
-        Main JSON-RPC 2.0 dispatcher.
+        Main JSON-RPC 2.0 dispatcher (HTTP transport).
 
         Parses the request body as a JSON-RPC 2.0 request and dispatches
         to the appropriate handler. Returns a JSON-RPC 2.0 response.
         """
         gw: MCPGatewayState = app.state.gw
-
-        # Parse body
-        try:
-            body = await request.json()
-        except Exception:
-            resp = make_error(None, JSONRPC_PARSE_ERROR, "Parse error: body is not valid JSON")
-            return JSONResponse(content=resp.model_dump(exclude_none=True), status_code=400)
-
-        # Validate JSON-RPC envelope
-        try:
-            rpc = JSONRPCRequest.model_validate(body)
-        except Exception as exc:
-            resp = make_error(
-                body.get("id") if isinstance(body, dict) else None,
-                JSONRPC_PARSE_ERROR,
-                f"Invalid JSON-RPC request: {exc}",
-            )
-            return JSONResponse(content=resp.model_dump(exclude_none=True), status_code=400)
-
-        # Extract provenance metadata from request headers / params
-        provenance = _extract_provenance(request, rpc)
-
-        # Dispatch
-        try:
-            if rpc.method == "initialize":
-                result = _handle_initialize(gw, rpc.params or {})
-                resp = make_result(rpc.id, result)
-
-            elif rpc.method == "tools/list":
-                result = _handle_tools_list(gw, rpc.params or {}, provenance)
-                resp = make_result(rpc.id, result)
-
-            elif rpc.method == "tools/call":
-                resp = _handle_tools_call(gw, rpc.id, rpc.params or {}, provenance)
-
-            else:
-                resp = make_error(
-                    rpc.id,
-                    JSONRPC_METHOD_NOT_FOUND,
-                    f"Method not found: {rpc.method!r}",
-                )
-        except Exception as exc:
-            resp = make_error(rpc.id, JSONRPC_INTERNAL_ERROR, f"Internal error: {exc}")
-
-        return JSONResponse(content=resp.model_dump(exclude_none=True))
+        resp = await _dispatch_rpc_body(gw, request)
+        # Return 400 only for transport-level parse failures; all JSON-RPC
+        # application errors (tool denied, method not found, etc.) are HTTP 200.
+        is_parse_error = (
+            resp.error is not None
+            and resp.error.code == JSONRPC_PARSE_ERROR
+        )
+        return JSONResponse(
+            content=resp.model_dump(exclude_none=True),
+            status_code=400 if is_parse_error else 200,
+        )
 
     # ------------------------------------------------------------------
     # Health check
@@ -308,6 +275,70 @@ def create_mcp_app(
             },
             "visible_tools": visible_tools,
         })
+
+    # ------------------------------------------------------------------
+    # SSE transport  (GET /mcp/sse  +  POST /mcp/messages)
+    # ------------------------------------------------------------------
+
+    @app.get("/mcp/sse")
+    async def sse_endpoint(request: Request) -> StreamingResponse:
+        """
+        MCP SSE transport — open a streaming connection.
+
+        Protocol (MCP 2024-11-05 SSE transport):
+          1. Server assigns a session UUID and returns a StreamingResponse
+             with Content-Type: text/event-stream.
+          2. The first event is 'endpoint'; its data is the URL the client
+             must use to POST JSON-RPC requests, e.g.:
+               /mcp/messages?session_id=<uuid>
+          3. Subsequent 'message' events carry JSON-RPC responses.
+          4. A keep-alive comment is sent every ~25 s to prevent proxy
+             timeouts.
+
+        The session UUID is distinct from a manifest-binding session. The
+        client may pass it as X-MCP-Session-Id in POST /mcp/messages headers
+        to also carry provenance through the manifest-binding layer.
+        """
+        store: SSESessionStore = app.state.sse_store
+        session_id, queue = store.create_session()
+        endpoint_url = f"/mcp/messages?session_id={session_id}"
+
+        return StreamingResponse(
+            sse_stream(session_id, queue, endpoint_url, store),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    @app.post("/mcp/messages")
+    async def sse_messages(request: Request, session_id: str) -> JSONResponse:
+        """
+        MCP SSE transport — receive a JSON-RPC request for an SSE session.
+
+        The client posts to this endpoint (URL received from the 'endpoint'
+        event on GET /mcp/sse). The request is processed identically to
+        POST /mcp, but the JSON-RPC response is pushed to the SSE stream
+        rather than returned in the HTTP response body.
+
+        Returns 202 Accepted if the request was queued, 404 if the session
+        is not found (client disconnected or invalid session_id).
+        """
+        gw: MCPGatewayState = app.state.gw
+        store: SSESessionStore = app.state.sse_store
+
+        queue = store.get_queue(session_id)
+        if queue is None:
+            return JSONResponse(
+                {"error": f"SSE session not found: {session_id!r}"},
+                status_code=404,
+            )
+
+        resp = await _dispatch_rpc_body(gw, request, session_id_override=session_id)
+        await queue.put(json.dumps(resp.model_dump(exclude_none=True)))
+        return JSONResponse({"status": "accepted"}, status_code=202)
 
     # ------------------------------------------------------------------
     # Manifest hot-reload
@@ -392,6 +423,84 @@ def create_mcp_app(
         })
 
     return app
+
+
+# ---------------------------------------------------------------------------
+# Shared dispatch helper (used by both HTTP and SSE transports)
+# ---------------------------------------------------------------------------
+
+async def _dispatch_rpc_body(
+    state: MCPGatewayState,
+    request: Request,
+    session_id_override: Optional[str] = None,
+) -> Any:
+    """
+    Parse the request body and dispatch to the appropriate MCP handler.
+
+    This is the shared core used by both POST /mcp (HTTP transport) and
+    POST /mcp/messages (SSE transport). Returns a JSONRPCResponse object
+    (result or error); the caller decides how to deliver it (HTTP body vs SSE
+    event).
+
+    Args:
+        state:              The gateway state.
+        request:            The FastAPI Request (for body + headers).
+        session_id_override: If set, this session_id takes precedence over
+                             whatever is extracted from headers/params. Used
+                             by the SSE transport which carries the session_id
+                             in the query parameter.
+
+    Returns:
+        A JSONRPCResponse (Pydantic model) — either make_result or make_error.
+    """
+    # Parse body
+    try:
+        body = await request.json()
+    except Exception:
+        return make_error(None, JSONRPC_PARSE_ERROR, "Parse error: body is not valid JSON")
+
+    # Validate JSON-RPC envelope
+    try:
+        rpc = JSONRPCRequest.model_validate(body)
+    except Exception as exc:
+        return make_error(
+            body.get("id") if isinstance(body, dict) else None,
+            JSONRPC_PARSE_ERROR,
+            f"Invalid JSON-RPC request: {exc}",
+        )
+
+    # Extract provenance; apply session_id override if provided
+    provenance = _extract_provenance(request, rpc)
+    if session_id_override:
+        provenance = InvocationProvenance(
+            source=provenance.source,
+            session_id=session_id_override,
+            trust_level=provenance.trust_level,
+            timestamp=provenance.timestamp,
+            extra=provenance.extra,
+        )
+
+    # Dispatch
+    try:
+        if rpc.method == "initialize":
+            result = _handle_initialize(state, rpc.params or {})
+            return make_result(rpc.id, result)
+
+        elif rpc.method == "tools/list":
+            result = _handle_tools_list(state, rpc.params or {}, provenance)
+            return make_result(rpc.id, result)
+
+        elif rpc.method == "tools/call":
+            return _handle_tools_call(state, rpc.id, rpc.params or {}, provenance)
+
+        else:
+            return make_error(
+                rpc.id,
+                JSONRPC_METHOD_NOT_FOUND,
+                f"Method not found: {rpc.method!r}",
+            )
+    except Exception as exc:
+        return make_error(rpc.id, JSONRPC_INTERNAL_ERROR, f"Internal error: {exc}")
 
 
 # ---------------------------------------------------------------------------

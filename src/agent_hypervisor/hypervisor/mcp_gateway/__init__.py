@@ -8,6 +8,7 @@ Public API:
     SessionWorldResolver       — session → WorldManifest binding
     EnforcementDecision        — result of enforcing a tool call
     InvocationProvenance       — provenance metadata for a tool invocation
+    SSESessionStore            — registry of active SSE sessions
 
 Usage::
 
@@ -20,6 +21,7 @@ from .mcp_server import create_mcp_app, MCPGatewayState
 from .tool_surface_renderer import ToolSurfaceRenderer
 from .tool_call_enforcer import ToolCallEnforcer, EnforcementDecision, InvocationProvenance
 from .session_world_resolver import SessionWorldResolver
+from .sse_transport import SSESessionStore
 from .protocol import MCPTool, MCPToolResult, JSONRPCRequest, JSONRPCResponse
 
 __all__ = [
@@ -30,6 +32,7 @@ __all__ = [
     "EnforcementDecision",
     "InvocationProvenance",
     "SessionWorldResolver",
+    "SSESessionStore",
     "MCPTool",
     "MCPToolResult",
     "JSONRPCRequest",

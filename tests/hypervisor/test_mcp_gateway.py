@@ -27,6 +27,7 @@ unit tests; integration tests use real manifest files).
 
 from __future__ import annotations
 
+import json
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -755,7 +756,7 @@ class TestPerSessionManifests:
             assert resp.json()["status"] == "error"
 
     @pytest.mark.asyncio
-    async def test_session_tool_call_enforced_against_session_world(self, two_world_client):
+    async def test_session_tool_call_enforced_against_session_world(self, two_world_client):  # noqa: E501
         """tools/call must be enforced against the session's bound manifest."""
         async with two_world_client as c:
             email_path = c._transport.app.state.email_manifest_path
@@ -775,3 +776,279 @@ class TestPerSessionManifests:
             data = call_resp.json()
             assert "error" in data, f"Expected denial for s1, got: {data}"
             assert data["error"]["code"] in (-32001, -32002)
+
+
+# ---------------------------------------------------------------------------
+# Group 7: SSE transport
+# ---------------------------------------------------------------------------
+
+class TestSSETransport:
+    """
+    Tests for the MCP SSE transport (GET /mcp/sse + POST /mcp/messages).
+
+    Protocol invariants tested:
+    - GET /mcp/sse returns text/event-stream with an 'endpoint' event
+    - The endpoint event payload is /mcp/messages?session_id=<uuid>
+    - POST /mcp/messages with a valid session_id returns 202 Accepted
+    - The JSON-RPC response is delivered over the SSE stream as a 'message' event
+    - POST /mcp/messages with an unknown session_id returns 404
+    - SSESessionStore correctly tracks and cleans up sessions
+
+    SSE streams are tested by opening the stream, posting a request from a
+    concurrent task, then reading the response event from the stream.
+    """
+
+    @pytest.fixture
+    def sse_client(self, tmp_path):
+        """httpx AsyncClient for a gateway with the default read_file world."""
+        pytest.importorskip("httpx")
+        from httpx import AsyncClient, ASGITransport
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+
+        manifest_file = tmp_path / "world.yaml"
+        manifest_file.write_text(
+            "workflow_id: sse-test-world\ncapabilities:\n  - tool: read_file\n"
+        )
+        app = create_mcp_app(manifest_file)
+        return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    # --- SSESessionStore unit tests ---
+
+    def test_create_session_returns_uuid_and_queue(self):
+        """create_session must return a non-empty UUID and a Queue."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SSESessionStore
+        import asyncio
+        store = SSESessionStore()
+        session_id, queue = store.create_session()
+        assert session_id and len(session_id) > 8
+        assert isinstance(queue, asyncio.Queue)
+
+    def test_get_queue_returns_same_queue(self):
+        """get_queue must return the same Queue that was created."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SSESessionStore
+        store = SSESessionStore()
+        session_id, queue = store.create_session()
+        assert store.get_queue(session_id) is queue
+
+    def test_get_queue_unknown_session_returns_none(self):
+        """get_queue for an unknown session_id must return None."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SSESessionStore
+        store = SSESessionStore()
+        assert store.get_queue("does-not-exist") is None
+
+    def test_remove_session_cleans_up(self):
+        """remove_session must remove the session; subsequent get_queue returns None."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SSESessionStore
+        store = SSESessionStore()
+        session_id, _ = store.create_session()
+        assert store.session_count() == 1
+        store.remove_session(session_id)
+        assert store.session_count() == 0
+        assert store.get_queue(session_id) is None
+
+    def test_remove_nonexistent_session_is_idempotent(self):
+        """remove_session on an unknown session_id must not raise."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SSESessionStore
+        store = SSESessionStore()
+        store.remove_session("ghost")  # must not raise
+
+    def test_multiple_sessions_are_independent(self):
+        """Multiple concurrent sessions must have independent queues."""
+        from agent_hypervisor.hypervisor.mcp_gateway import SSESessionStore
+        store = SSESessionStore()
+        id1, q1 = store.create_session()
+        id2, q2 = store.create_session()
+        assert id1 != id2
+        assert q1 is not q2
+        assert store.session_count() == 2
+
+    # --- sse_stream generator unit tests ---
+
+    @pytest.mark.asyncio
+    async def test_sse_stream_first_event_is_endpoint(self):
+        """sse_stream must yield an 'endpoint' event as the first chunk."""
+        from agent_hypervisor.hypervisor.mcp_gateway.sse_transport import (
+            SSESessionStore, sse_stream,
+        )
+        import asyncio
+
+        store = SSESessionStore()
+        session_id, queue = store.create_session()
+        endpoint_url = f"/mcp/messages?session_id={session_id}"
+
+        gen = sse_stream(session_id, queue, endpoint_url, store)
+        first_chunk = await gen.__anext__()
+
+        assert "event: endpoint" in first_chunk
+        assert endpoint_url in first_chunk
+
+        # Sentinel to stop the generator cleanly
+        await queue.put(None)
+        await gen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_sse_stream_delivers_message_events(self):
+        """sse_stream must yield 'message' events for payloads placed in the queue."""
+        from agent_hypervisor.hypervisor.mcp_gateway.sse_transport import (
+            SSESessionStore, sse_stream,
+        )
+        import asyncio
+
+        store = SSESessionStore()
+        session_id, queue = store.create_session()
+        gen = sse_stream(session_id, queue, "/ep", store)
+
+        # Consume endpoint event
+        await gen.__anext__()
+
+        # Put a payload in the queue
+        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+        await queue.put(payload)
+        message_chunk = await gen.__anext__()
+
+        assert "event: message" in message_chunk
+        assert payload in message_chunk
+
+        await queue.put(None)
+        await gen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_sse_stream_cleanup_on_sentinel(self):
+        """sse_stream must remove the session from the store when sentinel is received."""
+        from agent_hypervisor.hypervisor.mcp_gateway.sse_transport import (
+            SSESessionStore, sse_stream,
+        )
+        import asyncio
+
+        store = SSESessionStore()
+        session_id, queue = store.create_session()
+        gen = sse_stream(session_id, queue, "/ep", store)
+
+        await gen.__anext__()  # endpoint event
+        assert store.get_queue(session_id) is not None
+
+        await queue.put(None)  # sentinel
+        try:
+            await gen.__anext__()
+        except StopAsyncIteration:
+            pass
+
+        assert store.get_queue(session_id) is None
+
+    # --- HTTP endpoint tests ---
+
+    def test_sse_endpoints_registered_and_store_initialized(self, tmp_path):
+        """
+        GET /mcp/sse and POST /mcp/messages must be registered as routes.
+        The app must initialize an SSESessionStore on app.state.sse_store.
+
+        Note: httpx ASGI transport collects the entire response body before
+        returning headers, making it unsuitable for testing infinite SSE streams.
+        The actual streaming format is covered by the sse_stream generator tests.
+        """
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+
+        manifest_file = tmp_path / "world.yaml"
+        manifest_file.write_text(
+            "workflow_id: sse-route-test\ncapabilities:\n  - tool: read_file\n"
+        )
+        app = create_mcp_app(manifest_file)
+
+        route_paths = {r.path for r in app.routes if hasattr(r, "path")}
+        assert "/mcp/sse" in route_paths, f"Missing /mcp/sse in routes: {route_paths}"
+        assert "/mcp/messages" in route_paths, \
+            f"Missing /mcp/messages in routes: {route_paths}"
+
+        assert hasattr(app.state, "sse_store"), "app.state.sse_store not initialized"
+        assert app.state.sse_store.session_count() == 0
+
+    @pytest.mark.asyncio
+    async def test_sse_messages_unknown_session_returns_404(self, sse_client):
+        """POST /mcp/messages with an unknown session_id must return 404."""
+        async with sse_client as c:
+            resp = await c.post(
+                "/mcp/messages?session_id=nonexistent",
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_sse_full_round_trip_via_queue(self, sse_client):
+        """
+        Full SSE round-trip via direct queue inspection.
+
+        Directly registers a session in the SSE store (simulating GET /mcp/sse)
+        and posts a request to POST /mcp/messages. Verifies that the response
+        is placed in the session queue — i.e., it would have been delivered
+        over the SSE stream.
+
+        This tests the dispatch+routing logic without needing to stream SSE
+        events (which requires a real HTTP server for clean async semantics).
+        """
+        from httpx import AsyncClient, ASGITransport
+        import asyncio
+
+        app = sse_client._transport.app  # type: ignore[attr-defined]
+        store = app.state.sse_store
+
+        # Simulate GET /mcp/sse: register a session in the store
+        session_id, queue = store.create_session()
+        try:
+            c = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+            # POST the initialize request via SSE messages endpoint
+            post_resp = await c.post(
+                f"/mcp/messages?session_id={session_id}",
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            )
+            await c.aclose()
+
+            assert post_resp.status_code == 202
+            assert post_resp.json()["status"] == "accepted"
+
+            # Response must be in the queue (would have gone to SSE stream)
+            assert not queue.empty(), "Response was not placed in SSE queue"
+            payload = queue.get_nowait()
+            data = json.loads(payload)
+            assert "result" in data, f"Expected result, got: {data}"
+            assert "capabilities" in data["result"]
+            assert "serverInfo" in data["result"]
+        finally:
+            store.remove_session(session_id)
+
+    @pytest.mark.asyncio
+    async def test_sse_tool_denial_delivered_to_queue(self, sse_client):
+        """
+        tools/call to an undeclared tool must route a JSON-RPC error to the
+        SSE queue — i.e., it would have been delivered over the SSE stream.
+
+        HTTP response must be 202 Accepted (the denial is in the SSE stream).
+        """
+        from httpx import AsyncClient, ASGITransport
+
+        app = sse_client._transport.app  # type: ignore[attr-defined]
+        store = app.state.sse_store
+
+        session_id, queue = store.create_session()
+        try:
+            c = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+            post_resp = await c.post(
+                f"/mcp/messages?session_id={session_id}",
+                json={
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "http_post", "arguments": {"url": "http://x"}},
+                },
+            )
+            await c.aclose()
+
+            # HTTP level: always 202 for SSE transport (denial goes over stream)
+            assert post_resp.status_code == 202
+
+            assert not queue.empty(), "No response in SSE queue"
+            payload = queue.get_nowait()
+            data = json.loads(payload)
+            assert "error" in data, f"Expected error in SSE queue payload, got: {data}"
+            assert data["error"]["code"] in (-32001, -32002)
+        finally:
+            store.remove_session(session_id)
