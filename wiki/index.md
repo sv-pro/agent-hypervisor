@@ -15,6 +15,29 @@ This is the curated, content-oriented catalog of the Agent Hypervisor knowledge 
 ## Scenarios (Canonical)
 - [ZombieAgent](scenarios/zombie-agent.md) - Deep dive into neutralizing cross-session persistent memory poisoning.
 
+## Code Documentation (Canonical)
+
+### Packages
+- [Code Index](code/index.md) - Package map, module index, and recurring architectural patterns
+- [agent_hypervisor](code/agent_hypervisor.md) - Top-level public API: re-exported firewall models and sub-package map
+- [runtime](code/runtime.md) - Layer 3 Execution Governance kernel: IRBuilder, taint, compile, channel, proxy, executor
+- [compiler](code/compiler.md) - Layer 1 Base Ontology: manifest → deterministic policy artifacts; awc/ahc CLI
+- [authoring](code/authoring.md) - Layer 2 Dynamic Ontology: Capability DSL, World presets, MCP integration
+- [hypervisor](code/hypervisor.md) - PoC Gateway: HTTP server, ProvenanceFirewall, PolicyEngine, provenance graph
+- [economic](code/economic.md) - Economic constraints: budget enforcement, cost estimation, pricing registry
+- [program_layer](code/program_layer.md) - Optional execution abstraction: sandbox runtime, program executor
+- [core](code/core.md) - Portable reference implementation: ManifestResolver, WorldManifest, invariants
+
+### Module Deep-Dives
+- [IR & IRBuilder](code/modules/ir.md) - Sealed execution intent; construction-time enforcement; ConstructionError hierarchy
+- [Taint Engine](code/modules/taint.md) - Monotonic taint propagation; TaintedValue; TaintContext threading
+- [Compile Phase](code/modules/compile.md) - compile_world() → CompiledPolicy; sealing; O(1) capability matrix
+- [Channel & Source](code/modules/channel.md) - Sealed trust derivation; fail-closed defaults; trust from policy not caller
+- [SafeMCPProxy](code/modules/proxy.md) - In-path MCP enforcement; single gateway; typed denial kinds
+- [Executor](code/modules/executor.md) - Subprocess transport; worker boundary; SimulationExecutor
+- [ProvenanceFirewall](code/modules/firewall.md) - Structural provenance rules; RULE-01 through RULE-05; ValueRef model
+- [Core Hypervisor](code/modules/core_hypervisor.md) - Reference ManifestResolver; physics laws; input virtualization
+
 ---
 
 ## The Lab & Archives
