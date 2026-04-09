@@ -1,7 +1,7 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 8 — Control Plane Scaffolding (Phases 0–4)  
+**Session**: Session 9 — Control Plane API + Demo (Phases 5–6)  
 **Branch**: `claude/control-plane-scaffolding-ugZhz`
 
 ---
@@ -129,10 +129,57 @@ Implemented as WorldStateResolver:
 
 ---
 
+## Session 9 — Control Plane API + Demo (NEW)
+
+### Phase 5 — Control Plane API Surface ✅
+- [x] `src/agent_hypervisor/control_plane/api.py` — FastAPI router + standalone app factory
+- [x] `ControlPlaneState` dataclass holding all services; optional `get_base_manifest` callback
+- [x] `create_control_plane_router(state)` — returns mounted APIRouter
+- [x] `create_control_plane_app(...)` — returns standalone FastAPI app
+
+Endpoints implemented:
+- `POST /control/sessions` — create session (+ emits session_created event)
+- `GET  /control/sessions` — list sessions (filter by state/mode)
+- `GET  /control/sessions/{id}` — get session detail
+- `PATCH /control/sessions/{id}/mode` — change mode (+ emits mode_changed event)
+- `DELETE /control/sessions/{id}` — close session (+ emits session_closed event)
+- `GET  /control/sessions/{id}/world` — resolved WorldStateView (base + overlays)
+- `GET  /control/sessions/{id}/events` — structured audit log (filterable by type)
+- `GET  /control/approvals` — list pending approvals (+ sweep expired; filter by session)
+- `GET  /control/approvals/{id}` — get approval detail
+- `POST /control/approvals/{id}/resolve` — resolve approval (allowed|denied)
+- `GET  /control/sessions/{id}/overlays` — list overlays (active_only default)
+- `POST /control/sessions/{id}/overlays` — attach overlay (+ emits overlay_attached)
+- `DELETE /control/sessions/{id}/overlays/{oid}` — detach overlay (+ emits overlay_detached)
+- `GET  /health` — service health check
+
+### Phase 6 — Demo and Docs ✅
+- [x] `docs/implementation/control_plane_demo.md` — 8-step walkthrough with curl examples
+  - Step 1: session created (background)
+  - Step 2: approval requested
+  - Step 3: operator resolves once
+  - Step 4: operator attaches (interactive)
+  - Step 5: overlay attached
+  - Step 6: world state inspected (write_file visible)
+  - Step 7: overlay detached (world reverts)
+  - Step 8: audit log viewed
+
+### Tests ✅
+- [x] `tests/control_plane/test_api.py` — 44 tests, all passing
+  - Group 1: Health (1 test)
+  - Group 2: Sessions (15 tests)
+  - Group 3: World state (5 tests)
+  - Group 4: Approvals (10 tests)
+  - Group 5: Overlays (10 tests)
+  - Group 6: Event log (3 tests)
+  - Group 7: Integration (1 test — full 8-step scenario)
+
+---
+
 ## Test Results
 
 ```
-57 passed (control_plane/)
+101 passed (control_plane/test_control_plane.py: 57 + test_api.py: 44)
 ```
 
 Previous MCP gateway tests (83) require `pip install -e .` to run.
@@ -141,23 +188,27 @@ Previous MCP gateway tests (83) require `pip install -e .` to run.
 
 ## Pending (next session)
 
-### Phase 5 — Control Plane API Surface ⬜
-- FastAPI router at `src/agent_hypervisor/control_plane/api.py`
-- Endpoints: list sessions, get session, list pending approvals, approve/deny, attach/detach overlay, inspect world state
-- Mount on existing MCP gateway app or standalone
+### Gateway Wiring ⬜
+Wire control plane into the MCP gateway enforcement loop:
+1. When `ToolCallEnforcer.enforce()` returns verdict=`ask`, call `ApprovalService.request_approval()`
+2. Return `{"status": "pending", "approval_id": "..."}` to MCP client
+3. When operator resolves via `POST /control/approvals/{id}/resolve`, resume the blocked call
+4. In `_handle_tools_list()`, use `WorldStateResolver.resolve()` to feed overlay-aware manifest
 
-### Phase 6 — Demo Path and Docs ⬜
-- `docs/implementation/control_plane_demo.md`
-- Walkthrough scenario from background mode → approval → operator attaches → overlay → world state
-
-### Wiring ⬜
-- Bridge control plane `WorldStateResolver` into MCP gateway `SessionWorldResolver`
-- Wire ASK verdict from `ToolCallEnforcer` into `ApprovalService`
+### MCP Gateway Mount ⬜
+Add to `mcp_server.py` (or a wrapper):
+```python
+cp_state = ControlPlaneState.create(get_base_manifest=lambda sid: (
+    gateway_state.resolver.resolve(sid).tool_names(), {}
+))
+app.include_router(create_control_plane_router(cp_state))
+```
 
 ---
 
 ## What Must NOT Be Rewritten
 
 - MCP gateway enforcement pipeline (`ToolCallEnforcer`, `ToolSurfaceRenderer`, `SessionWorldResolver`)
-- All 57 control plane tests — they encode the core invariants
+- All 101 control plane tests — they encode the core invariants
 - `domain.py` types are stable — the public API for control plane consumers
+- `api.py` endpoint contracts — tests and demo depend on them

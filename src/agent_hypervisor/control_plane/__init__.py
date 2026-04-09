@@ -81,6 +81,7 @@ from .approval_service import ApprovalService
 from .overlay_service import OverlayService
 from .session_store import SessionStore
 from .world_state_resolver import WorldStateResolver, world_state_to_manifest_dict
+from .api import ControlPlaneState, create_control_plane_router, create_control_plane_app
 
 __all__ = [
     # Domain types
@@ -130,4 +131,8 @@ __all__ = [
     "make_overlay_detached",
     # World state bridge
     "world_state_to_manifest_dict",
+    # API
+    "ControlPlaneState",
+    "create_control_plane_router",
+    "create_control_plane_app",
 ]

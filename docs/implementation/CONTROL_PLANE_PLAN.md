@@ -85,14 +85,14 @@ Files created:
 - Computes visible_tools, active_constraints, active_overlay_ids, mode
 - Tests: resolver is deterministic, expired overlays excluded
 
-### Phase 5 — Control Plane API Surface ⬜
-- FastAPI router: `/control_plane/sessions`, `/control_plane/approvals`, etc.
-- Mount on existing MCP gateway or standalone app
-- Deferred: implement when UI or integration needs it
+### Phase 5 — Control Plane API Surface ✅
+- `src/agent_hypervisor/control_plane/api.py` — ControlPlaneState, router factory, standalone app
+- 13 endpoints under `/control/*` prefix
+- 44 tests in `tests/control_plane/test_api.py`
 
-### Phase 6 — Demo Path and Docs ⬜
-- `docs/implementation/control_plane_demo.md`
-- Walkthrough: session starts → approval requested → operator attaches → overlay attached → world state inspected
+### Phase 6 — Demo Path and Docs ✅
+- `docs/implementation/control_plane_demo.md` — 8-step curl walkthrough
+- Covers: session creation → approval → operator attach → overlay → world state → detach → audit
 
 ---
 
