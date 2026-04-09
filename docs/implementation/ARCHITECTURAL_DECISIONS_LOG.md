@@ -83,3 +83,51 @@ Running log of implementation decisions made during the AH MCP Gateway build.
 **Alternatives rejected**:
 - New adapter protocol for MCP → rejected (duplication with no benefit at this stage)
 **Consequences**: MCP-visible tools are constrained to tools that have adapters in the existing registry. New tools require adapter registration in the existing registry before they can appear in any world manifest.
+
+---
+
+## ADL-008 — Control plane as a separate module, not woven into data plane
+
+**Date**: 2026-04-09  
+**Decision**: The control plane (`control_plane/`) is a standalone module that does not import from or modify the MCP gateway data plane. The bridge is a single function (`world_state_to_manifest_dict()`) that converts a `WorldStateView` to a manifest dict.  
+**Why**: The enforcement pipeline is stable and tested. Weaving approval/overlay logic into `ToolCallEnforcer` or `mcp_server.py` would conflate two distinct concerns (enforcement vs. governance). Keeping them separate preserves the ability to test each in isolation.  
+**Alternatives rejected**:
+- Add overlay resolution to `ToolCallEnforcer` → rejected (conflates enforcement with authoring)
+- Add approval logic directly to `_handle_tools_call()` → deferred to Phase 5 (needs clean interface first)
+**Consequences**: The control plane can be used standalone. Wiring to the gateway is explicit and testable. Phase 5 adds the FastAPI router and the hook into `_handle_tools_call()`.
+
+---
+
+## ADL-009 — ActionApproval bound to fingerprint, not session+tool
+
+**Date**: 2026-04-09  
+**Decision**: An `ActionApproval` is bound to `action_fingerprint = SHA-256[:16](json(tool, args))`, not just to `(session_id, tool_name)`.  
+**Why**: Approving `send_email` in general would silently widen the world — an operator authorizing one specific email would inadvertently authorize all emails in that session. The fingerprint ensures the approval applies only to the exact call instance the operator reviewed.  
+**Alternatives rejected**:
+- Approve by `(session_id, tool_name)` → rejected (would silently widen the tool's scope for the session)
+- Approve by `(session_id, tool_name, arg_key)` → rejected (too coarse; doesn't capture all args)
+**Consequences**: Approvals are single-use for their exact fingerprint. Callers that resubmit with different args get a new fingerprint → new approval required.
+
+---
+
+## ADL-010 — Session overlays are not manifest mutations
+
+**Date**: 2026-04-09  
+**Decision**: `SessionOverlay` is a separate artifact that lives alongside the `WorldManifest`. The base manifest is never mutated. `WorldStateResolver` applies overlays in memory to produce a `WorldStateView`.  
+**Why**: Mutating the manifest would affect all sessions using that manifest. Overlays are session-scoped by definition. Keeping them separate also preserves the audit trail — the base manifest is always inspectable and unchanged.  
+**Alternatives rejected**:
+- Fork the manifest and mutate the fork → rejected (creates manifest proliferation; hard to audit)
+- Store overlay diffs in the manifest metadata → rejected (conflates runtime state with compile-time spec)
+**Consequences**: `WorldStateView` is a computed (not stored) artifact. The resolver must be called whenever a fresh view is needed. This is intentional — it makes the current world state inspectable at any time without stale cache concerns.
+
+---
+
+## ADL-011 — pythonpath includes both `src/agent_hypervisor` and `src`
+
+**Date**: 2026-04-09  
+**Decision**: Added `src` to `pythonpath` in `pyproject.toml` alongside the existing `src/agent_hypervisor`.  
+**Why**: The existing entry (`src/agent_hypervisor`) allows direct submodule imports (`from runtime.ir import ...`). Adding `src` allows the full package path (`from agent_hypervisor.control_plane import ...`) which is required for top-level test imports and avoids the shadowing problem where `tests/control_plane/__init__.py` would shadow `src/agent_hypervisor/control_plane/`.  
+**Alternatives rejected**:
+- Use deferred imports in test methods (existing pattern) → workable but makes top-level imports less readable
+- Remove `tests/control_plane/__init__.py` → causes namespace package ambiguity
+**Consequences**: Both import styles now work. Existing tests are unaffected. New control plane tests use top-level imports.

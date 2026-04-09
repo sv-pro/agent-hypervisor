@@ -1,88 +1,128 @@
-# Handoff Note
+# Handoff Note — Session 8
 
 **Date**: 2026-04-09  
-**Session**: Session 7 — SSE integration tests (Option E)  
-**Branch**: `claude/continue-implementation-FpgJZ`
+**Branch**: `claude/control-plane-scaffolding-ugZhz`  
+**Session**: Control Plane Scaffolding (Phases 0–4)
 
 ---
 
-## What Was Just Done
+## What Was Done
 
-Implemented Option E from the Session 6 handoff: full SSE streaming round-trip
-tests against a real uvicorn server.
+Introduced the first World Authoring Control Plane as a new module `src/agent_hypervisor/control_plane/`. This is additive — no existing data plane code was modified.
 
-### New test class: `TestSSEIntegration` (Group 8)
+### Files Created (control plane)
 
-5 tests in `tests/hypervisor/test_mcp_gateway.py`, all using a real uvicorn
-server in a daemon thread rather than httpx ASGI transport (which cannot test
-infinite SSE streams).
+```
+src/agent_hypervisor/control_plane/
+├── __init__.py               ← clean public API exports
+├── domain.py                 ← Session, ActionApproval, SessionOverlay, WorldStateView, ...
+├── session_store.py          ← SessionStore (in-memory session lifecycle)
+├── event_store.py            ← EventStore (append-only audit log + event factories)
+├── approval_service.py       ← ApprovalService (fingerprint-bound TTL approvals)
+├── overlay_service.py        ← OverlayService (session-scoped world augmentation)
+└── world_state_resolver.py   ← WorldStateResolver + world_state_to_manifest_dict
 
-**`live_server` fixture** (`scope="class"`):
-- Starts uvicorn with a minimal read_file world manifest
-- Polls `/mcp/health` until ready (max 5 s)
-- Yields `(host, port, base_url)` to all tests in the class
-- Sets `server.should_exit = True` on teardown (daemon thread, clean shutdown)
+tests/control_plane/
+├── __init__.py
+├── conftest.py
+└── test_control_plane.py     ← 57 tests, all passing
 
-**Static helpers**:
-- `_collect_sse_events(host, port, path, n_events, timeout)` — opens SSE connection
-  in a daemon thread using `http.client`, reads line-by-line, parses
-  `event:` / `data:` lines into dicts, forwards parsed events via `queue.Queue`
-- `_post_json(host, port, path, body)` — `http.client` POST, returns `(status_code, dict)`
+docs/implementation/
+├── CONTROL_PLANE_PLAN.md
+├── control_plane_repo_audit.md
+WORLD_AUTHORING.md            ← project root, architecture overview
+```
 
-**Tests**:
+### pyproject.toml change
 
-1. `test_sse_content_type` — verifies `GET /mcp/sse` returns `Content-Type: text/event-stream`
-2. `test_sse_first_event_is_endpoint` — first SSE event is `event: endpoint` with `data: /mcp/messages?session_id=<uuid>`
-3. `test_sse_endpoint_url_has_uuid_session_id` — session_id in endpoint data matches UUID regex
-4. `test_sse_full_round_trip` — full protocol sequence:
-   - Opens SSE in a direct streaming reader thread (emits events immediately)
-   - Main thread reads the `endpoint` event → extracts `messages_path`
-   - Main thread POSTs `tools/list` to `messages_path` → 202 Accepted
-   - Main thread reads `message` event → verifies JSON-RPC result contains `read_file`
-5. `test_sse_session_removed_after_disconnect` — opens SSE, reads endpoint, closes abruptly, waits 0.3 s, verifies POST returns 404
-
-**Key design decision — direct streaming reader thread**:
-The initial round-trip implementation used `_collect_sse_events(n_events=2)` in a
-wrapper thread that forwarded events to the main thread only after collecting both.
-This deadlocked: the reader waited for event 2, but the main thread needed event 1
-(endpoint) first before it could POST to trigger event 2.
-
-Fixed by using a direct `_streaming_reader` function (defined inline) that emits
-each parsed event to `queue.Queue` immediately after parsing, without batching.
-The main thread then interleaves: get event 1 → POST → get event 2.
-
-### Test results: 83 passed (was 78)
+Added `src` to `pythonpath = ["src/agent_hypervisor", "src"]`.
+- Reason: makes `agent_hypervisor` importable as a top-level package in tests.
+- Backwards compatible: `src/agent_hypervisor` still present.
 
 ---
 
-## What to Do Next
+## Current State
 
-All planned implementation options (C, B/SSE, D, E) are complete.
+57 control plane tests pass.
 
-Remaining work is either production-hardening or new feature areas:
+```
+pytest tests/control_plane/  → 57 passed
+```
 
-- **Auth / TLS**: The gateway currently accepts any request. Adding bearer token
-  auth or mTLS would be needed before production deployment.
-
-- **Rate limiting / budget enforcement**: The economic layer (`src/agent_hypervisor/economic/`)
-  exists but is not wired into the MCP gateway. Integrating budget enforcement at
-  the gateway layer would let manifests declare per-tool cost limits.
-
-- **Streaming tool results**: Currently, tool results are returned as a single JSON
-  blob. Long-running tools (e.g., code execution) could benefit from streaming
-  partial results back as additional SSE events.
+The MCP gateway (Sessions 1–7) still works; its tests require `pip install -e .` to run.
 
 ---
 
-## Key Invariants to Preserve
+## What Remains
 
-- `live_server` fixture must be `scope="class"` — one server per class, shared
-  across tests (not per-test, which would be too slow)
-- The streaming reader thread must emit events immediately (not batch by n_events)
-  to avoid the deadlock in the round-trip test
-- `http.client.HTTPConnection.readline()` is the correct primitive for SSE — it
-  reads one line at a time without buffering the entire response
-- Daemon threads are safe here: they naturally die when the test process exits
-- 0.3 s sleep in `test_sse_session_removed_after_disconnect` gives uvicorn time to
-  run the `finally` block in `sse_stream` after TCP close — this is a real timing
-  dependency but 0.3 s is conservative enough for any CI environment
+### Phase 5 — Control Plane API Surface
+Create `src/agent_hypervisor/control_plane/api.py` with a FastAPI router:
+
+```python
+from fastapi import APIRouter
+router = APIRouter(prefix="/control")
+
+GET  /control/sessions
+GET  /control/sessions/{session_id}
+GET  /control/sessions/{session_id}/world
+GET  /control/approvals?session_id=...
+POST /control/approvals/{approval_id}/resolve
+POST /control/sessions/{session_id}/overlays
+DELETE /control/sessions/{session_id}/overlays/{overlay_id}
+```
+
+Mount with: `app.include_router(router)` on the existing MCP gateway app.
+
+### Phase 6 — Demo and Docs
+Create `docs/implementation/control_plane_demo.md` with the full walkthrough:
+1. Session starts in background mode
+2. Agent requests send_email approval
+3. Operator approves (once)
+4. Operator attaches session overlay (reveals write_file)
+5. World state is inspected and reflects the overlay
+6. Overlay is detached; world reverts to base manifest
+
+### Wiring into Gateway (future)
+The bridge is already designed in `world_state_to_manifest_dict()`. The next step:
+1. In `_handle_tools_call()` (mcp_server.py), when `ToolCallEnforcer` returns verdict=`ask`:
+   - Call `ApprovalService.request_approval()`
+   - Store the pending approval
+   - Return a pending response to the caller (or block)
+2. In `_handle_tools_list()`, call `WorldStateResolver.resolve()` and use the result
+   to feed a synthetic manifest into `ToolSurfaceRenderer`.
+
+---
+
+## Key Invariants the Next Session Must Preserve
+
+1. **Base manifest is never mutated** — overlays are separate; `OverlayService.attach()` does not touch `WorldManifest`.
+2. **Approvals do not widen the world** — `ApprovalService.resolve()` does not affect `visible_tools`.
+3. **`compute_action_fingerprint()` must remain deterministic** — do not change the hash algorithm or JSON serialization without updating all callers.
+4. **`check_expired()` on `ApprovalService`** must be called before listing pending approvals in production (not automatically called by `list_pending()`).
+5. **`WorldStateResolver` is stateless** — it reads from stores but never writes. Keep it pure.
+6. **overlay_ids in Session** is ordered — append order matters for overlay precedence.
+
+---
+
+## Architecture Summary
+
+```
+Control Plane (session_store, event_store, approval_service, overlay_service)
+    ↓
+WorldStateResolver
+    ↓ world_state_to_manifest_dict()
+    ↓
+SessionWorldResolver.register_session()  [existing MCP gateway]
+    ↓
+ToolSurfaceRenderer / ToolCallEnforcer   [existing enforcement pipeline]
+```
+
+The bridge is `world_state_to_manifest_dict()` in `world_state_resolver.py`. It converts a `WorldStateView` (control plane) into a manifest dict the data plane can ingest.
+
+---
+
+## Do Not Touch
+
+- `src/agent_hypervisor/hypervisor/mcp_gateway/` — data plane, stable
+- `src/agent_hypervisor/runtime/` — canonical, do not break
+- `tests/control_plane/test_control_plane.py` — encodes core invariants; only extend, don't weaken
