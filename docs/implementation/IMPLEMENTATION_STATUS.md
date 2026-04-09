@@ -1,15 +1,15 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 3 — End-to-end demo  
-**Branch**: `claude/continue-implementation-TsEYr`
+**Session**: Session 7 — SSE integration tests (Option E)  
+**Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## Session Summary
 
-First implementation session. Completed all six phases in one pass.
-The MCP Gateway is now functional, tested, and committed.
+Session 7: Full SSE streaming round-trip tests against a real uvicorn server
+(Option E from Session 6 handoff). 83 tests passing (was 78).
 
 ---
 
@@ -55,7 +55,15 @@ The MCP Gateway is now functional, tested, and committed.
 - [x] `InvocationProvenance` dataclass captures source, session_id, trust_level, timestamp
 - [x] `_extract_provenance()` reads from request headers and `_meta` params
 - [x] Provenance attached to every `EnforcementDecision`
-- [x] Extension point: `trust_level` ready for future taint-aware enforcement
+- [x] `trust_level` wired to `TaintContext` — taint propagated through full enforcement pipeline
+
+### Phase 7 — Taint Propagation
+- [x] `_taint_context_from_provenance()` — `"trusted"` → CLEAN, all other trust levels → TAINTED
+- [x] `EnforcementDecision.taint_context: TaintContext` — always set; callers propagate into `TaintedValue`s
+- [x] `EnforcementDecision.taint_state` — convenience accessor for `taint_context.taint`
+- [x] `mcp_server.py` — tool results wrapped in `TaintedValue`, taint state emitted as `"_taint"` field in JSON response
+- [x] `TaintContext.from_outputs()` — downstream contexts correctly inherit taint from gateway results
+- [x] 20 new tests in `tests/hypervisor/test_taint_propagation.py` — all passing
 
 ### Phase 6 — Docs, Tests, Demo
 - [x] 26 tests across 4 groups: all passing
@@ -69,14 +77,19 @@ The MCP Gateway is now functional, tested, and committed.
 ## Test Results
 
 ```
-26 passed in 0.40s
+83 passed
 ```
 
-All 26 tests pass. Groups:
+All 83 tests pass. Groups:
 - `TestToolSurfaceRenderer` (7 tests) — tools/list invariants
 - `TestToolCallEnforcer` (8 tests) — enforcement invariants
 - `TestMCPGatewayHTTP` (6 tests) — HTTP integration
 - `TestSessionWorldResolver` (5 tests) — manifest binding
+- Group 5 PolicyEngine (6 tests) — policy wiring
+- Group 6 per-session bindings (13 tests) — session registry
+- Group 7 SSE transport (13 tests) — SSE session store, stream, HTTP endpoints
+- `TestTaintPropagation` (20 tests) — taint from provenance through decision to result
+- `TestSSEIntegration` (5 tests) — full SSE streaming round-trip vs. real uvicorn
 
 ---
 
@@ -104,11 +117,68 @@ All 26 tests pass. Groups:
 
 ---
 
+### Session 7 — SSE integration tests (Option E)
+
+- [x] `TestSSEIntegration` (Group 8, 5 tests) in `test_mcp_gateway.py`
+- [x] `live_server` fixture: starts real uvicorn in daemon thread, polls `/mcp/health` for readiness, scope=class (one server per class)
+- [x] `_collect_sse_events` static helper: `http.client` + daemon thread + `queue.Queue`, reads line-by-line, parses SSE events
+- [x] `_post_json` static helper: `http.client` POST to live server
+- [x] `test_sse_content_type` — verifies `text/event-stream` header
+- [x] `test_sse_first_event_is_endpoint` — first event is `endpoint` with session URL
+- [x] `test_sse_endpoint_url_has_uuid_session_id` — session_id matches UUID pattern
+- [x] `test_sse_full_round_trip` — open SSE → read endpoint → POST → read message event (uses direct streaming reader thread to avoid deadlock)
+- [x] `test_sse_session_removed_after_disconnect` — after abrupt close, POST returns 404
+- [x] Fixed deadlock: round-trip test uses a direct reader thread that emits events into `queue.Queue` immediately (not after batching n events)
+
+**Test results**: 83 passed (was 78).
+
+---
+
+### Session 6 — Taint propagation
+
+- [x] `_taint_context_from_provenance(prov)` — maps `trust_level` to `TaintContext`; only `"trusted"` yields CLEAN
+- [x] `EnforcementDecision.taint_context` — `TaintContext` field always set; default is TAINTED
+- [x] `EnforcementDecision.taint_state` — convenience accessor for callers
+- [x] `mcp_server.py` — `TaintedValue(value=text, taint=decision.taint_state)` wraps every tool result; `"_taint": "clean"|"tainted"` added to JSON response
+- [x] `test_taint_propagation.py` — 20 tests: helper unit, decision unit, monotonicity, HTTP integration
+- [x] Fixed enum double-import identity bug: all taint tests import via `agent_hypervisor.runtime.*` (full package path, not `pythonpath`-relative `runtime.*`)
+
+**Test results**: 78 passed (was 58).
+
+---
+
+### Session 5 — MCP SSE transport
+
+- [x] `sse_transport.py` — `SSESessionStore` (UUID→Queue registry), `format_sse_event`, `sse_stream` async generator (heartbeat/keepalive, sentinel stop, cleanup in finally)
+- [x] `GET /mcp/sse` — creates session in store, returns `StreamingResponse(text/event-stream)`, first event is `endpoint` with `/mcp/messages?session_id=<uuid>`
+- [x] `POST /mcp/messages` — looks up session queue, dispatches JSON-RPC, puts response in queue, returns 202 Accepted
+- [x] `_dispatch_rpc_body()` extracted as shared async helper (used by both transports); `session_id_override` propagates SSE session into provenance for per-session manifest resolution
+- [x] `SSESessionStore` exported from `mcp_gateway.__init__`
+- [x] Group 7: 13 new tests (6 SSESessionStore unit, 3 sse_stream generator, 4 HTTP endpoint) — all passing
+- Note: httpx ASGI transport collects full response body — can't test infinite streams via `c.stream()`. HTTP tests use direct queue inspection instead.
+
+**Test results**: 58 passed (was 45).
+
+---
+
+### Session 4 — Per-session WorldManifest bindings
+
+- [x] `SessionWorldResolver.register_session(session_id, manifest_path)` — loads manifest immediately, fails closed on error
+- [x] `SessionWorldResolver.unregister_session(session_id)` — idempotent revert to default
+- [x] `SessionWorldResolver.session_registry()` — snapshot of active bindings
+- [x] `tools/list` and `tools/call` resolve per-session manifest via `provenance.session_id`
+- [x] Default renderer/enforcer cached; per-session ones built on-the-fly (lightweight)
+- [x] `POST /mcp/sessions/{session_id}/bind` — bind a session to a manifest path
+- [x] `DELETE /mcp/sessions/{session_id}` — unbind a session
+- [x] `GET /mcp/sessions` — list all active bindings
+- [x] Group 6: 13 new tests (7 unit + 6 HTTP integration) — all passing
+
+**Test results**: 45 passed (was 32).
+
+---
+
 ## Pending / Not Yet Done
 
-- [ ] Full SSE transport (streaming) — out of scope for Phase 1
-- [ ] Per-session manifest selection — architecture ready, not implemented
-- [ ] Full taint propagation integration — hooks in place, not wired to runtime taint
 - [ ] Auth / TLS — not in scope for this phase
 
 ---
@@ -121,14 +191,14 @@ None.
 
 ## Next Recommended Step
 
-**Option A (done)**: `examples/mcp_gateway/main.py` — complete, runnable, all
-5 scenarios passing.
+All planned options (C, B/SSE, D, E) are complete. The MCP gateway now has:
+- Manifest-driven tool surface rendering and enforcement
+- Per-session WorldManifest bindings
+- SSE transport (GET /mcp/sse + POST /mcp/messages)
+- Taint propagation from InvocationProvenance through EnforcementDecision
+- Full SSE streaming integration tests via real uvicorn
 
-**Option B (SSE transport)**: Add SSE streaming transport so the gateway is
-compatible with MCP clients that require streaming. FastAPI supports SSE via
-`StreamingResponse` and `EventSourceResponse` (sse-starlette). The HTTP POST
-endpoint remains as-is; SSE is additive.
-
-**Option C (per-session manifests)**: `SessionWorldResolver.resolve(session_id, context)`
-already accepts a `session_id` argument. Wire it to a session registry (dict or
-Redis) so different sessions can be bound to different WorldManifests at runtime.
+Possible further work:
+- Auth / TLS hardening for production use
+- Rate limiting or budget enforcement at the gateway layer
+- Streaming tool results (chunked SSE events for long-running tools)

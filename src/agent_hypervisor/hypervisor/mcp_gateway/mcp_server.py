@@ -4,27 +4,33 @@ mcp_server.py — Agent Hypervisor MCP Gateway.
 Implements a JSON-RPC 2.0 server that speaks the Model Context Protocol.
 
 Endpoints:
-  POST /mcp          — JSON-RPC 2.0 dispatcher (tools/list, tools/call, initialize)
-  GET  /mcp/health   — health check + world summary
-  POST /mcp/reload   — hot-reload manifest from disk
+  POST /mcp                            — JSON-RPC 2.0 dispatcher (HTTP transport)
+  GET  /mcp/sse                        — MCP SSE transport: opens stream, sends endpoint event
+  POST /mcp/messages                   — MCP SSE transport: receives requests, routes over SSE
+  GET  /mcp/health                     — health check + world summary
+  POST /mcp/reload                     — hot-reload default manifest from disk
+  POST /mcp/sessions/{session_id}/bind — bind a session to a specific manifest
+  DELETE /mcp/sessions/{session_id}    — unbind a session (revert to default)
+  GET  /mcp/sessions                   — list all active session bindings
 
 MCP methods handled:
   initialize         — MCP handshake (returns server capabilities)
   tools/list         — returns only manifest-declared tools (world rendering)
   tools/call         — deterministic enforcement, then adapter dispatch
 
-Request flow:
-  Client → POST /mcp → dispatch_jsonrpc()
-    ├── method=tools/list
-    │     → SessionWorldResolver.resolve()
-    │     → ToolSurfaceRenderer.render()
-    │     → [MCPTool, ...]  (only manifest-visible tools)
-    │
-    └── method=tools/call
-          → SessionWorldResolver.resolve()
-          → ToolCallEnforcer.enforce()  (manifest check → policy → allow/deny)
-          → ToolRegistry.get_tool().adapter(args)  (only on allow)
-          → MCPToolResult
+HTTP transport (POST /mcp):
+  Client → POST /mcp → dispatch_jsonrpc() → JSONResponse
+
+SSE transport (GET /mcp/sse + POST /mcp/messages):
+  Client → GET /mcp/sse   → server sends endpoint event: "/mcp/messages?session_id=<uuid>"
+        → POST /mcp/messages?session_id=<uuid>  → server returns 202, pushes response to SSE stream
+        → SSE stream delivers "message" event with the JSON-RPC response
+
+Per-session manifests:
+  Sessions without an explicit binding use the gateway-level default manifest.
+  Bind a session via POST /mcp/sessions/{session_id}/bind with a manifest_path
+  in the request body. Different agents/users can operate in different worlds
+  simultaneously without gateway restart.
 
 Usage::
 
@@ -52,7 +58,15 @@ _DEFAULT_POLICY_PATH: Path = (
 )
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+
+from agent_hypervisor.runtime.taint import TaintedValue
+from .sse_transport import SSESessionStore, sse_stream
+
+
+class _BindSessionRequest(BaseModel):
+    manifest_path: str
 
 from ..gateway.tool_registry import ToolRegistry, build_default_registry
 from .protocol import (
@@ -107,10 +121,32 @@ class MCPGatewayState:
         self.started_at = datetime.now(timezone.utc).isoformat()
 
     def _rebuild_components(self) -> None:
-        """Rebuild renderer and enforcer from the current manifest."""
+        """Rebuild default renderer and enforcer from the gateway-level manifest."""
         manifest = self.resolver.manifest
         self.renderer = ToolSurfaceRenderer(manifest, self.registry)
         self.enforcer = ToolCallEnforcer(manifest, self.registry, self.policy_engine)
+
+    def renderer_for(self, manifest) -> "ToolSurfaceRenderer":
+        """
+        Return a ToolSurfaceRenderer for the given manifest.
+
+        If manifest is the gateway-level default, returns the cached renderer.
+        Otherwise builds a new one (lightweight).
+        """
+        if manifest is self.resolver.manifest:
+            return self.renderer
+        return ToolSurfaceRenderer(manifest, self.registry)
+
+    def enforcer_for(self, manifest) -> "ToolCallEnforcer":
+        """
+        Return a ToolCallEnforcer for the given manifest.
+
+        If manifest is the gateway-level default, returns the cached enforcer.
+        Otherwise builds a new one (lightweight).
+        """
+        if manifest is self.resolver.manifest:
+            return self.enforcer
+        return ToolCallEnforcer(manifest, self.registry, self.policy_engine)
 
     def reload_manifest(self) -> bool:
         """
@@ -191,6 +227,8 @@ def create_mcp_app(
 
     # Attach state early for sync test access
     app.state.gw = state
+    sse_store = SSESessionStore()
+    app.state.sse_store = sse_store
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 dispatcher
@@ -199,57 +237,23 @@ def create_mcp_app(
     @app.post("/mcp")
     async def dispatch_jsonrpc(request: Request) -> JSONResponse:
         """
-        Main JSON-RPC 2.0 dispatcher.
+        Main JSON-RPC 2.0 dispatcher (HTTP transport).
 
         Parses the request body as a JSON-RPC 2.0 request and dispatches
         to the appropriate handler. Returns a JSON-RPC 2.0 response.
         """
         gw: MCPGatewayState = app.state.gw
-
-        # Parse body
-        try:
-            body = await request.json()
-        except Exception:
-            resp = make_error(None, JSONRPC_PARSE_ERROR, "Parse error: body is not valid JSON")
-            return JSONResponse(content=resp.model_dump(exclude_none=True), status_code=400)
-
-        # Validate JSON-RPC envelope
-        try:
-            rpc = JSONRPCRequest.model_validate(body)
-        except Exception as exc:
-            resp = make_error(
-                body.get("id") if isinstance(body, dict) else None,
-                JSONRPC_PARSE_ERROR,
-                f"Invalid JSON-RPC request: {exc}",
-            )
-            return JSONResponse(content=resp.model_dump(exclude_none=True), status_code=400)
-
-        # Extract provenance metadata from request headers / params
-        provenance = _extract_provenance(request, rpc)
-
-        # Dispatch
-        try:
-            if rpc.method == "initialize":
-                result = _handle_initialize(gw, rpc.params or {})
-                resp = make_result(rpc.id, result)
-
-            elif rpc.method == "tools/list":
-                result = _handle_tools_list(gw, rpc.params or {}, provenance)
-                resp = make_result(rpc.id, result)
-
-            elif rpc.method == "tools/call":
-                resp = _handle_tools_call(gw, rpc.id, rpc.params or {}, provenance)
-
-            else:
-                resp = make_error(
-                    rpc.id,
-                    JSONRPC_METHOD_NOT_FOUND,
-                    f"Method not found: {rpc.method!r}",
-                )
-        except Exception as exc:
-            resp = make_error(rpc.id, JSONRPC_INTERNAL_ERROR, f"Internal error: {exc}")
-
-        return JSONResponse(content=resp.model_dump(exclude_none=True))
+        resp = await _dispatch_rpc_body(gw, request)
+        # Return 400 only for transport-level parse failures; all JSON-RPC
+        # application errors (tool denied, method not found, etc.) are HTTP 200.
+        is_parse_error = (
+            resp.error is not None
+            and resp.error.code == JSONRPC_PARSE_ERROR
+        )
+        return JSONResponse(
+            content=resp.model_dump(exclude_none=True),
+            status_code=400 if is_parse_error else 200,
+        )
 
     # ------------------------------------------------------------------
     # Health check
@@ -274,12 +278,76 @@ def create_mcp_app(
         })
 
     # ------------------------------------------------------------------
+    # SSE transport  (GET /mcp/sse  +  POST /mcp/messages)
+    # ------------------------------------------------------------------
+
+    @app.get("/mcp/sse")
+    async def sse_endpoint(request: Request) -> StreamingResponse:
+        """
+        MCP SSE transport — open a streaming connection.
+
+        Protocol (MCP 2024-11-05 SSE transport):
+          1. Server assigns a session UUID and returns a StreamingResponse
+             with Content-Type: text/event-stream.
+          2. The first event is 'endpoint'; its data is the URL the client
+             must use to POST JSON-RPC requests, e.g.:
+               /mcp/messages?session_id=<uuid>
+          3. Subsequent 'message' events carry JSON-RPC responses.
+          4. A keep-alive comment is sent every ~25 s to prevent proxy
+             timeouts.
+
+        The session UUID is distinct from a manifest-binding session. The
+        client may pass it as X-MCP-Session-Id in POST /mcp/messages headers
+        to also carry provenance through the manifest-binding layer.
+        """
+        store: SSESessionStore = app.state.sse_store
+        session_id, queue = store.create_session()
+        endpoint_url = f"/mcp/messages?session_id={session_id}"
+
+        return StreamingResponse(
+            sse_stream(session_id, queue, endpoint_url, store),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    @app.post("/mcp/messages")
+    async def sse_messages(request: Request, session_id: str) -> JSONResponse:
+        """
+        MCP SSE transport — receive a JSON-RPC request for an SSE session.
+
+        The client posts to this endpoint (URL received from the 'endpoint'
+        event on GET /mcp/sse). The request is processed identically to
+        POST /mcp, but the JSON-RPC response is pushed to the SSE stream
+        rather than returned in the HTTP response body.
+
+        Returns 202 Accepted if the request was queued, 404 if the session
+        is not found (client disconnected or invalid session_id).
+        """
+        gw: MCPGatewayState = app.state.gw
+        store: SSESessionStore = app.state.sse_store
+
+        queue = store.get_queue(session_id)
+        if queue is None:
+            return JSONResponse(
+                {"error": f"SSE session not found: {session_id!r}"},
+                status_code=404,
+            )
+
+        resp = await _dispatch_rpc_body(gw, request, session_id_override=session_id)
+        await queue.put(json.dumps(resp.model_dump(exclude_none=True)))
+        return JSONResponse({"status": "accepted"}, status_code=202)
+
+    # ------------------------------------------------------------------
     # Manifest hot-reload
     # ------------------------------------------------------------------
 
     @app.post("/mcp/reload")
     async def reload_manifest() -> JSONResponse:
-        """Hot-reload the WorldManifest from disk."""
+        """Hot-reload the default WorldManifest from disk."""
         gw: MCPGatewayState = app.state.gw
         ok = gw.reload_manifest()
         manifest = gw.resolver.manifest
@@ -290,7 +358,150 @@ def create_mcp_app(
             "visible_tools": [t.name for t in gw.renderer.render()] if ok else [],
         })
 
+    # ------------------------------------------------------------------
+    # Per-session manifest management
+    # ------------------------------------------------------------------
+
+    @app.post("/mcp/sessions/{session_id}/bind")
+    async def bind_session(session_id: str, body: _BindSessionRequest) -> JSONResponse:
+        """
+        Bind a session to a specific WorldManifest.
+
+        After binding, tools/list and tools/call for this session_id will use
+        the specified manifest instead of the gateway-level default.
+
+        The manifest is loaded immediately. Returns 400 if the manifest file
+        cannot be loaded (fail closed — no silent fallback to default).
+        """
+        gw: MCPGatewayState = app.state.gw
+        try:
+            manifest = gw.resolver.register_session(session_id, Path(body.manifest_path))
+        except Exception as exc:
+            return JSONResponse(
+                {"status": "error", "session_id": session_id, "error": str(exc)},
+                status_code=400,
+            )
+        renderer = gw.renderer_for(manifest)
+        return JSONResponse({
+            "status": "bound",
+            "session_id": session_id,
+            "manifest_path": body.manifest_path,
+            "workflow_id": manifest.workflow_id,
+            "visible_tools": [t.name for t in renderer.render()],
+        })
+
+    @app.delete("/mcp/sessions/{session_id}")
+    async def unbind_session(session_id: str) -> JSONResponse:
+        """
+        Remove a session's manifest binding, reverting it to the default.
+
+        Safe to call even if the session is not currently bound.
+        """
+        gw: MCPGatewayState = app.state.gw
+        removed = gw.resolver.unregister_session(session_id)
+        default_manifest = gw.resolver.manifest
+        return JSONResponse({
+            "status": "unbound" if removed else "not_bound",
+            "session_id": session_id,
+            "default_workflow_id": default_manifest.workflow_id if default_manifest else None,
+        })
+
+    @app.get("/mcp/sessions")
+    async def list_sessions() -> JSONResponse:
+        """
+        List all active per-session manifest bindings.
+
+        Returns a dict of session_id → workflow_id for all explicitly bound
+        sessions. Sessions not listed are using the gateway-level default.
+        """
+        gw: MCPGatewayState = app.state.gw
+        registry = gw.resolver.session_registry()
+        default_manifest = gw.resolver.manifest
+        return JSONResponse({
+            "sessions": registry,
+            "default_workflow_id": default_manifest.workflow_id if default_manifest else None,
+            "session_count": len(registry),
+        })
+
     return app
+
+
+# ---------------------------------------------------------------------------
+# Shared dispatch helper (used by both HTTP and SSE transports)
+# ---------------------------------------------------------------------------
+
+async def _dispatch_rpc_body(
+    state: MCPGatewayState,
+    request: Request,
+    session_id_override: Optional[str] = None,
+) -> Any:
+    """
+    Parse the request body and dispatch to the appropriate MCP handler.
+
+    This is the shared core used by both POST /mcp (HTTP transport) and
+    POST /mcp/messages (SSE transport). Returns a JSONRPCResponse object
+    (result or error); the caller decides how to deliver it (HTTP body vs SSE
+    event).
+
+    Args:
+        state:              The gateway state.
+        request:            The FastAPI Request (for body + headers).
+        session_id_override: If set, this session_id takes precedence over
+                             whatever is extracted from headers/params. Used
+                             by the SSE transport which carries the session_id
+                             in the query parameter.
+
+    Returns:
+        A JSONRPCResponse (Pydantic model) — either make_result or make_error.
+    """
+    # Parse body
+    try:
+        body = await request.json()
+    except Exception:
+        return make_error(None, JSONRPC_PARSE_ERROR, "Parse error: body is not valid JSON")
+
+    # Validate JSON-RPC envelope
+    try:
+        rpc = JSONRPCRequest.model_validate(body)
+    except Exception as exc:
+        return make_error(
+            body.get("id") if isinstance(body, dict) else None,
+            JSONRPC_PARSE_ERROR,
+            f"Invalid JSON-RPC request: {exc}",
+        )
+
+    # Extract provenance; apply session_id override if provided
+    provenance = _extract_provenance(request, rpc)
+    if session_id_override:
+        provenance = InvocationProvenance(
+            source=provenance.source,
+            session_id=session_id_override,
+            trust_level=provenance.trust_level,
+            timestamp=provenance.timestamp,
+            extra=provenance.extra,
+        )
+
+    # Dispatch
+    try:
+        if rpc.method == "initialize":
+            result = _handle_initialize(state, rpc.params or {})
+            return make_result(rpc.id, result)
+
+        elif rpc.method == "tools/list":
+            result = _handle_tools_list(state, rpc.params or {}, provenance)
+            return make_result(rpc.id, result)
+
+        elif rpc.method == "tools/call":
+            return _handle_tools_call(state, rpc.id, rpc.params or {}, provenance)
+
+        else:
+            return make_error(
+                rpc.id,
+                JSONRPC_METHOD_NOT_FOUND,
+                f"Method not found: {rpc.method!r}",
+            )
+    except Exception as exc:
+        return make_error(rpc.id, JSONRPC_INTERNAL_ERROR, f"Internal error: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +540,13 @@ def _handle_tools_list(
     """
     Handle tools/list.
 
-    Returns only the tools visible in the current manifest world.
-    The MCP client will see only these tools — undeclared tools do not exist.
+    Returns only the tools visible in the session's manifest world.
+    If the session has a registered manifest, that world is used; otherwise
+    the gateway-level default is used. The MCP client sees only these tools —
+    undeclared tools do not exist.
     """
-    tools = state.renderer.render()
+    manifest = state.resolver.resolve(session_id=provenance.session_id)
+    tools = state.renderer_for(manifest).render()
     return {
         "tools": [t.model_dump() for t in tools],
     }
@@ -347,9 +561,9 @@ def _handle_tools_call(
     """
     Handle tools/call.
 
-    Enforces the call against the manifest. On denial, returns a JSON-RPC
-    error response (the tool is absent or forbidden). On allow, dispatches
-    to the registered adapter and returns the result.
+    Enforces the call against the session's manifest. On denial, returns a
+    JSON-RPC error response (the tool is absent or forbidden). On allow,
+    dispatches to the registered adapter and returns the result.
     """
     # Validate params
     tool_name = params.get("name")
@@ -367,8 +581,9 @@ def _handle_tools_call(
             "'arguments' must be an object",
         )
 
-    # Enforce
-    decision = state.enforcer.enforce(tool_name, arguments, provenance)
+    # Resolve per-session manifest and enforce
+    manifest = state.resolver.resolve(session_id=provenance.session_id)
+    decision = state.enforcer_for(manifest).enforce(tool_name, arguments, provenance)
 
     if decision.denied:
         # Choose error code: not-in-world vs. policy-denied
@@ -390,24 +605,34 @@ def _handle_tools_call(
     try:
         raw_result = tool_def.adapter(arguments)
     except Exception as exc:
-        # Adapter error — protocol-level success, tool-level error
+        # Adapter error — protocol-level success, tool-level error.
+        # The result is still tainted by the invocation provenance.
+        tainted = TaintedValue(value=f"Tool error: {exc}", taint=decision.taint_state)
         result_obj = MCPToolResult(
-            content=[MCPContent(type="text", text=f"Tool error: {exc}")],
+            content=[MCPContent(type="text", text=tainted.value)],
             isError=True,
         )
         return make_result(request_id, result_obj.model_dump())
 
-    # Format result
+    # Format result, wrapping it in TaintedValue to carry provenance taint.
+    # taint_state reflects the trust level of the caller:
+    #   CLEAN  — caller is trusted; result may be used in external operations
+    #   TAINTED — caller is untrusted/derived; result must not flow unchecked
     if isinstance(raw_result, str):
         text = raw_result
     else:
         text = json.dumps(raw_result, default=str)
 
+    tainted = TaintedValue(value=text, taint=decision.taint_state)
+
     result_obj = MCPToolResult(
-        content=[MCPContent(type="text", text=text)],
+        content=[MCPContent(type="text", text=tainted.value)],
         isError=False,
     )
-    return make_result(request_id, result_obj.model_dump())
+    # Include taint metadata in the MCP result so callers can inspect it.
+    result_dict = result_obj.model_dump()
+    result_dict["_taint"] = tainted.taint.value  # "clean" | "tainted"
+    return make_result(request_id, result_dict)
 
 
 # ---------------------------------------------------------------------------
