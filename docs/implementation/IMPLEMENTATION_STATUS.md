@@ -1,16 +1,16 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 4 — Per-session WorldManifest bindings  
+**Session**: Session 5 — MCP SSE transport  
 **Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## Session Summary
 
-Session 4: Per-session manifest bindings (Option C from Session 3 handoff).
-Different sessions now operate in different worlds simultaneously.
-45 tests passing (was 32).
+Session 5: MCP SSE transport (Option B from Session 3 handoff).
+GET /mcp/sse + POST /mcp/messages enable streaming-compatible MCP clients.
+58 tests passing (was 45).
 
 ---
 
@@ -105,6 +105,20 @@ All 26 tests pass. Groups:
 
 ---
 
+### Session 5 — MCP SSE transport
+
+- [x] `sse_transport.py` — `SSESessionStore` (UUID→Queue registry), `format_sse_event`, `sse_stream` async generator (heartbeat/keepalive, sentinel stop, cleanup in finally)
+- [x] `GET /mcp/sse` — creates session in store, returns `StreamingResponse(text/event-stream)`, first event is `endpoint` with `/mcp/messages?session_id=<uuid>`
+- [x] `POST /mcp/messages` — looks up session queue, dispatches JSON-RPC, puts response in queue, returns 202 Accepted
+- [x] `_dispatch_rpc_body()` extracted as shared async helper (used by both transports); `session_id_override` propagates SSE session into provenance for per-session manifest resolution
+- [x] `SSESessionStore` exported from `mcp_gateway.__init__`
+- [x] Group 7: 13 new tests (6 SSESessionStore unit, 3 sse_stream generator, 4 HTTP endpoint) — all passing
+- Note: httpx ASGI transport collects full response body — can't test infinite streams via `c.stream()`. HTTP tests use direct queue inspection instead.
+
+**Test results**: 58 passed (was 45).
+
+---
+
 ### Session 4 — Per-session WorldManifest bindings
 
 - [x] `SessionWorldResolver.register_session(session_id, manifest_path)` — loads manifest immediately, fails closed on error
@@ -123,7 +137,6 @@ All 26 tests pass. Groups:
 
 ## Pending / Not Yet Done
 
-- [ ] Full SSE transport (streaming) — out of scope for Phase 1
 - [ ] Full taint propagation integration — hooks in place, not wired to runtime taint
 - [ ] Auth / TLS — not in scope for this phase
 
@@ -137,13 +150,15 @@ None.
 
 ## Next Recommended Step
 
-**Option B (SSE transport)**: Add SSE streaming transport to `/mcp/sse` so the
-gateway is compatible with MCP clients that require streaming (e.g., Claude
-Desktop). FastAPI supports SSE via `StreamingResponse`. The HTTP POST endpoint
-at `/mcp` stays unchanged; SSE is additive. This is the last major
-protocol-level gap.
-
 **Option D (taint propagation)**: Wire `InvocationProvenance.trust_level` and
-`session_id` into the runtime `TaintContext` so values from untrusted external
-sessions carry taint that the provenance firewall can inspect. This closes the
-loop between the MCP gateway and the runtime invariants layer.
+`session_id` into the runtime `TaintContext` so values that arrive through the
+MCP gateway carry taint that is visible to the provenance firewall. The hook is
+already in place in the enforcer; the runtime taint layer needs to be imported
+and updated from the gateway.
+
+**Option E (SSE integration test via real server)**: The SSE transport is
+implemented and unit-tested, but the full streaming round-trip (open SSE stream
+→ POST request → read response event) can only be tested against a real
+uvicorn server. Add a test fixture that starts uvicorn in a thread and uses
+`requests` + `sseclient` (or stdlib `urllib.request`) to verify the full
+round-trip, similar to `examples/mcp_gateway/main.py`.

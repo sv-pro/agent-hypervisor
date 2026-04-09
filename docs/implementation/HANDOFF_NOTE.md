@@ -1,79 +1,83 @@
 # Handoff Note
 
 **Date**: 2026-04-09  
-**Session**: Session 4 — Per-session WorldManifest bindings  
+**Session**: Session 5 — MCP SSE transport  
 **Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## What Was Just Done
 
-Implemented Option C from the Session 3 handoff: per-session WorldManifest
-bindings. Different sessions (agents/users) can now operate in different worlds
-simultaneously without gateway restart.
+Implemented Option B from the Session 3 handoff: MCP SSE transport.
+The gateway is now compatible with MCP clients that require streaming
+(e.g., Claude Desktop).
 
-### Changes
+### New file: `sse_transport.py`
 
-**`session_world_resolver.py`**
-- `register_session(session_id, manifest_path)` — loads the manifest
-  immediately; raises and does NOT register if loading fails (fail closed)
-- `unregister_session(session_id)` — removes binding, reverts to default;
-  idempotent (returns False if session was not registered)
-- `session_registry()` — returns `{session_id: workflow_id}` snapshot
-- `resolve(session_id)` — now checks `_session_registry` first; falls back to
-  default manifest if not found
+- `SSESessionStore` — registry of `{session_id: asyncio.Queue}` for active
+  SSE connections. Sessions are created on GET /mcp/sse and removed in the
+  `sse_stream` generator's `finally` block on disconnect.
+- `format_sse_event(event, data)` — SSE wire format helper.
+- `sse_stream(session_id, queue, endpoint_url, store)` — async generator:
+  yields endpoint event immediately, then yields message events from the
+  queue, sends `: ping` comments every 25 s, stops on `None` sentinel.
 
-**`mcp_server.py`**
-- `_handle_tools_list` and `_handle_tools_call` now call
-  `state.resolver.resolve(session_id=provenance.session_id)` to get the
-  session's manifest, then `state.renderer_for(manifest)` /
-  `state.enforcer_for(manifest)` to get the right components
-- `renderer_for(manifest)` / `enforcer_for(manifest)` — return cached default
-  components if manifest is the default (common path), build on-the-fly
-  otherwise (lightweight)
-- New endpoints:
-  - `POST /mcp/sessions/{session_id}/bind` — body: `{"manifest_path": "..."}`
-  - `DELETE /mcp/sessions/{session_id}` — revert to default
-  - `GET /mcp/sessions` — list active bindings
-- `_BindSessionRequest` is a module-level Pydantic model (required for FastAPI
-  schema generation — do not move it inside `create_mcp_app`)
+### Changes to `mcp_server.py`
 
-**`tests/hypervisor/test_mcp_gateway.py`** — Group 6: 13 new tests
-- 7 unit tests on `SessionWorldResolver` directly
-- 6 HTTP integration tests using `two_world_client` fixture (default + email worlds)
+- `_dispatch_rpc_body(state, request, session_id_override)` — new shared
+  async helper used by BOTH transports. Parses body, validates JSON-RPC,
+  extracts provenance (with optional `session_id_override` for SSE), dispatches.
+- `GET /mcp/sse` — creates session, returns `StreamingResponse(text/event-stream)`.
+  First SSE event: `endpoint` with `/mcp/messages?session_id=<uuid>`.
+- `POST /mcp/messages?session_id=<id>` — uses `_dispatch_rpc_body`, puts
+  response in session queue, returns 202 Accepted.
+- `SSESessionStore` attached to `app.state.sse_store` at factory time.
+- `POST /mcp` (HTTP transport) now delegates to `_dispatch_rpc_body` too;
+  error code `JSONRPC_PARSE_ERROR` (-32700) → HTTP 400, all others → 200.
 
-### Test results: 45 passed (was 32)
+### Tests: Group 7 (13 tests, all passing)
+
+- 6 `SSESessionStore` unit tests
+- 3 `sse_stream` generator tests (endpoint event, message events, cleanup)
+- 1 route/store registration test
+- 1 unknown-session 404 test
+- 2 queue inspection tests (round-trip + denial-over-stream)
+
+**Why queue inspection instead of streaming httpx tests**: httpx ASGI
+transport buffers the entire response body before returning headers, making
+it impossible to test infinite SSE streams via `c.stream()`. The correct
+approach for full SSE streaming integration tests is a real uvicorn server.
+
+### Test results: 58 passed (was 45)
 
 ---
 
 ## What to Do Next
 
-**Option B (SSE transport)**: Add SSE streaming transport at `/mcp/sse`.
-The MCP 2024-11-05 SSE transport works like this:
-1. Client GETs `/mcp/sse` → server sends `endpoint` event with a POST URL
-   (e.g., `/mcp/messages?session_id=<uuid>`)
-2. Client POSTs JSON-RPC requests to that URL
-3. Server sends responses back over the open SSE stream
+**Option D (taint propagation)**: Wire `InvocationProvenance.trust_level`
+into `TaintContext`. The `InvocationProvenance` object is passed to
+`enforce()` in `ToolCallEnforcer`. The `TaintContext` lives in
+`runtime/taint.py`. The connection to make:
+- When `enforce()` runs, create a `TaintedValue` for the tool call arguments
+  using the trust level from provenance
+- Return the taint metadata in `EnforcementDecision` so callers can propagate
+  it to downstream operations
+- This closes the loop: LLM-generated tool calls from external sources carry
+  taint all the way through to the provenance firewall
 
-This requires:
-- An asyncio `Queue` per session for routing SSE responses
-- A `GET /mcp/sse` endpoint that opens the stream and sends the endpoint event
-- A `POST /mcp/messages` endpoint that routes responses back to the queue
-- `sse-starlette` package (or manual `StreamingResponse`) — add to
-  `pyproject.toml` optional deps
-
-**Option D (taint propagation)**: Wire `InvocationProvenance.trust_level` into
-`TaintContext` so values from external sources carry taint that is visible to
-the provenance firewall. The hook is already in place in the enforcer; the
-runtime taint layer needs to be imported and updated from the gateway.
+**Option E (SSE integration test via real server)**: Add a pytest fixture
+that starts uvicorn in a daemon thread and tests the full SSE round-trip
+with `urllib.request` + line-by-line iteration of the response stream.
+See `examples/mcp_gateway/main.py` for the pattern — it already does this.
 
 ---
 
 ## Key Invariants to Preserve
 
-- `enforce()` must never raise
-- Undeclared tools stay absent from the surface (not just denied)
-- `register_session()` must fail closed — if the manifest cannot be loaded,
-  the session must NOT be registered (no silent fallback to default)
+- POST /mcp/messages returns 202 Accepted — the response ALWAYS goes over
+  the SSE stream, never in the HTTP response body
+- `_dispatch_rpc_body` is the single source of truth for JSON-RPC dispatch
+  logic — do not duplicate it in the SSE messages handler
+- `sse_stream` removes the session from the store in a `finally` block —
+  this ensures POST /mcp/messages returns 404 after client disconnects
 - `_BindSessionRequest` must remain at module level (FastAPI constraint)
-- `use_default_policy=False` default for `create_mcp_app` — unchanged
