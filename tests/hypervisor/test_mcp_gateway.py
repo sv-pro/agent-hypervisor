@@ -779,6 +779,345 @@ class TestPerSessionManifests:
 
 
 # ---------------------------------------------------------------------------
+# Group 8: SSE integration via real uvicorn server (Option E)
+# ---------------------------------------------------------------------------
+
+class TestSSEIntegration:
+    """
+    Full SSE streaming round-trip tests against a real uvicorn server.
+
+    httpx ASGI transport buffers the entire HTTP response body before returning
+    headers, making it impossible to test infinite SSE streams. These tests
+    start a real uvicorn server in a daemon thread and use http.client +
+    threading to read SSE events line-by-line, which is the only reliable way
+    to test actual streaming behaviour.
+
+    Protocol invariants tested:
+    - GET /mcp/sse returns Content-Type: text/event-stream
+    - The first SSE event is 'endpoint' with data=/mcp/messages?session_id=<uuid>
+    - Full round-trip: open SSE → read endpoint → POST request → read message event
+    - POST /mcp/messages after SSE disconnect returns 404 (session cleaned up)
+    """
+
+    HOST = "127.0.0.1"
+    PORT = 18095
+
+    # ------------------------------------------------------------------ #
+    # Fixtures                                                             #
+    # ------------------------------------------------------------------ #
+
+    @pytest.fixture(scope="class")
+    def live_server(self, tmp_path_factory):
+        """
+        Start a real uvicorn gateway and yield (host, port, base_url).
+
+        Uses scope="class" so all tests in the group share one server instance
+        (faster) rather than paying the startup cost per test.
+        """
+        import time
+        import threading
+        import http.client
+
+        pytest.importorskip("uvicorn")
+        from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+
+        tmp_path = tmp_path_factory.mktemp("sse_integration")
+        manifest_file = tmp_path / "world.yaml"
+        manifest_file.write_text(
+            "workflow_id: sse-integration-world\ncapabilities:\n  - tool: read_file\n"
+        )
+        app = create_mcp_app(manifest_file)
+
+        import uvicorn
+        config = uvicorn.Config(
+            app, host=self.HOST, port=self.PORT, log_level="error"
+        )
+        server = uvicorn.Server(config)
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+
+        # Poll the health endpoint until the server is ready (max 5 s).
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            try:
+                conn = http.client.HTTPConnection(self.HOST, self.PORT, timeout=1)
+                conn.request("GET", "/mcp/health")
+                conn.getresponse().read()
+                conn.close()
+                break
+            except Exception:
+                time.sleep(0.05)
+        else:
+            raise RuntimeError("SSE integration server did not start within 5 s")
+
+        yield (self.HOST, self.PORT, f"http://{self.HOST}:{self.PORT}")
+
+        server.should_exit = True
+        time.sleep(0.2)
+
+    # ------------------------------------------------------------------ #
+    # SSE helpers                                                          #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _collect_sse_events(
+        host: str,
+        port: int,
+        path: str,
+        n_events: int,
+        timeout: float = 5.0,
+    ) -> list[dict]:
+        """
+        Open an SSE connection and collect up to n_events parsed events.
+
+        Returns a list of dicts with keys 'event' (str) and 'data' (str).
+        Runs the blocking HTTP read in a daemon thread so the main test
+        thread can time-out cleanly.
+        """
+        import http.client
+        import threading
+        import queue as queue_mod
+
+        result_q: queue_mod.Queue = queue_mod.Queue()
+
+        def _reader():
+            try:
+                conn = http.client.HTTPConnection(host, port, timeout=timeout)
+                conn.request("GET", path, headers={"Accept": "text/event-stream"})
+                resp = conn.getresponse()
+                event_type = None
+                event_data = None
+                while True:
+                    raw = resp.readline()
+                    if not raw:
+                        break
+                    line = raw.decode("utf-8").rstrip("\r\n")
+                    if line.startswith("event: "):
+                        event_type = line[7:]
+                    elif line.startswith("data: "):
+                        event_data = line[6:]
+                    elif line.startswith(":"):
+                        pass   # heartbeat comment — ignore
+                    elif line == "" and event_type is not None:
+                        result_q.put({"event": event_type, "data": event_data})
+                        event_type = None
+                        event_data = None
+                conn.close()
+            except Exception as exc:
+                result_q.put({"_error": str(exc)})
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+
+        events = []
+        for _ in range(n_events):
+            try:
+                ev = result_q.get(timeout=timeout)
+                if "_error" in ev:
+                    raise RuntimeError(f"SSE reader error: {ev['_error']}")
+                events.append(ev)
+            except queue_mod.Empty:
+                break
+        return events
+
+    @staticmethod
+    def _post_json(host: str, port: int, path: str, body: dict) -> tuple[int, dict]:
+        """Send a JSON POST to the live server; return (status_code, parsed_body)."""
+        import http.client
+        payload = json.dumps(body).encode()
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        conn.request(
+            "POST", path, body=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        status = resp.status
+        data = json.loads(resp.read())
+        conn.close()
+        return status, data
+
+    # ------------------------------------------------------------------ #
+    # Tests                                                                #
+    # ------------------------------------------------------------------ #
+
+    def test_sse_content_type(self, live_server):
+        """GET /mcp/sse must return Content-Type: text/event-stream."""
+        import http.client
+        host, port, _ = live_server
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        conn.request("GET", "/mcp/sse", headers={"Accept": "text/event-stream"})
+        resp = conn.getresponse()
+        content_type = resp.getheader("Content-Type", "")
+        # Read a small chunk then abandon (we only need the headers here)
+        resp.read(64)
+        conn.close()
+        assert "text/event-stream" in content_type, (
+            f"Expected text/event-stream, got {content_type!r}"
+        )
+
+    def test_sse_first_event_is_endpoint(self, live_server):
+        """The first SSE event must be 'endpoint' with a session URL."""
+        host, port, _ = live_server
+        events = self._collect_sse_events(host, port, "/mcp/sse", n_events=1)
+        assert len(events) == 1, f"Expected 1 event, got {events}"
+        ev = events[0]
+        assert ev["event"] == "endpoint", f"Expected 'endpoint' event, got {ev}"
+        assert "/mcp/messages?session_id=" in ev["data"], (
+            f"Endpoint data does not contain session URL: {ev['data']}"
+        )
+
+    def test_sse_endpoint_url_has_uuid_session_id(self, live_server):
+        """The endpoint event's session_id must look like a UUID."""
+        import re
+        host, port, _ = live_server
+        events = self._collect_sse_events(host, port, "/mcp/sse", n_events=1)
+        data = events[0]["data"]
+        # data is "/mcp/messages?session_id=<uuid>"
+        m = re.search(r"session_id=([0-9a-f-]{30,})", data)
+        assert m is not None, f"No UUID-like session_id found in {data!r}"
+
+    def test_sse_full_round_trip(self, live_server):
+        """
+        Full SSE round-trip:
+        1. Open GET /mcp/sse → read endpoint event → extract session_id
+        2. POST tools/list to /mcp/messages?session_id=<id>
+        3. Read the resulting 'message' event from the SSE stream.
+
+        The SSE reader runs in a daemon thread and forwards each event to a
+        shared queue as soon as it arrives (not after collecting n_events).
+        This avoids the deadlock where the reader waits for event 2 before
+        the main thread can POST to trigger event 2.
+        """
+        import http.client
+        import threading
+        import queue as queue_mod
+
+        host, port, _ = live_server
+        event_q: queue_mod.Queue = queue_mod.Queue()
+
+        def _streaming_reader():
+            """Connect to SSE and push each parsed event into event_q immediately."""
+            try:
+                conn = http.client.HTTPConnection(host, port, timeout=10)
+                conn.request("GET", "/mcp/sse", headers={"Accept": "text/event-stream"})
+                resp = conn.getresponse()
+                event_type = None
+                event_data = None
+                while True:
+                    raw = resp.readline()
+                    if not raw:
+                        break
+                    line = raw.decode("utf-8").rstrip("\r\n")
+                    if line.startswith("event: "):
+                        event_type = line[7:]
+                    elif line.startswith("data: "):
+                        event_data = line[6:]
+                    elif line.startswith(":"):
+                        pass   # heartbeat comment
+                    elif line == "" and event_type is not None:
+                        # Emit event immediately — do not wait to batch
+                        event_q.put({"event": event_type, "data": event_data})
+                        event_type = None
+                        event_data = None
+                conn.close()
+            except Exception as exc:
+                event_q.put({"_error": str(exc)})
+
+        t = threading.Thread(target=_streaming_reader, daemon=True)
+        t.start()
+
+        # Step 1: get the endpoint event (the server yields it immediately on connect)
+        try:
+            endpoint_event = event_q.get(timeout=5.0)
+        except queue_mod.Empty:
+            pytest.fail("Timed out waiting for SSE endpoint event")
+
+        if "_error" in endpoint_event:
+            pytest.fail(f"SSE reader error: {endpoint_event['_error']}")
+
+        assert endpoint_event["event"] == "endpoint", (
+            f"Expected 'endpoint' event, got {endpoint_event}"
+        )
+        messages_path = endpoint_event["data"]   # /mcp/messages?session_id=<uuid>
+
+        # Step 2: POST a tools/list request via the SSE messages endpoint.
+        # Now that the main thread has the session_id it can POST.
+        status, post_body = self._post_json(
+            host, port, messages_path,
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert status == 202, f"Expected 202, got {status}: {post_body}"
+        assert post_body.get("status") == "accepted"
+
+        # Step 3: the JSON-RPC response arrives as a 'message' event on the stream.
+        # The server puts the response in the session queue, sse_stream yields it.
+        try:
+            message_event = event_q.get(timeout=5.0)
+        except queue_mod.Empty:
+            pytest.fail("Timed out waiting for SSE message event after POST")
+
+        if "_error" in message_event:
+            pytest.fail(f"SSE reader error after POST: {message_event['_error']}")
+
+        assert message_event["event"] == "message", (
+            f"Expected 'message' event, got {message_event}"
+        )
+        result = json.loads(message_event["data"])
+        assert "result" in result, f"Expected JSON-RPC result, got: {result}"
+        assert "tools" in result["result"], f"tools/list result missing 'tools': {result}"
+        tool_names = [t["name"] for t in result["result"]["tools"]]
+        assert "read_file" in tool_names, f"read_file not in {tool_names}"
+
+    def test_sse_session_removed_after_disconnect(self, live_server):
+        """
+        After the SSE connection closes, POST /mcp/messages must return 404.
+
+        Simulate disconnect by opening the SSE stream, reading the endpoint
+        event, closing the connection, then attempting to POST.
+        """
+        import http.client
+        import time
+
+        host, port, _ = live_server
+
+        # Open SSE, read endpoint event, capture session_id, close abruptly.
+        session_id = None
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("GET", "/mcp/sse", headers={"Accept": "text/event-stream"})
+            resp = conn.getresponse()
+            event_type = None
+            event_data = None
+            while True:
+                line = resp.readline().decode("utf-8").rstrip("\r\n")
+                if line.startswith("event: "):
+                    event_type = line[7:]
+                elif line.startswith("data: "):
+                    event_data = line[6:]
+                elif line == "" and event_type is not None:
+                    if event_type == "endpoint":
+                        # /mcp/messages?session_id=<uuid>
+                        session_id = event_data.split("session_id=")[-1]
+                        break
+        finally:
+            conn.close()   # abrupt close — simulates client disconnect
+
+        assert session_id, "Could not extract session_id from SSE stream"
+
+        # Give the server a moment to run the finally block in sse_stream.
+        time.sleep(0.3)
+
+        # POST to the now-dead session must return 404.
+        status, body = self._post_json(
+            host, port, f"/mcp/messages?session_id={session_id}",
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert status == 404, (
+            f"Expected 404 after SSE disconnect, got {status}: {body}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Group 7: SSE transport
 # ---------------------------------------------------------------------------
 
