@@ -25,6 +25,7 @@ Status: Supported (PoC quality — working and maintained, not production harden
 | `gateway/execution_router.py` | `ExecutionRouter`, `ToolRequest`, `ArgSpec` | Provenance-based execution routing |
 | `gateway/tool_registry.py` | tool registry | Registered tool adapters |
 | `gateway/config_loader.py` | config loader | Gateway configuration loading |
+| `mcp_gateway/` | `create_mcp_app`, `ToolSurfaceRenderer`, `ToolCallEnforcer`, `SessionWorldResolver`, `SSESessionStore` | **AH MCP Gateway** — JSON-RPC 2.0 server enforcing manifest-driven tool visibility for MCP clients |
 | `provenance/graph.py` | `ProvenanceGraph`, `ProvenanceNode`, `ProvenanceEdge` | Append-only audit provenance graph |
 | `storage/trace_store.py` | `TraceStore` | Append-only JSONL persistent trace log |
 | `storage/approval_store.py` | `ApprovalStore` | Pending and resolved approval records |
@@ -89,8 +90,38 @@ The `policy_tuner/` sub-package works *offline* against persisted traces and app
 - **Scope drift** — task-scoped behavior bleeding across long-lived policies
 - **Rule quality smells** — overly broad allows, catch-all denies, approval-heavy rules
 
+## AH MCP Gateway
+
+The `mcp_gateway/` sub-package is the **Agent Hypervisor MCP Gateway** — a JSON-RPC 2.0 server that enforces manifest-driven tool visibility for MCP clients such as Claude Desktop, Cursor, and other LLM agents. It is the newest feature in the `hypervisor` package.
+
+See the [MCP Gateway module deep-dive](modules/mcp_gateway.md) for full documentation.
+
+**Core idea:** a tool not declared in the WorldManifest does not exist in this world — it is absent rather than merely forbidden. `tools/list` returns only the world's declared tools; `tools/call` runs a 4-stage deterministic enforcement pipeline before dispatching to an adapter.
+
+```
+MCP Client
+    │  JSON-RPC 2.0
+    ▼
+AH MCP Gateway (POST /mcp or SSE)
+    ├── SessionWorldResolver    → manifest per session
+    ├── ToolSurfaceRenderer     → tools/list (world rendering)
+    └── ToolCallEnforcer        → 4-stage enforcement + taint derivation
+            1. Manifest declaration check  (tool must be declared)
+            2. Registry check              (adapter must exist)
+            3. Policy engine check         (optional YAML rules)
+            4. Constraint check            (manifest constraints)
+```
+
+**Usage:**
+```python
+from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+import uvicorn
+uvicorn.run(create_mcp_app("manifests/example_world.yaml"), host="127.0.0.1", port=8090)
+```
+
 ## See Also
 
+- [MCP Gateway module](modules/mcp_gateway.md) — full deep-dive: enforcement pipeline, SSE transport, per-session manifests, taint bridge
 - [ProvenanceFirewall module](modules/firewall.md)
 - [Trust, Taint, and Provenance](../concepts/trust-and-taint.md)
 - [Manifest Resolution Law](../concepts/manifest-resolution.md)

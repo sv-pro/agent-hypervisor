@@ -36,6 +36,7 @@ This is the curated, content-oriented catalog of the Agent Hypervisor knowledge 
 - [SafeMCPProxy](code/modules/proxy.md) - In-path MCP enforcement; single gateway; typed denial kinds
 - [Executor](code/modules/executor.md) - Subprocess transport; worker boundary; SimulationExecutor
 - [ProvenanceFirewall](code/modules/firewall.md) - Structural provenance rules; RULE-01 through RULE-05; ValueRef model
+- [AH MCP Gateway](code/modules/mcp_gateway.md) - JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage deterministic enforcement; SSE transport
 - [Core Hypervisor](code/modules/core_hypervisor.md) - Reference ManifestResolver; physics laws; input virtualization
 
 ---

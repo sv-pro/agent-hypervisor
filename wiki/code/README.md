@@ -30,6 +30,7 @@ The [`modules/`](modules/README.md) subdirectory contains individual pages for e
 | `runtime/proxy.py` | [modules/proxy.md](modules/proxy.md) | Single MCP enforcement point; typed denial kinds |
 | `runtime/executor.py` | [modules/executor.md](modules/executor.md) | Process boundary; main process never calls handlers |
 | `hypervisor/firewall.py` | [modules/firewall.md](modules/firewall.md) | Structural provenance rules; sticky derivation (RULE-03) |
+| `hypervisor/mcp_gateway/` | [modules/mcp_gateway.md](modules/mcp_gateway.md) | JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage enforcement |
 | `core/hypervisor.py` | [modules/core_hypervisor.md](modules/core_hypervisor.md) | Deterministic resolution; physics laws override all rules |
 
 ## Architectural Patterns

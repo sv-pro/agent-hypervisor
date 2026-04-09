@@ -30,6 +30,7 @@ These modules own critical security invariants and warrant individual pages.
 | `runtime/proxy.py` | [SafeMCPProxy](modules/proxy.md) | In-path MCP enforcement |
 | `runtime/executor.py` | [Executor](modules/executor.md) | Subprocess transport & boundary |
 | `hypervisor/firewall.py` | [ProvenanceFirewall](modules/firewall.md) | Provenance-aware tool firewall |
+| `hypervisor/mcp_gateway/` | [AH MCP Gateway](modules/mcp_gateway.md) | JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage enforcement |
 | `core/hypervisor.py` | [Core Hypervisor](modules/core_hypervisor.md) | Reference manifest resolver |
 
 ## Architectural Patterns
