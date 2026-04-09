@@ -9,6 +9,73 @@ Instead of just retrieving information and discarding it after answering, you wi
 2. **The Wiki (Read/Write)**: The `wiki/` directory. **You own this layer.** You create pages, update summaries, document scenarios, and maintain the cross-references here.
 3. **The Schema**: This `PROMPT.txt` file, dictating how you manage the knowledge base.
 
+## Python Code as a Source
+
+The `src/` directory is a first-class raw source. It contains two top-level Python packages:
+- `src/core/` — minimal reference implementation (portable, dependency-free)
+- `src/agent_hypervisor/` — full runtime framework (seven sub-packages)
+
+Sub-packages of `src/agent_hypervisor/`:
+
+| Sub-package | Path | Role |
+|---|---|---|
+| `runtime` | `src/agent_hypervisor/runtime/` | Execution governance kernel (Layer 3) |
+| `compiler` | `src/agent_hypervisor/compiler/` | World Manifest compiler & CLI (Layer 1) |
+| `authoring` | `src/agent_hypervisor/authoring/` | Capability DSL & policy presets (Layer 2) |
+| `hypervisor` | `src/agent_hypervisor/hypervisor/` | PoC gateway, policy engine, provenance graph |
+| `economic` | `src/agent_hypervisor/economic/` | Budget enforcement & cost estimation |
+| `program_layer` | `src/agent_hypervisor/program_layer/` | Optional task compilation & workflow |
+
+### Package-Level Articles
+
+For every package (including `src/core`), maintain a page at `wiki/code/<package>.md`. Each page must cover:
+- **Purpose**: What this package is responsible for (one paragraph).
+- **Public API**: The symbols exported from `__init__.py`, with types and one-line descriptions.
+- **Key Modules**: A table listing every `.py` file, its primary class(es)/function(s), and a one-line description.
+- **Security Invariants**: Any invariants this package owns (construction-time sealing, monotonic taint, fail-closed defaults, etc.).
+- **Cross-references**: Links to related [concept pages](concepts/) and other code pages.
+
+### Module-Level Articles
+
+For every module that owns a significant security-relevant component, maintain a page at `wiki/code/modules/<module>.md`. Each page must cover:
+- **Source**: Deep link to the `.py` file (e.g., `src/agent_hypervisor/runtime/ir.py`).
+- **Purpose**: What problem this module solves.
+- **Key Types**: Classes/enums/dataclasses with field descriptions.
+- **Key Functions/Methods**: Signature, contract (inputs → outputs), and any exceptions raised.
+- **Invariants**: Invariants enforced by this module (and where in the code they are checked).
+- **Security Patterns Used**: e.g., Sealing, Immutability, Monotonic Lattice, Fail-Closed, Subprocess Boundary.
+
+### Significant modules that always warrant their own page:
+- `runtime/ir.py` → `wiki/code/modules/ir.md`
+- `runtime/taint.py` → `wiki/code/modules/taint.md`
+- `runtime/compile.py` → `wiki/code/modules/compile.md`
+- `runtime/channel.py` → `wiki/code/modules/channel.md`
+- `runtime/proxy.py` → `wiki/code/modules/proxy.md`
+- `runtime/executor.py` → `wiki/code/modules/executor.md`
+- `hypervisor/firewall.py` → `wiki/code/modules/firewall.md`
+- `core/hypervisor.py` → `wiki/code/modules/core_hypervisor.md`
+
+### Deep-Linking Convention for Source Code
+
+Always use repository-root-relative paths in Markdown links:
+```
+[IRBuilder](../../src/agent_hypervisor/runtime/ir.py)
+[compile_world()](../../src/agent_hypervisor/runtime/compile.py)
+[core/hypervisor.py](../../src/core/hypervisor.py)
+```
+When referencing a specific class or function, append the name as an anchor label in prose: e.g., "`IRBuilder.build()` ([ir.py](../../src/agent_hypervisor/runtime/ir.py))".
+
+### Code Ingest Workflow
+
+When ingesting Python code:
+1. Read the `__init__.py` of each package to identify public API.
+2. Read each module to extract classes, functions, invariants, and relationships.
+3. Create or update the corresponding `wiki/code/<package>.md` page.
+4. For significant modules, create or update `wiki/code/modules/<module>.md`.
+5. Update `wiki/code/index.md` with any new entries.
+6. Update `wiki/index.md` to catalog the `wiki/code/` section.
+7. Add an entry to `wiki/log.md`.
+
 ## Core Domain Context
 When writing, synthesize knowledge through the lens of the Agent Hypervisor architecture:
 - **Core Philosophy**: Deterministic virtualization of reality for AI agents. Ask "Does this action exist?" not "Is it forbidden?".
