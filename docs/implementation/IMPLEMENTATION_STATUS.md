@@ -1,15 +1,16 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 3 — End-to-end demo  
-**Branch**: `claude/continue-implementation-TsEYr`
+**Session**: Session 4 — Per-session WorldManifest bindings  
+**Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## Session Summary
 
-First implementation session. Completed all six phases in one pass.
-The MCP Gateway is now functional, tested, and committed.
+Session 4: Per-session manifest bindings (Option C from Session 3 handoff).
+Different sessions now operate in different worlds simultaneously.
+45 tests passing (was 32).
 
 ---
 
@@ -104,10 +105,25 @@ All 26 tests pass. Groups:
 
 ---
 
+### Session 4 — Per-session WorldManifest bindings
+
+- [x] `SessionWorldResolver.register_session(session_id, manifest_path)` — loads manifest immediately, fails closed on error
+- [x] `SessionWorldResolver.unregister_session(session_id)` — idempotent revert to default
+- [x] `SessionWorldResolver.session_registry()` — snapshot of active bindings
+- [x] `tools/list` and `tools/call` resolve per-session manifest via `provenance.session_id`
+- [x] Default renderer/enforcer cached; per-session ones built on-the-fly (lightweight)
+- [x] `POST /mcp/sessions/{session_id}/bind` — bind a session to a manifest path
+- [x] `DELETE /mcp/sessions/{session_id}` — unbind a session
+- [x] `GET /mcp/sessions` — list all active bindings
+- [x] Group 6: 13 new tests (7 unit + 6 HTTP integration) — all passing
+
+**Test results**: 45 passed (was 32).
+
+---
+
 ## Pending / Not Yet Done
 
 - [ ] Full SSE transport (streaming) — out of scope for Phase 1
-- [ ] Per-session manifest selection — architecture ready, not implemented
 - [ ] Full taint propagation integration — hooks in place, not wired to runtime taint
 - [ ] Auth / TLS — not in scope for this phase
 
@@ -121,14 +137,13 @@ None.
 
 ## Next Recommended Step
 
-**Option A (done)**: `examples/mcp_gateway/main.py` — complete, runnable, all
-5 scenarios passing.
+**Option B (SSE transport)**: Add SSE streaming transport to `/mcp/sse` so the
+gateway is compatible with MCP clients that require streaming (e.g., Claude
+Desktop). FastAPI supports SSE via `StreamingResponse`. The HTTP POST endpoint
+at `/mcp` stays unchanged; SSE is additive. This is the last major
+protocol-level gap.
 
-**Option B (SSE transport)**: Add SSE streaming transport so the gateway is
-compatible with MCP clients that require streaming. FastAPI supports SSE via
-`StreamingResponse` and `EventSourceResponse` (sse-starlette). The HTTP POST
-endpoint remains as-is; SSE is additive.
-
-**Option C (per-session manifests)**: `SessionWorldResolver.resolve(session_id, context)`
-already accepts a `session_id` argument. Wire it to a session registry (dict or
-Redis) so different sessions can be bound to different WorldManifests at runtime.
+**Option D (taint propagation)**: Wire `InvocationProvenance.trust_level` and
+`session_id` into the runtime `TaintContext` so values from untrusted external
+sessions carry taint that the provenance firewall can inspect. This closes the
+loop between the MCP gateway and the runtime invariants layer.

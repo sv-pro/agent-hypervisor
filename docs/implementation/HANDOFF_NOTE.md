@@ -1,83 +1,79 @@
 # Handoff Note
 
 **Date**: 2026-04-09  
-**Session**: Session 3 — End-to-end demo  
-**Branch**: `claude/continue-implementation-TsEYr`
+**Session**: Session 4 — Per-session WorldManifest bindings  
+**Branch**: `claude/continue-implementation-FpgJZ`
 
 ---
 
 ## What Was Just Done
 
-Created `examples/mcp_gateway/main.py` — a fully runnable, self-contained
-end-to-end demo of the MCP Gateway enforcement flow. Covers all key invariants
-from `docs/implementation/mcp_gateway_demo.md` in a single script.
+Implemented Option C from the Session 3 handoff: per-session WorldManifest
+bindings. Different sessions (agents/users) can now operate in different worlds
+simultaneously without gateway restart.
 
-### The demo
+### Changes
 
-```bash
-python examples/mcp_gateway/main.py
-```
+**`session_world_resolver.py`**
+- `register_session(session_id, manifest_path)` — loads the manifest
+  immediately; raises and does NOT register if loading fails (fail closed)
+- `unregister_session(session_id)` — removes binding, reverts to default;
+  idempotent (returns False if session was not registered)
+- `session_registry()` — returns `{session_id: workflow_id}` snapshot
+- `resolve(session_id)` — now checks `_session_registry` first; falls back to
+  default manifest if not found
 
-No extra dependencies. Uses stdlib `urllib.request` for HTTP; starts a real
-`uvicorn` server in a background daemon thread. Finds the repo root via
-`__file__`, so it works from any working directory.
+**`mcp_server.py`**
+- `_handle_tools_list` and `_handle_tools_call` now call
+  `state.resolver.resolve(session_id=provenance.session_id)` to get the
+  session's manifest, then `state.renderer_for(manifest)` /
+  `state.enforcer_for(manifest)` to get the right components
+- `renderer_for(manifest)` / `enforcer_for(manifest)` — return cached default
+  components if manifest is the default (common path), build on-the-fly
+  otherwise (lightweight)
+- New endpoints:
+  - `POST /mcp/sessions/{session_id}/bind` — body: `{"manifest_path": "..."}`
+  - `DELETE /mcp/sessions/{session_id}` — revert to default
+  - `GET /mcp/sessions` — list active bindings
+- `_BindSessionRequest` is a module-level Pydantic model (required for FastAPI
+  schema generation — do not move it inside `create_mcp_app`)
 
-### 5 scenarios, all verified passing:
+**`tests/hypervisor/test_mcp_gateway.py`** — Group 6: 13 new tests
+- 7 unit tests on `SessionWorldResolver` directly
+- 6 HTTP integration tests using `two_world_client` fixture (default + email worlds)
 
-| # | Scenario | Key check |
-|---|----------|-----------|
-| 1 | MCP initialize handshake | `protocolVersion`, `capabilities.tools`, `serverInfo` |
-| 2 | World rendering (`tools/list`) | Only `read_file` + `send_email` appear; `http_post` absent |
-| 3 | Fail closed (undeclared tool) | `http_post` → `manifest:tool_not_declared`, code -32001 |
-| 4 | Allow path (declared tool) | `read_file /etc/hostname` → result, `isError: false` |
-| 5 | World switch | Restart with `read_only_world.yaml` → `send_email` disappears |
-
-Each scenario prints `[PASS]`/`[FAIL]` per invariant and raises on failure.
-
-### Environment note
-
-The pytest binary runs under a separate uv-managed Python environment
-(`/root/.local/share/uv/tools/pytest/`). The package must be installed there:
-
-```bash
-/root/.local/share/uv/tools/pytest/bin/python -m pip install -e .
-/root/.local/share/uv/tools/pytest/bin/python -m pip install httpx pytest-asyncio
-```
-
-These were installed in this session. If a new session gets a fresh environment,
-re-run these two commands before running `pytest`.
+### Test results: 45 passed (was 32)
 
 ---
 
 ## What to Do Next
 
-**Option B (SSE transport)**: Add SSE streaming transport to `/mcp/sse`.
-FastAPI supports SSE via `StreamingResponse`. The HTTP POST endpoint at `/mcp`
-stays unchanged; SSE is additive. This makes the gateway compatible with MCP
-clients that require streaming (e.g., Claude Desktop).
+**Option B (SSE transport)**: Add SSE streaming transport at `/mcp/sse`.
+The MCP 2024-11-05 SSE transport works like this:
+1. Client GETs `/mcp/sse` → server sends `endpoint` event with a POST URL
+   (e.g., `/mcp/messages?session_id=<uuid>`)
+2. Client POSTs JSON-RPC requests to that URL
+3. Server sends responses back over the open SSE stream
 
-**Option C (per-session manifests)**: `SessionWorldResolver.resolve(session_id, context)`
-already accepts `session_id`. Wire it to a session registry dict so different
-sessions can get different WorldManifests at runtime. The gateway already
-passes `session_id` from provenance through to the resolver call.
+This requires:
+- An asyncio `Queue` per session for routing SSE responses
+- A `GET /mcp/sse` endpoint that opens the stream and sends the endpoint event
+- A `POST /mcp/messages` endpoint that routes responses back to the queue
+- `sse-starlette` package (or manual `StreamingResponse`) — add to
+  `pyproject.toml` optional deps
 
----
-
-## Files That Matter Most
-
-1. `examples/mcp_gateway/main.py` — new: end-to-end demo
-2. `src/agent_hypervisor/hypervisor/mcp_gateway/mcp_server.py` — `create_mcp_app()` + handlers
-3. `src/agent_hypervisor/hypervisor/mcp_gateway/tool_call_enforcer.py` — enforcement pipeline
-4. `manifests/example_world.yaml` — demo world (read_file + send_email)
-5. `manifests/read_only_world.yaml` — minimal world (read_file only)
-6. `tests/hypervisor/test_mcp_gateway.py` — 32 tests (Groups 1–5)
+**Option D (taint propagation)**: Wire `InvocationProvenance.trust_level` into
+`TaintContext` so values from external sources carry taint that is visible to
+the provenance firewall. The hook is already in place in the enforcer; the
+runtime taint layer needs to be imported and updated from the gateway.
 
 ---
 
-## What NOT to Break
+## Key Invariants to Preserve
 
-- `enforce()` must never raise — all error paths return deny decisions
-- The manifest-binding invariant: undeclared tools must remain absent from the
-  surface, not just denied at call time
-- `use_default_policy=False` default — existing callers continue to get
-  manifest-only enforcement unless they opt in
+- `enforce()` must never raise
+- Undeclared tools stay absent from the surface (not just denied)
+- `register_session()` must fail closed — if the manifest cannot be loaded,
+  the session must NOT be registered (no silent fallback to default)
+- `_BindSessionRequest` must remain at module level (FastAPI constraint)
+- `use_default_policy=False` default for `create_mcp_app` — unchanged
