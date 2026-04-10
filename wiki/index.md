@@ -24,6 +24,7 @@ This is the curated, content-oriented catalog of the Agent Hypervisor knowledge 
 - [compiler](code/compiler.md) - Layer 1 Base Ontology: manifest → deterministic policy artifacts; awc/ahc CLI
 - [authoring](code/authoring.md) - Layer 2 Dynamic Ontology: Capability DSL, World presets, MCP integration
 - [hypervisor](code/hypervisor.md) - PoC Gateway: HTTP server, ProvenanceFirewall, PolicyEngine, provenance graph
+- [control_plane](code/control_plane.md) - World Authoring Control Plane: session governance, action approvals, overlays, multi-scope approval system
 - [economic](code/economic.md) - Economic constraints: budget enforcement, cost estimation, pricing registry
 - [program_layer](code/program_layer.md) - Optional execution abstraction: sandbox runtime, program executor
 - [core](code/core.md) - Portable reference implementation: ManifestResolver, WorldManifest, invariants

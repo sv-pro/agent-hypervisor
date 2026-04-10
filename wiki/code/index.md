@@ -14,6 +14,7 @@ This section maps the Python codebase to the [Four-Layer Architecture](../concep
 | `src/agent_hypervisor/compiler` | [compiler](compiler.md) | Layer 1 — Base Ontology | Canonical |
 | `src/agent_hypervisor/authoring` | [authoring](authoring.md) | Layer 2 — Dynamic Ontology | Supported |
 | `src/agent_hypervisor/hypervisor` | [hypervisor](hypervisor.md) | PoC Gateway | Supported |
+| `src/agent_hypervisor/control_plane` | [control_plane](control_plane.md) | World Authoring Control Plane | Supported |
 | `src/agent_hypervisor/economic` | [economic](economic.md) | Economic Constraints | Supported |
 | `src/agent_hypervisor/program_layer` | [program_layer](program_layer.md) | Optional Execution Abstraction | Supported |
 
@@ -30,7 +31,7 @@ These modules own critical security invariants and warrant individual pages.
 | `runtime/proxy.py` | [SafeMCPProxy](modules/proxy.md) | In-path MCP enforcement |
 | `runtime/executor.py` | [Executor](modules/executor.md) | Subprocess transport & boundary |
 | `hypervisor/firewall.py` | [ProvenanceFirewall](modules/firewall.md) | Provenance-aware tool firewall |
-| `hypervisor/mcp_gateway/` | [AH MCP Gateway](modules/mcp_gateway.md) | JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage enforcement |
+| `hypervisor/mcp_gateway/` | [AH MCP Gateway](modules/mcp_gateway.md) | JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage enforcement; control-plane bridge |
 | `core/hypervisor.py` | [Core Hypervisor](modules/core_hypervisor.md) | Reference manifest resolver |
 
 ## Architectural Patterns

@@ -14,6 +14,7 @@ This section maps the Python codebase to the [Four-Layer Architecture](../concep
 | `src/agent_hypervisor/compiler` | [compiler.md](compiler.md) | Layer 1 — Base Ontology | YAML → deterministic policy artifacts; `awc`/`ahc` CLI; semantic compiler pipeline |
 | `src/agent_hypervisor/authoring` | [authoring.md](authoring.md) | Layer 2 — Dynamic Ontology | Capability DSL, named policy presets, MCP integration; design-time only |
 | `src/agent_hypervisor/hypervisor` | [hypervisor.md](hypervisor.md) | PoC Gateway | FastAPI gateway, PolicyEngine, ProvenanceFirewall, approval workflow, policy tuner |
+| `src/agent_hypervisor/control_plane` | [control_plane.md](control_plane.md) | World Authoring Control Plane | Session governance, action approvals, SessionOverlay, multi-scope approval system; sits beside the data plane |
 | `src/agent_hypervisor/economic` | [economic.md](economic.md) | Economic Constraints | Budget enforcement at IR construction time; conservative cost estimation without LLM |
 | `src/agent_hypervisor/program_layer` | [program_layer.md](program_layer.md) | Optional Execution Abstraction | Sandboxed program execution after all policy checks have passed |
 
@@ -30,7 +31,7 @@ The [`modules/`](modules/README.md) subdirectory contains individual pages for e
 | `runtime/proxy.py` | [modules/proxy.md](modules/proxy.md) | Single MCP enforcement point; typed denial kinds |
 | `runtime/executor.py` | [modules/executor.md](modules/executor.md) | Process boundary; main process never calls handlers |
 | `hypervisor/firewall.py` | [modules/firewall.md](modules/firewall.md) | Structural provenance rules; sticky derivation (RULE-03) |
-| `hypervisor/mcp_gateway/` | [modules/mcp_gateway.md](modules/mcp_gateway.md) | JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage enforcement |
+| `hypervisor/mcp_gateway/` | [modules/mcp_gateway.md](modules/mcp_gateway.md) | JSON-RPC 2.0 MCP gateway; manifest-driven tool visibility; 4-stage enforcement; control-plane bridge |
 | `core/hypervisor.py` | [modules/core_hypervisor.md](modules/core_hypervisor.md) | Deterministic resolution; physics laws override all rules |
 
 ## Architectural Patterns

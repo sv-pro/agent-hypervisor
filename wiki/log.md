@@ -1,5 +1,38 @@
 # Wiki Log
 
+## [2026-04-10] ingest | Control plane, gateway wiring, and multi-scope approval system
+
+Reflected PRs #88 and #89 into the wiki. Three major features landed:
+
+**1. World Authoring Control Plane (`src/agent_hypervisor/control_plane/`)** — new package introducing:
+- `domain.py`: `Session`, `ActionApproval`, `SessionOverlay`, `OverlayChanges`, `WorldStateView`, `ScopedVerdict`, `ParticipantRegistration`, `compute_action_fingerprint`
+- `session_store.py`, `event_store.py`: session lifecycle and append-only audit log
+- `approval_service.py`: fingerprint-bound, TTL-governed action approvals
+- `overlay_service.py`, `world_state_resolver.py`: session-scoped world augmentation
+- `api.py` (`ControlPlaneState`, `create_control_plane_router`): 16-endpoint FastAPI router
+
+**2. Gateway Wiring (PR #88)** — `mcp_server.py` + `tool_call_enforcer.py`:
+- `MCPGatewayState.control_plane` field
+- `EnforcementDecision.asked` property; `ask` verdicts route to `ApprovalService` (fail-closed without CP)
+- SSE sessions auto-register with `SessionStore`
+- `tools/list` uses `WorldStateResolver` when overlays are active
+- `create_mcp_app()` auto-mounts `/control/*` router when CP provided
+
+**3. Multi-scope Approval System (PR #89)** — Phase 8:
+- `ScopedVerdict`, `ParticipantRegistration` domain types
+- `ParticipantRegistry`: registered SSE sessions eligible to vote
+- `ApprovalBroadcaster`: fan-out of `approval_requested` / `approval_resolved` events to SSE queues
+- `ApprovalService.respond()`: idempotent per-scope verdict processing; status `pending → partially_resolved → resolved`
+- `ApprovalService.has_explicit_allow()`: strict gateway pre-check
+- New API endpoints: POST/DELETE/GET `/control/participants`; PATCH `/control/approvals/{id}/respond`
+
+Updated:
+- `wiki/code/control_plane.md` — **created** (package-level article)
+- `wiki/code/modules/mcp_gateway.md` — updated enforcement pipeline diagram (ask routing), Control Plane Integration section, updated HTTP API reference, updated security invariants
+- `wiki/code/index.md` — added `control_plane` row to Package Map
+- `wiki/code/README.md` — added `control_plane` row to Packages table
+- `wiki/index.md` — added `control_plane` link under Code Documentation → Packages
+
 ## [2026-04-09] ingest | Ingested Python source code under src/
 
 Read all Python modules in `src/core/` and `src/agent_hypervisor/` (7 sub-packages, ~60 modules). Synthesized package-level and module-level wiki articles, and updated `PROMPT.txt` to include a formal Python code integration schema.

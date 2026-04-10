@@ -58,9 +58,9 @@ MCP Client (Claude / Cursor / any agent)
 | `__init__.py` | `create_mcp_app` | Public API; re-exports all key symbols |
 | `protocol.py` | `JSONRPCRequest`, `JSONRPCResponse`, `MCPTool`, `MCPToolResult`, error codes | JSON-RPC 2.0 wire types and MCP-specific error codes |
 | `tool_surface_renderer.py` | `ToolSurfaceRenderer` | Renders the visible tool surface for `tools/list` |
-| `tool_call_enforcer.py` | `ToolCallEnforcer`, `EnforcementDecision`, `InvocationProvenance` | 4-stage deterministic enforcement pipeline |
+| `tool_call_enforcer.py` | `ToolCallEnforcer`, `EnforcementDecision`, `InvocationProvenance` | 4-stage deterministic enforcement pipeline; `asked` property for control-plane routing |
 | `session_world_resolver.py` | `SessionWorldResolver` | Maps session IDs to WorldManifest instances |
-| `mcp_server.py` | `create_mcp_app`, `MCPGatewayState` | FastAPI app factory; all HTTP and SSE endpoints |
+| `mcp_server.py` | `create_mcp_app`, `MCPGatewayState` | FastAPI app factory; all HTTP and SSE endpoints; optional control-plane bridge |
 | `sse_transport.py` | `SSESessionStore` | Registry of active SSE sessions and stream helpers |
 
 ---
@@ -82,9 +82,13 @@ tools/call {name, arguments}
     │  No → deny, rule=registry:no_adapter
     │
     ▼  Stage 3: Policy engine check (optional)
-    │  PolicyEngine.evaluate() returns deny or ask?
-    │  Yes → deny, rule=policy:<matched_rule>
-    │         (ask is treated as deny — fail closed)
+    │  PolicyEngine.evaluate() returns deny → deny, rule=policy:<matched_rule>
+    │  PolicyEngine.evaluate() returns ask →
+    │    ├─ control plane present:
+    │    │    pre-check has_explicit_allow()
+    │    │      True  → continue to Stage 4 (execute directly)
+    │    │      False → route to ApprovalService (return approval_pending response)
+    │    └─ no control plane → deny, fail closed
     │
     ▼  Stage 4: Manifest constraint check
     │  cap.allows(tool_name, arguments)?
@@ -94,12 +98,15 @@ tools/call {name, arguments}
        allow, rule=manifest:allowed
 ```
 
+`EnforcementDecision` now exposes three boolean properties: `allowed`, `denied`, and `asked`. The `asked` verdict is only meaningful when the gateway has a control plane attached; callers without a control plane must treat `asked` as `denied` (fail closed).
+
 **Invariants:**
 - No LLM in this path.
 - Same input → same output (deterministic).
 - Unknown tool → deny, never allow.
 - If `manifest is None` (startup failure) → deny all.
 - Policy engine errors → deny (fail closed, not fail open).
+- `ask` without a control plane → deny (fail closed, not fail open).
 
 ---
 
@@ -205,6 +212,8 @@ A keep-alive comment is sent every ~25 s to prevent proxy timeouts.
 
 ## HTTP API Reference
 
+### MCP Data Plane
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/mcp` | JSON-RPC 2.0 dispatcher (HTTP transport) |
@@ -215,6 +224,19 @@ A keep-alive comment is sent every ~25 s to prevent proxy timeouts.
 | `POST` | `/mcp/sessions/{session_id}/bind` | Bind session to a specific manifest |
 | `DELETE` | `/mcp/sessions/{session_id}` | Unbind session; revert to default |
 | `GET` | `/mcp/sessions` | List all active per-session bindings |
+
+### Control Plane (mounted when `control_plane` is provided)
+
+See [Package: control_plane](../control_plane.md) for the full control plane API reference. Summary:
+
+| Prefix | Routes | Description |
+|--------|--------|-------------|
+| `/control/sessions` | CRUD + mode | Session lifecycle management |
+| `/control/sessions/{id}/world` | GET | Live WorldStateView (base + overlays) |
+| `/control/sessions/{id}/events` | GET | Append-only audit log |
+| `/control/approvals` | GET, resolve, respond | Approval listing and multi-scope verdict submission |
+| `/control/sessions/{id}/overlays` | CRUD | Session overlay management |
+| `/control/participants` | CRUD | Participant registration for approval voting |
 
 ### Per-session manifest binding
 
@@ -260,6 +282,26 @@ Any other method returns JSON-RPC error `-32601` (Method not found).
 
 ---
 
+## Control Plane Integration
+
+When `create_mcp_app()` receives a `ControlPlaneState`, the gateway and control plane are bridged automatically:
+
+1. **Router mount** — the `/control/*` router is mounted on the FastAPI app.
+2. **Manifest bridge** — `get_base_manifest` callback is configured to read from `SessionWorldResolver`, so world-state endpoints reflect the live manifest.
+3. **Auto-registration** — sessions opened via `GET /mcp/sse` are automatically registered in `SessionStore`.
+4. **`ask` routing** — instead of failing closed on `ask` verdicts, the gateway calls `ApprovalService.request_approval()`. A pre-check via `has_explicit_allow()` lets already-approved actions skip the approval queue and execute directly.
+5. **Overlay-aware rendering** — `tools/list` uses `WorldStateResolver` when the session has active overlays, so revealed or hidden tools are reflected immediately in the visible surface.
+
+```python
+from agent_hypervisor.hypervisor.mcp_gateway import create_mcp_app
+from agent_hypervisor.control_plane import ControlPlaneState
+
+cp = ControlPlaneState.create()
+app = create_mcp_app("manifests/example_world.yaml", control_plane=cp)
+```
+
+---
+
 ## Usage
 
 ```python
@@ -277,6 +319,11 @@ app = create_mcp_app("manifests/example_world.yaml", use_default_policy=True)
 from agent_hypervisor.hypervisor.policy_engine import PolicyEngine
 engine = PolicyEngine.from_yaml("configs/my_policy.yaml")
 app = create_mcp_app("manifests/example_world.yaml", policy_engine=engine)
+
+# With full control plane (approval workflow + overlays)
+from agent_hypervisor.control_plane import ControlPlaneState
+cp = ControlPlaneState.create()
+app = create_mcp_app("manifests/example_world.yaml", control_plane=cp)
 ```
 
 **Quick test:**
@@ -308,18 +355,22 @@ curl -s -X POST http://127.0.0.1:8090/mcp \
 | Undeclared tool call always fails with `-32001` | `ToolCallEnforcer` Stage 1 |
 | Missing adapter always fails with `-32001` | `ToolCallEnforcer` Stage 2 |
 | Policy engine error → deny, not allow | `ToolCallEnforcer._evaluate_policy()` |
+| `ask` without a control plane → deny (fail closed) | `mcp_server._handle_tools_call()` |
 | Manifest load failure → gateway does not start | `SessionWorldResolver.__init__()` |
 | Per-session bind failure → session not registered | `SessionWorldResolver.register_session()` |
 | Reload failure → existing manifest retained | `SessionWorldResolver.reload()` |
 | Taint context always set on `EnforcementDecision` | `ToolCallEnforcer.enforce()` |
 | `trust_level` defaults to `"untrusted"` (TAINTED) | `InvocationProvenance` dataclass default |
 | Tool results always wrapped in `TaintedValue` | `mcp_server._handle_tools_call()` |
+| Overlay-revealed tools still pass enforcement pipeline | `ToolCallEnforcer` runs regardless of overlay source |
+| `has_explicit_allow()` required before bypassing approval queue | `mcp_server._handle_tools_call()` pre-check |
 
 ---
 
 ## See Also
 
 - [Package: hypervisor](../hypervisor.md) — parent package; PoC gateway, PolicyEngine, ProvenanceFirewall
+- [Package: control_plane](../control_plane.md) — control plane package; approval workflow, overlays, participant registry
 - [Taint Engine](taint.md) — monotonic taint lattice that `taint_context` plugs into
 - [ProvenanceFirewall](firewall.md) — structural provenance rules (the optional Stage 3 policy)
 - [World Manifest](../../concepts/world-manifest.md) — the manifest that defines the agent's world
