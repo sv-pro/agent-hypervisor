@@ -1,0 +1,565 @@
+# schema_v2.yaml — World Manifest v2.0 Annotated Reference Schema
+#
+# This file is the canonical reference for the v2 manifest format.
+# Copy and customize it for your deployment.
+#
+# Version 2.0 extends v1 with a structured world model:
+#   - entities         Named objects in the agent's world
+#   - actors           Execution participants with trust tiers
+#   - data_classes     Classifications for data flowing through the system
+#   - trust_zones      Named regions with trust boundaries
+#   - confirmation_classes  Human-review requirements
+#   - side_effect_surfaces  Explicit per-action touch surfaces
+#   - transition_policies   Zone-crossing rules
+#   - observability    Per-action audit configuration
+#
+# Required sections: manifest, actions, trust_channels, capability_matrix
+# All other sections are optional but recommended for full policy expressiveness.
+#
+# Supersedes: schema v1.0 (see docs/adr/ADR-001-manifest-schema-versioning.md)
+
+version: "2.0"  # must be exactly "2.0"
+
+manifest:                         # (required) manifest identity
+  name: my-agent-world            # (required) unique identifier for this manifest
+  description: >                  # (optional) human-readable description
+    Replace this with a description of the world this manifest defines and
+    what the agent is permitted to do within it.
+
+
+# ── World Model: Entities ──────────────────────────────────────────────────────
+# Named objects that exist in the agent's world.
+# Entities are referenced by trust_zones and side_effect_surfaces.
+#
+# type:              free-form label (user, account, document, queue, mailbox, contact, ...)
+# data_class:        references a data_classes entry — drives taint and confirmation policy
+# identity_fields:   fields that uniquely identify instances of this entity
+# description:       human-readable note
+
+entities:                         # (optional)
+
+  user_inbox:
+    type: mailbox
+    data_class: internal
+    description: The authenticated user's email inbox
+    identity_fields: [owner_email]
+
+  external_contact:
+    type: contact
+    data_class: pii
+    description: An external email recipient or calendar participant
+    identity_fields: [email_address]
+
+  shared_drive:
+    type: document_store
+    data_class: internal
+    description: The user's file storage
+    identity_fields: [file_id]
+
+
+# ── World Model: Actors ────────────────────────────────────────────────────────
+# Execution participants. Each actor has an explicit trust tier and a bounded
+# permission scope (list of capability names from capability_matrix).
+#
+# type:             agent | sub_agent | service | human
+# trust_tier:       TRUSTED | SEMI_TRUSTED | UNTRUSTED
+# permission_scope: capabilities this actor is granted
+
+actors:                           # (optional)
+
+  primary_agent:
+    type: agent
+    trust_tier: TRUSTED
+    permission_scope:
+      - read_only
+      - internal_write
+      - external_boundary
+    description: The primary executing agent operating on behalf of the user
+
+  external_email_service:
+    type: service
+    trust_tier: UNTRUSTED
+    permission_scope: []
+    description: External SMTP relay — receives outbound mail, sends no replies into the world
+
+  human_operator:
+    type: human
+    trust_tier: TRUSTED
+    permission_scope:
+      - read_only
+      - internal_write
+      - external_boundary
+      - approve_irreversible
+    description: The authenticated human user who owns this world
+
+
+# ── World Model: Data Classes ──────────────────────────────────────────────────
+# Classifications for data flowing through the system. Data classes drive:
+#   - taint_label:  the taint label applied when this data is marked
+#   - confirmation: the minimum confirmation class required to handle it
+#   - retention:    how long audit records are kept (session, 90d, 365d, forever)
+
+data_classes:                     # (optional)
+
+  public:
+    description: Publicly available data — no handling restrictions
+    taint_label: clean
+    confirmation: auto
+    retention: "session"
+
+  internal:
+    description: Internal data — must not leave the system boundary without review
+    taint_label: internal
+    confirmation: soft_confirm
+    retention: "90d"
+
+  pii:
+    description: Personally identifiable information (names, email addresses, phone numbers)
+    taint_label: pii
+    confirmation: hard_confirm
+    retention: "365d"
+
+  credentials:
+    description: Authentication tokens, passwords, API keys, session tokens
+    taint_label: credentials
+    confirmation: require_human
+    retention: "never"
+
+  financial:
+    description: Financial data — payment details, transaction records
+    taint_label: financial
+    confirmation: require_human
+    retention: "forever"
+
+
+# ── World Model: Trust Zones ───────────────────────────────────────────────────
+# Named regions of the world with trust boundaries.
+# TransitionPolicies govern what data can cross zone boundaries.
+#
+# default_trust: TRUSTED | SEMI_TRUSTED | UNTRUSTED
+# entities:      list of entity names that reside in this zone
+
+trust_zones:                      # (optional)
+
+  internal_workspace:
+    description: The agent's internal workspace — trusted execution environment
+    default_trust: TRUSTED
+    entities:
+      - user_inbox
+      - shared_drive
+
+  external_network:
+    description: The external internet and third-party services
+    default_trust: UNTRUSTED
+    entities:
+      - external_contact
+
+
+# ── Confirmation Classes ───────────────────────────────────────────────────────
+# Named human-review requirements. The four standard classes are defined here;
+# add custom classes for domain-specific workflows.
+#
+# blocking: true  — execution blocks until a human responds
+# blocking: false — execution proceeds but the event is logged / gated
+
+confirmation_classes:             # (optional)
+
+  auto:
+    description: No confirmation needed — execute immediately
+    blocking: false
+
+  soft_confirm:
+    description: Agent-level gate — dry-run, log, but do not block execution
+    blocking: false
+
+  hard_confirm:
+    description: Requires approval before execution (non-blocking wait)
+    blocking: true
+
+  require_human:
+    description: Blocks execution until explicit human sign-off is received
+    blocking: true
+
+
+# ── Side Effect Surfaces ───────────────────────────────────────────────────────
+# Explicit declaration of what each action can touch.
+# Replaces the coarse side_effects list from v1. Each entry names the action,
+# the entities and zones it touches, and the data classes it can affect.
+
+side_effect_surfaces:             # (optional)
+
+  - action: send_email
+    touches:
+      - external_contact         # entity touched
+      - external_network         # zone crossed
+    data_classes_affected:
+      - pii
+      - internal
+    description: Sends data across the external boundary to external contacts
+
+  - action: delete_file
+    touches:
+      - shared_drive
+      - internal_workspace
+    data_classes_affected:
+      - internal
+    description: Permanently removes a file from the internal workspace
+
+  - action: share_file
+    touches:
+      - shared_drive
+      - external_contact
+      - external_network
+    data_classes_affected:
+      - internal
+      - pii
+    description: Grants external access to an internal file
+
+
+# ── Transition Policies ────────────────────────────────────────────────────────
+# Allowed and forbidden data transitions between trust zones.
+# allowed: false entries are enforced as hard denials at the zone boundary.
+# allowed: true entries specify the confirmation class required for the crossing.
+
+transition_policies:              # (optional)
+
+  - from_zone: internal_workspace
+    to_zone: external_network
+    allowed: false
+    confirmation: require_human
+    description: >
+      Internal data must not reach the external network without explicit
+      human sign-off. This policy is the primary containment for injection attacks.
+
+  - from_zone: external_network
+    to_zone: internal_workspace
+    allowed: true
+    confirmation: soft_confirm
+    description: >
+      External data enters as tainted input. It is allowed in but tagged
+      and tracked throughout the internal workspace.
+
+
+# ── Observability ──────────────────────────────────────────────────────────────
+# Per-action audit configuration.
+# defaults:     applied to all actions unless a per_action override exists
+# per_action:   overrides for specific actions (merged with defaults)
+#
+# log_fields:      fields to include in every audit record for this action
+# redact_fields:   fields to record as "[REDACTED]" — never log in plaintext
+# retain_duration: how long audit records for this action are kept
+
+observability:                    # (optional)
+
+  defaults:
+    log_fields:
+      - action
+      - timestamp
+      - actor
+      - decision
+    redact_fields: []
+    retain_duration: "90d"
+
+  per_action:
+
+    send_email:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - recipients
+        - subject
+        - decision
+      redact_fields:
+        - body                    # email body is never logged in plaintext
+      retain_duration: "365d"
+
+    delete_file:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - file_id
+        - decision
+      redact_fields: []
+      retain_duration: "forever"  # deletions are retained indefinitely
+
+    share_file:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - file_id
+        - recipients
+        - decision
+      redact_fields: []
+      retain_duration: "365d"
+
+
+# ── Defaults (fail-closed) ────────────────────────────────────────────────────
+# Every unknown or unhandled case defaults to deny.
+
+defaults:
+  unknown_action: deny
+  unknown_tool: deny
+  missing_capability: deny
+  schema_mismatch: deny
+  tainted_external: deny
+  unknown_transformation_taint: preserve   # fail-closed for unknown transforms
+
+
+# ── Trust Channels ────────────────────────────────────────────────────────────
+# Input sources and their default trust levels.
+# taint_by_default: true — all input from this channel is tainted until proven clean
+
+trust_channels:                   # (required)
+
+  user:
+    trust_level: TRUSTED
+    taint_by_default: false
+    description: Direct human input via the user interface
+
+  email:
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Email content from external senders
+
+  file:
+    trust_level: SEMI_TRUSTED
+    taint_by_default: true
+    description: File content read from storage
+
+  web:
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Content fetched from the web
+
+  agent:
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Input from a sub-agent or external agent (untrusted by default)
+
+
+# ── Trust Levels ──────────────────────────────────────────────────────────────
+# Ordered from least to most privileged.
+# The order determines which capabilities are cumulative.
+
+trust_levels:                     # (required)
+  - UNTRUSTED
+  - SEMI_TRUSTED
+  - TRUSTED
+
+
+# ── Capability Matrix ─────────────────────────────────────────────────────────
+# Maps trust_level -> list of capabilities granted at that level.
+# Principle of least privilege: higher trust adds capabilities cumulatively.
+
+capability_matrix:                # (required)
+
+  UNTRUSTED:
+    - read_only
+
+  SEMI_TRUSTED:
+    - read_only
+    - internal_write
+
+  TRUSTED:
+    - read_only
+    - internal_write
+    - external_boundary
+    - approve_irreversible
+
+
+# ── Action Schemas ────────────────────────────────────────────────────────────
+# Minimal required parameter schemas for type-safe normalisation (INV-004).
+# Only required parameters are listed. Unknown parameters => deny.
+
+schemas:                          # (optional)
+
+  send_email:
+    recipients:
+      type: list
+      required: true
+    subject:
+      type: str
+      required: true
+    body:
+      type: str
+      required: true
+
+  delete_file:
+    file_id:
+      type: str
+      required: true
+
+  share_file:
+    file_id:
+      type: str
+      required: true
+    recipients:
+      type: list
+      required: true
+
+
+# ── Actions (ontology) ────────────────────────────────────────────────────────
+# Every action that can exist must be declared here.
+# Undeclared actions => deny (fail-closed, INV-001/INV-012).
+#
+# v1 fields (preserved):
+#   reversible:             true | false
+#   side_effects:           [internal_read | internal_write | external_read | external_write]
+#
+# v2 additions:
+#   action_class:           read_only | reversible_internal | irreversible_internal | external_boundary
+#   risk_class:             low | medium | high | critical
+#   required_capabilities:  list of capability names
+#   requires_approval:      true | false (whether requires_approval gate triggers)
+#   irreversible:           true | false
+#   external_boundary:      true | false (crosses into external_network zone)
+#   taint_passthrough:      true | false (taint on input propagates to output)
+#   confirmation_class:     references a confirmation_classes entry
+#   description:            human-readable note
+
+actions:                          # (required)
+
+  # ── Read-only ──────────────────────────────────────────────────────────────
+
+  read_emails:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Retrieve emails from the inbox
+
+  list_files:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: auto
+    description: List available files in storage
+
+  # ── Reversible internal ───────────────────────────────────────────────────
+
+  create_file:
+    reversible: true
+    side_effects: [internal_write]
+    action_class: reversible_internal
+    risk_class: low
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Create a new file in storage
+
+  # ── Irreversible internal ─────────────────────────────────────────────────
+
+  delete_file:
+    reversible: false
+    side_effects: [internal_write]
+    action_class: irreversible_internal
+    risk_class: high
+    required_capabilities: [approve_irreversible]
+    requires_approval: true
+    irreversible: true
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: hard_confirm
+    description: Permanently delete a file — irreversible
+
+  # ── External boundary ─────────────────────────────────────────────────────
+
+  send_email:
+    reversible: false
+    side_effects: [external_write]
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false       # taint containment is the primary defence
+    irreversible: true
+    external_boundary: true
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Send email to external recipients — crosses external boundary
+
+  share_file:
+    reversible: false
+    side_effects: [external_write]
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false       # taint containment is the primary defence
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Share a file with external recipients — crosses external boundary
+
+
+# ── Taint Rules ───────────────────────────────────────────────────────────────
+# (taint_label, operation) -> "clear" | "preserve"
+# Only explicit "clear" rules lift taint. Everything else is preserved (fail-closed).
+# INV-011: taint propagates through transformations unless explicitly cleared.
+
+taint_rules:                      # (optional)
+
+  - source_taint: tainted
+    operation: summarize
+    result: preserve
+
+  - source_taint: tainted
+    operation: quote
+    result: preserve
+
+  - source_taint: tainted
+    operation: extract
+    result: preserve
+
+  - source_taint: tainted
+    operation: derive
+    result: preserve
+
+
+# ── Escalation Rules ──────────────────────────────────────────────────────────
+# Defines when an action escalates to require_approval.
+# These fire only when requires_approval=true on the action definition.
+
+escalation_rules:                 # (optional)
+
+  send_email:
+    condition: tainted
+    reason: "send_email with tainted context denied — injection containment"
+    rule_id: "ESC-001"
+
+  share_file:
+    condition: tainted
+    reason: "share_file with tainted context denied — injection containment"
+    rule_id: "ESC-002"
+
+  delete_file:
+    condition: tainted
+    reason: "delete_file with tainted context denied — injection containment"
+    rule_id: "ESC-003"
+
+
+# ── Provenance Policy ─────────────────────────────────────────────────────────
+
+provenance_policy:                # (optional)
+  track_all_channels: true
+  inter_agent_default_trust: UNTRUSTED
+  propagate_through_summarize: true
+  propagate_through_quote: true
+  propagate_through_extract: true

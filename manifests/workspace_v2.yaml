@@ -1,0 +1,1018 @@
+# workspace_v2.yaml — Fail-closed manifest v2.0 for the AgentDojo workspace suite.
+#
+# This is the canonical v2 rewrite of the workspace manifest, extending the v1
+# action ontology with full world-model context: entities, actors, data classes,
+# trust zones, confirmation classes, side effect surfaces, transition policies,
+# and observability specification.
+#
+# The v2 world model enables data-flow policies that v1 could not express:
+#   - PII containment: email bodies and recipient lists tagged as pii
+#   - Credential isolation: no credential data may reach external_boundary actions
+#   - Internal-to-external denial: data cannot flow from internal_workspace
+#     to external_network without an explicit allowed transition
+#
+# Architecture: ontology-first, provenance-aware, deterministic enforcement.
+# Default behaviour: DENY everything not explicitly defined and permitted.
+#
+# Invariants enforced:
+#   INV-001  Unknown action => deny
+#   INV-002  Missing manifest => deny
+#   INV-004  Schema mismatch => deny
+#   INV-005  Capability missing => deny
+#   INV-006  Tainted external action => deny
+#   INV-007  High-risk action => require approval, never silently allow
+#   INV-012  Actions not in ontology do not exist
+#   INV-014  Irreversible internal != harmless write
+#   INV-015  Approval path is explicit, narrow, auditable
+
+version: "2.0"
+
+manifest:
+  name: workspace-suite-v2
+  description: >
+    World manifest for the AgentDojo workspace suite. Defines the complete
+    action ontology, trust model, and data-flow policy for an email/calendar/
+    file-management agent operating on behalf of a human user.
+
+
+# ── World Model: Entities ──────────────────────────────────────────────────────
+# Named objects in the workspace world.
+
+entities:
+
+  user_inbox:
+    type: mailbox
+    data_class: internal
+    description: The authenticated user's email inbox
+    identity_fields: [owner_email]
+
+  user_sent:
+    type: mailbox
+    data_class: internal
+    description: The authenticated user's sent mail folder
+    identity_fields: [owner_email]
+
+  external_contact:
+    type: contact
+    data_class: pii
+    description: An external email recipient or calendar participant
+    identity_fields: [email_address]
+
+  shared_drive:
+    type: document_store
+    data_class: internal
+    description: The user's file storage
+    identity_fields: [file_id]
+
+  calendar:
+    type: calendar
+    data_class: internal
+    description: The user's personal calendar
+    identity_fields: [owner_email]
+
+  calendar_event:
+    type: event
+    data_class: internal
+    description: A single calendar event, which may include external participants
+    identity_fields: [event_id]
+
+
+# ── World Model: Actors ────────────────────────────────────────────────────────
+
+actors:
+
+  primary_agent:
+    type: agent
+    trust_tier: TRUSTED
+    permission_scope:
+      - read_only
+      - internal_write
+      - external_boundary
+    description: The primary executing agent operating on behalf of the human user
+
+  human_user:
+    type: human
+    trust_tier: TRUSTED
+    permission_scope:
+      - read_only
+      - internal_write
+      - external_boundary
+      - approve_irreversible
+    description: The authenticated human user who owns this workspace
+
+  email_service:
+    type: service
+    trust_tier: UNTRUSTED
+    permission_scope: []
+    description: External SMTP/IMAP service — provides email content as tainted input
+
+  calendar_service:
+    type: service
+    trust_tier: SEMI_TRUSTED
+    permission_scope: []
+    description: Calendar backend — trusted for reads, untrusted for invite content
+
+
+# ── World Model: Data Classes ──────────────────────────────────────────────────
+
+data_classes:
+
+  public:
+    description: Publicly available data — no handling restrictions
+    taint_label: clean
+    confirmation: auto
+    retention: session
+
+  internal:
+    description: Internal data — must not leave the workspace boundary without review
+    taint_label: internal
+    confirmation: soft_confirm
+    retention: 90d
+
+  pii:
+    description: >
+      Personally identifiable information — email addresses, names, phone numbers,
+      meeting attendee lists
+    taint_label: pii
+    confirmation: hard_confirm
+    retention: 365d
+
+  credentials:
+    description: Authentication tokens, passwords, API keys, session cookies
+    taint_label: credentials
+    confirmation: require_human
+    retention: never
+
+  email_content:
+    description: >
+      Email body content from external senders — always tainted at ingestion.
+      Primary injection vector in the workspace suite.
+    taint_label: tainted
+    confirmation: hard_confirm
+    retention: 90d
+
+
+# ── World Model: Trust Zones ───────────────────────────────────────────────────
+
+trust_zones:
+
+  internal_workspace:
+    description: >
+      The agent's trusted execution environment. Includes the user's inbox,
+      calendar, and file storage. Data here is internal by default.
+    default_trust: TRUSTED
+    entities:
+      - user_inbox
+      - user_sent
+      - shared_drive
+      - calendar
+      - calendar_event
+
+  external_network:
+    description: >
+      The external internet — external contacts, email recipients, calendar
+      invite recipients. Data here is untrusted by default.
+    default_trust: UNTRUSTED
+    entities:
+      - external_contact
+
+
+# ── Confirmation Classes ───────────────────────────────────────────────────────
+
+confirmation_classes:
+
+  auto:
+    description: No confirmation needed — execute immediately
+    blocking: false
+
+  soft_confirm:
+    description: Agent-level gate — log and proceed; no execution block
+    blocking: false
+
+  hard_confirm:
+    description: Requires human approval before execution
+    blocking: true
+
+  require_human:
+    description: Blocks execution until explicit human sign-off received
+    blocking: true
+
+
+# ── Side Effect Surfaces ───────────────────────────────────────────────────────
+# Explicit declaration of what each action can touch.
+
+side_effect_surfaces:
+
+  - action: send_email
+    touches:
+      - external_contact
+      - external_network
+      - user_sent
+    data_classes_affected:
+      - pii
+      - internal
+      - email_content
+    description: Sends data across the external boundary to external contacts
+
+  - action: share_file
+    touches:
+      - external_contact
+      - external_network
+      - shared_drive
+    data_classes_affected:
+      - pii
+      - internal
+    description: Grants external access to an internal file
+
+  - action: create_calendar_event_with_participants
+    touches:
+      - external_contact
+      - external_network
+      - calendar
+    data_classes_affected:
+      - pii
+      - internal
+    description: Creates calendar event and sends invites to external participants
+
+  - action: add_calendar_event_participants
+    touches:
+      - external_contact
+      - external_network
+      - calendar_event
+    data_classes_affected:
+      - pii
+      - internal
+    description: Adds external participants to an existing calendar event
+
+  - action: delete_file
+    touches:
+      - shared_drive
+      - internal_workspace
+    data_classes_affected:
+      - internal
+    description: Permanently removes a file from internal storage
+
+  - action: delete_email
+    touches:
+      - user_inbox
+      - internal_workspace
+    data_classes_affected:
+      - internal
+      - email_content
+    description: Permanently removes an email from the inbox
+
+
+# ── Transition Policies ────────────────────────────────────────────────────────
+
+transition_policies:
+
+  - from_zone: internal_workspace
+    to_zone: external_network
+    allowed: false
+    confirmation: require_human
+    description: >
+      Internal workspace data must not reach the external network without
+      explicit human approval. This is the primary injection-containment policy.
+
+  - from_zone: external_network
+    to_zone: internal_workspace
+    allowed: true
+    confirmation: soft_confirm
+    description: >
+      External data enters as tainted input and is tracked throughout the
+      internal workspace. Permitted but logged.
+
+
+# ── Observability ──────────────────────────────────────────────────────────────
+
+observability:
+
+  defaults:
+    log_fields:
+      - action
+      - timestamp
+      - actor
+      - decision
+      - taint_status
+    redact_fields: []
+    retain_duration: 90d
+
+  per_action:
+
+    send_email:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - recipients
+        - subject
+        - decision
+        - taint_status
+      redact_fields:
+        - body                    # email body is never logged in plaintext
+      retain_duration: 365d
+
+    share_file:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - file_id
+        - recipients
+        - decision
+        - taint_status
+      redact_fields: []
+      retain_duration: 365d
+
+    delete_file:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - file_id
+        - decision
+      redact_fields: []
+      retain_duration: forever
+
+    delete_email:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - email_id
+        - decision
+      redact_fields: []
+      retain_duration: forever
+
+    create_calendar_event_with_participants:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - participants
+        - title
+        - decision
+        - taint_status
+      redact_fields: []
+      retain_duration: 365d
+
+    add_calendar_event_participants:
+      log_fields:
+        - action
+        - timestamp
+        - actor
+        - event_id
+        - participants
+        - decision
+        - taint_status
+      redact_fields: []
+      retain_duration: 365d
+
+
+# ── Defaults (fail-closed) ────────────────────────────────────────────────────
+
+defaults:
+  unknown_action: deny
+  unknown_tool: deny
+  missing_capability: deny
+  schema_mismatch: deny
+  tainted_external: deny
+  unknown_transformation_taint: preserve
+
+
+# ── Trust Channels ────────────────────────────────────────────────────────────
+
+trust_channels:
+  user:
+    trust_level: TRUSTED
+    taint_by_default: false
+    description: Direct human input via the user interface
+  email:
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Email content from external senders — primary injection vector
+  web:
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Web page content fetched from the internet
+  file:
+    trust_level: SEMI_TRUSTED
+    taint_by_default: true
+    description: File content from local storage
+  mcp:
+    trust_level: SEMI_TRUSTED
+    taint_by_default: true
+    description: Model Context Protocol tool outputs
+  agent:
+    trust_level: UNTRUSTED
+    taint_by_default: true
+    description: Input from another agent — untrusted by default (INV-006)
+
+
+# ── Trust Levels ──────────────────────────────────────────────────────────────
+
+trust_levels:
+  - UNTRUSTED
+  - SEMI_TRUSTED
+  - TRUSTED
+
+
+# ── Capability Matrix ─────────────────────────────────────────────────────────
+
+capability_matrix:
+  UNTRUSTED:
+    - read_only
+  SEMI_TRUSTED:
+    - read_only
+    - internal_write
+  TRUSTED:
+    - read_only
+    - internal_write
+    - external_boundary
+    - approve_irreversible
+
+
+# ── Action Schemas ────────────────────────────────────────────────────────────
+
+schemas:
+  send_email:
+    recipients:
+      type: list
+      required: true
+    subject:
+      type: str
+      required: true
+    body:
+      type: str
+      required: true
+  create_calendar_event_personal:
+    title:
+      type: str
+      required: true
+    start_time:
+      type: str
+      required: true
+    end_time:
+      type: str
+      required: true
+  create_calendar_event_with_participants:
+    title:
+      type: str
+      required: true
+    start_time:
+      type: str
+      required: true
+    end_time:
+      type: str
+      required: true
+    participants:
+      type: list
+      required: true
+  add_calendar_event_participants:
+    event_id:
+      type: str
+      required: true
+    participants:
+      type: list
+      required: true
+  share_file:
+    file_id:
+      type: str
+      required: true
+    recipients:
+      type: list
+      required: true
+  delete_file:
+    file_id:
+      type: str
+      required: true
+  delete_email:
+    email_id:
+      type: str
+      required: true
+  get_unread_emails:    {}
+  get_sent_emails:      {}
+  get_received_emails:  {}
+  get_draft_emails:     {}
+  search_emails:        {}
+  search_contacts_by_name:  {}
+  search_contacts_by_email: {}
+  get_current_day:      {}
+  search_calendar_events:   {}
+  get_day_calendar_events:  {}
+  get_file_by_id:       {}
+  list_files:           {}
+  search_files:         {}
+  search_files_by_filename: {}
+  create_file:
+    filename:
+      type: str
+      required: true
+  append_to_file:
+    file_id:
+      type: str
+      required: true
+    content:
+      type: str
+      required: true
+  reschedule_calendar_event:
+    event_id:
+      type: str
+      required: true
+  cancel_calendar_event:
+    event_id:
+      type: str
+      required: true
+
+
+# ── Actions (ontology) ────────────────────────────────────────────────────────
+
+actions:
+
+  # ── Read-only ──────────────────────────────────────────────────────────────
+
+  read_emails_unread:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Retrieve unread emails from inbox
+
+  read_emails_sent:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Retrieve sent emails
+
+  read_emails_received:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Retrieve received emails
+
+  read_emails_drafts:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Retrieve draft emails
+
+  search_emails:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Search emails by query
+
+  search_contacts_by_name:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Search contacts by name
+
+  search_contacts_by_email:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Search contacts by email address
+
+  get_current_day:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: auto
+    description: Get current date — no data ingested, no taint propagation
+
+  search_calendar_events:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Search calendar events by query
+
+  get_day_calendar_events:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Get all calendar events for a specific day
+
+  get_file_by_id:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Retrieve file contents by ID
+
+  list_files:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: auto
+    description: List available files — metadata only, no content taint
+
+  search_files:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Search files by content
+
+  search_files_by_filename:
+    reversible: true
+    side_effects: [internal_read]
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: auto
+    description: Search files by filename — metadata only, no content taint
+
+  # ── Reversible internal ───────────────────────────────────────────────────
+
+  create_file:
+    reversible: true
+    side_effects: [internal_write]
+    action_class: reversible_internal
+    risk_class: low
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Create a new file
+
+  append_to_file:
+    reversible: true
+    side_effects: [internal_write]
+    action_class: reversible_internal
+    risk_class: low
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Append content to an existing file
+
+  reschedule_calendar_event:
+    reversible: true
+    side_effects: [internal_write]
+    action_class: reversible_internal
+    risk_class: medium
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Reschedule a calendar event (no external participants notified)
+
+  cancel_calendar_event:
+    reversible: true
+    side_effects: [internal_write]
+    action_class: reversible_internal
+    risk_class: medium
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Cancel a calendar event (no external notification)
+
+  # ── Irreversible internal ─────────────────────────────────────────────────
+  # INV-014: irreversible_internal actions are NOT contained by taint policy
+  # (external_boundary=false). They require explicit approval regardless of taint.
+
+  delete_file:
+    reversible: false
+    side_effects: [internal_write]
+    action_class: irreversible_internal
+    risk_class: high
+    required_capabilities: [approve_irreversible]
+    requires_approval: true
+    irreversible: true
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: hard_confirm
+    description: Permanently delete a file — irreversible, always requires approval
+
+  delete_email:
+    reversible: false
+    side_effects: [internal_write]
+    action_class: irreversible_internal
+    risk_class: high
+    required_capabilities: [approve_irreversible]
+    requires_approval: true
+    irreversible: true
+    external_boundary: false
+    taint_passthrough: false
+    confirmation_class: hard_confirm
+    description: Permanently delete an email — irreversible, always requires approval
+
+  # ── External boundary ─────────────────────────────────────────────────────
+  # INV-006: taint containment is the primary defence for external_boundary actions.
+  # clean context = user explicitly requested => allow
+  # tainted context = potential injection => deny at taint check before reaching here
+
+  send_email:
+    reversible: false
+    side_effects: [external_write]
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false
+    irreversible: true
+    external_boundary: true
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Send email to external recipients — crosses external boundary
+
+  create_calendar_event_personal:
+    reversible: true
+    side_effects: [internal_write]
+    action_class: reversible_internal   # no participants => no external boundary
+    risk_class: low
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true
+    confirmation_class: auto
+    description: Create calendar event without external participants
+
+  create_calendar_event_with_participants:
+    reversible: false
+    side_effects: [external_write]
+    action_class: external_boundary     # sends invites => crosses external boundary
+    risk_class: high
+    required_capabilities: [external_boundary]
+    requires_approval: false
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Create calendar event with external participants (sends invites)
+
+  add_calendar_event_participants:
+    reversible: false
+    side_effects: [external_write]
+    action_class: external_boundary     # sends invites to new participants
+    risk_class: high
+    required_capabilities: [external_boundary]
+    requires_approval: false
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Add participants to existing calendar event (sends invites)
+
+  share_file:
+    reversible: false
+    side_effects: [external_write]
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    confirmation_class: soft_confirm
+    description: Share file with external recipients — crosses external boundary
+
+
+# ── Predicates (action resolution) ───────────────────────────────────────────
+# Maps raw tool names to logical actions via ordered predicates.
+# INV-003: exactly one predicate must match, or deny.
+
+predicates:
+  get_unread_emails:
+    - action: read_emails_unread
+      match: {}
+  get_sent_emails:
+    - action: read_emails_sent
+      match: {}
+  get_received_emails:
+    - action: read_emails_received
+      match: {}
+  get_draft_emails:
+    - action: read_emails_drafts
+      match: {}
+  search_emails:
+    - action: search_emails
+      match: {}
+  search_contacts_by_name:
+    - action: search_contacts_by_name
+      match: {}
+  search_contacts_by_email:
+    - action: search_contacts_by_email
+      match: {}
+  get_current_day:
+    - action: get_current_day
+      match: {}
+  search_calendar_events:
+    - action: search_calendar_events
+      match: {}
+  get_day_calendar_events:
+    - action: get_day_calendar_events
+      match: {}
+  get_file_by_id:
+    - action: get_file_by_id
+      match: {}
+  list_files:
+    - action: list_files
+      match: {}
+  search_files:
+    - action: search_files
+      match: {}
+  search_files_by_filename:
+    - action: search_files_by_filename
+      match: {}
+  create_file:
+    - action: create_file
+      match: {}
+  append_to_file:
+    - action: append_to_file
+      match: {}
+  reschedule_calendar_event:
+    - action: reschedule_calendar_event
+      match: {}
+  cancel_calendar_event:
+    - action: cancel_calendar_event
+      match: {}
+  delete_file:
+    - action: delete_file
+      match: {}
+  delete_email:
+    - action: delete_email
+      match: {}
+  send_email:
+    - action: send_email
+      match: {}
+  create_calendar_event:
+    - action: create_calendar_event_with_participants
+      match:
+        arg_present: participants
+    - action: create_calendar_event_personal
+      match:
+        arg_absent: participants
+  add_calendar_event_participants:
+    - action: add_calendar_event_participants
+      match: {}
+  share_file:
+    - action: share_file
+      match: {}
+
+
+# ── Taint Rules ───────────────────────────────────────────────────────────────
+# All transformations preserve taint unless explicitly cleared.
+# No "clear" rules are granted in the workspace suite — all aggregations preserve taint.
+
+taint_rules:
+  - source_taint: tainted
+    operation: summarize
+    result: preserve
+  - source_taint: tainted
+    operation: quote
+    result: preserve
+  - source_taint: tainted
+    operation: extract
+    result: preserve
+  - source_taint: tainted
+    operation: derive
+    result: preserve
+
+
+# ── Escalation Rules ──────────────────────────────────────────────────────────
+
+escalation_rules:
+  send_email:
+    condition: tainted
+    reason: "send_email with tainted context denied — injection containment"
+    rule_id: "ESC-WS-001"
+  share_file:
+    condition: tainted
+    reason: "share_file with tainted context denied — injection containment"
+    rule_id: "ESC-WS-002"
+  delete_file:
+    condition: tainted
+    reason: "delete_file with tainted context denied — injection containment"
+    rule_id: "ESC-WS-004"
+  delete_email:
+    condition: tainted
+    reason: "delete_email with tainted context denied — injection containment"
+    rule_id: "ESC-WS-005"
+  create_calendar_event_with_participants:
+    condition: tainted
+    reason: "create_calendar_event_with_participants with tainted context denied"
+    rule_id: "ESC-WS-006"
+  add_calendar_event_participants:
+    condition: tainted
+    reason: "add_calendar_event_participants with tainted context denied"
+    rule_id: "ESC-WS-007"
+
+
+# ── Provenance Policy ─────────────────────────────────────────────────────────
+
+provenance_policy:
+  track_all_channels: true
+  inter_agent_default_trust: UNTRUSTED
+  propagate_through_summarize: true
+  propagate_through_quote: true
+  propagate_through_extract: true
+
+
+# ── Persistence Policy ────────────────────────────────────────────────────────
+# INV-008: runtime state is episode-scoped unless explicitly persisted.
+
+persistence_policy:
+  episode_scoped: true
+  persist_decisions: false
+  persist_taint_state: false
