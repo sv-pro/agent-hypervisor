@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Hypervisor</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="header-brand">
+        <span class="brand-icon">⬡</span>
+        <div>
+          <div class="brand-title">Agent Hypervisor</div>
+          <div class="brand-sub">Execution Governance Dashboard</div>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-label" id="status-label">connecting…</span>
+        <span class="badge" id="pending-badge" style="display:none"></span>
+      </div>
+    </header>
+
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="manifests">Manifests</button>
+      <button class="tab-btn" data-tab="decisions">Decisions</button>
+      <button class="tab-btn" data-tab="traces">Traces</button>
+      <button class="tab-btn" data-tab="provenance">Provenance</button>
+      <button class="tab-btn" data-tab="benchmarks">Benchmarks</button>
+      <div class="tab-refresh">
+        <span class="refresh-label" id="refresh-label">—</span>
+      </div>
+    </nav>
+
+    <main>
+      <div id="tab-manifests"  class="tab-panel active"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+      <div id="tab-decisions"  class="tab-panel"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+      <div id="tab-traces"     class="tab-panel"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+      <div id="tab-provenance" class="tab-panel"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+      <div id="tab-benchmarks" class="tab-panel"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+    </main>
+  </div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

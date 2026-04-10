@@ -3,15 +3,41 @@ version: "3.9"
 # Agent Hypervisor — local demo stack
 #
 # Services:
+#   gateway    : MCP gateway + Web UI dashboard  →  http://localhost:8090/ui
 #   demo       : runs the interactive demo (02_hypervisor_demo.py) and exits
 #   benchmarks : runs the full benchmark suite and emits a metrics report
 #
 # Usage:
+#   docker compose up gateway       # start the MCP gateway and open http://localhost:8090/ui
 #   docker compose up demo          # run the three-scenario demo
 #   docker compose up benchmarks    # run benchmark + metrics report
 #   docker compose run demo bash    # interactive shell for exploration
 
 services:
+  gateway:
+    build: .
+    command: >
+      python -c "
+      import uvicorn
+      from agent_hypervisor.hypervisor.mcp_gateway.mcp_server import create_mcp_app
+      from agent_hypervisor.control_plane.api import ControlPlaneState
+      cp = ControlPlaneState.create()
+      app = create_mcp_app(
+          manifest_path='manifests/example_world.yaml',
+          use_default_policy=True,
+          control_plane=cp,
+      )
+      uvicorn.run(app, host='0.0.0.0', port=8090)
+      "
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./manifests:/app/manifests:ro
+      - ./_research/benchmarks/reports:/app/_research/benchmarks/reports:ro
+    environment:
+      - PYTHONPATH=/app/src
+
+
   demo:
     build: .
     command: python examples/basic/02_hypervisor_demo.py

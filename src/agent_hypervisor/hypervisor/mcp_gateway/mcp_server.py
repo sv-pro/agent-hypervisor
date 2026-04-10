@@ -274,6 +274,16 @@ def create_mcp_app(
         # Wire the broadcaster to the SSE store so it can push events to queues.
         control_plane.broadcaster.set_sse_store(sse_store)
 
+    # Mount Web UI dashboard (always available; enriched when control plane is wired)
+    from agent_hypervisor.ui.router import create_ui_router
+    app.include_router(
+        create_ui_router(
+            gw_state=state,
+            cp_state=control_plane,
+            policy_path=_DEFAULT_POLICY_PATH if use_default_policy else None,
+        )
+    )
+
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 dispatcher
     # ------------------------------------------------------------------
