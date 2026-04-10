@@ -8,6 +8,10 @@ agentdojo>=0.1.35
 pyyaml>=6.0
 python-dotenv>=1.0
 
+# Required transitive dependency — google-auth → cryptography uses cffi;
+# the system-installed cryptography may lack it, causing a pyo3 panic at import.
+cffi>=2.0.0
+
 # LLM providers (choose the ones you need)
 openai>=1.0            # For GPT-4o (recommended for AgentDojo comparison)
 anthropic>=0.20        # For Claude models
@@ -15,3 +19,6 @@ anthropic>=0.20        # For Claude models
 # CLI and output
 click>=8.0
 rich>=13.0
+
+# Development / testing
+pytest>=7.0

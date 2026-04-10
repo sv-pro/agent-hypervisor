@@ -368,7 +368,7 @@ actions:
     action_class: irreversible_internal
     risk_class: high
     required_capabilities: [approve_irreversible]
-    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
+    requires_approval: true            # irreversible_internal: NOT covered by taint containment (external_boundary=false)
     irreversible: true
     external_boundary: false
     taint_passthrough: false
@@ -378,7 +378,7 @@ actions:
     action_class: irreversible_internal
     risk_class: high
     required_capabilities: [approve_irreversible]
-    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
+    requires_approval: true            # irreversible_internal: NOT covered by taint containment (external_boundary=false)
     irreversible: true
     external_boundary: false
     taint_passthrough: false

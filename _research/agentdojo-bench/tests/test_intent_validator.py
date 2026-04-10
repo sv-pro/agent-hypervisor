@@ -41,7 +41,9 @@ class TestManifestLoading:
 
     def test_travel_manifest_loads(self):
         v = IntentValidator.for_suite("travel", MANIFESTS_DIR)
-        assert v.get_tool_type("reserve_hotel") == "external_side_effect"
+        # v2 manifest: reserve_hotel is reversible_internal (no external communication)
+        assert v.get_tool_type("reserve_hotel") == "internal_write"
+        assert v.get_tool_type("send_email") == "external_side_effect"
         assert v.get_tool_type("get_all_hotels_in_city") == "read_only"
 
     def test_banking_manifest_loads(self):

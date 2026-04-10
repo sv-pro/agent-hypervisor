@@ -1,0 +1,294 @@
+# slack_v2.yaml — Fail-closed manifest v2 for the slack suite.
+#
+# Architecture: ontology-first, provenance-aware, deterministic enforcement.
+# Default behaviour: DENY everything not explicitly defined and permitted.
+#
+# Invariants enforced:
+#   INV-001  Unknown action => deny
+#   INV-002  Missing manifest => deny
+#   INV-004  Schema mismatch => deny
+#   INV-005  Capability missing => deny
+#   INV-006  Tainted external action => deny
+#   INV-007  High-risk action => requireapproval, never silently allow
+#   INV-012  Actions not in ontology do not exist
+#   INV-014  Irreversible internal != harmless write
+#   INV-015  Approval path is explicit, narrow, auditable
+
+version: "2.0"
+suite: slack
+
+# ── Defaults (fail-closed) ────────────────────────────────────────────────────
+defaults:
+  unknown_action: deny
+  unknown_tool: deny
+  missing_capability: deny
+  schema_mismatch: deny
+  tainted_external: deny
+  unknown_transformation_taint: preserve
+
+# ── Trust channels ────────────────────────────────────────────────────────────
+trust_channels:
+  user:
+    trust_level: trusted
+    taints_by_default: false
+    description: Direct human input via the user interface
+  email:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Email content from external senders
+  web:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Web page content fetched from the internet
+  file:
+    trust_level: semi_trusted
+    taints_by_default: true
+    description: File content from the local filesystem
+  mcp:
+    trust_level: semi_trusted
+    taints_by_default: true
+    description: Model Context Protocol tool outputs
+  agent:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Input from another agent (inter-agent communication)
+
+# ── Trust levels ──────────────────────────────────────────────────────────────
+trust_levels:
+  - untrusted
+  - semi_trusted
+  - trusted
+
+# ── Capability matrix ─────────────────────────────────────────────────────────
+capabilities:
+  untrusted:
+    - read_only
+  semi_trusted:
+    - read_only
+    - internal_write
+  trusted:
+    - read_only
+    - internal_write
+    - external_boundary
+    - approve_irreversible
+
+# ── Action schemas ────────────────────────────────────────────────────────────
+schemas:
+  # Read-only
+  get_channels:     {}
+  read_channel_messages:
+    channel: {type: str, required: true}
+  read_inbox:
+    user: {type: str, required: true}
+  get_users_in_channel:
+    channel: {type: str, required: true}
+  get_webpage:
+    url: {type: str, required: true}
+
+  # Internal write
+  add_user_to_channel:
+    user: {type: str, required: true}
+    channel: {type: str, required: true}
+
+  # External boundary
+  send_direct_message:
+    recipient: {type: str, required: true}
+    body: {type: str, required: true}
+  send_channel_message:
+    channel: {type: str, required: true}
+    body: {type: str, required: true}
+  invite_user_to_slack:
+    user: {type: str, required: true}
+    user_email: {type: str, required: true}
+  post_webpage:
+    url: {type: str, required: true}
+    content: {type: str, required: true}
+
+  # Irreversible internal
+  remove_user_from_slack:
+    user: {type: str, required: true}
+
+# ── Action ontology ───────────────────────────────────────────────────────────
+actions:
+
+  # ── Read-only ─────────────────────────────────────────────────────────────
+
+  get_channels:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: List all Slack channels
+
+  read_channel_messages:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # channel messages are user-generated, can contain injection
+    description: Read messages from a Slack channel
+
+  read_inbox:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # DMs are user-generated content, can contain injection
+    description: Read direct messages from a user inbox
+
+  get_users_in_channel:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: List users in a Slack channel
+
+  get_webpage:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # web content is untrusted, classic injection vector
+    description: Fetch content from a web URL
+
+  # ── Reversible internal ────────────────────────────────────────────────────
+
+  add_user_to_channel:
+    action_class: reversible_internal
+    risk_class: low
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Add a user to a Slack channel (reversible — can be removed)
+
+  # ── Irreversible internal ──────────────────────────────────────────────────
+  # Removes a user's workspace access. Requires explicit approval.
+
+  remove_user_from_slack:
+    action_class: irreversible_internal
+    risk_class: high
+    required_capabilities: [approve_irreversible]
+    requires_approval: true            # irreversible_internal: NOT covered by taint containment
+    irreversible: true
+    external_boundary: false
+    taint_passthrough: false
+    description: Remove a user from the Slack workspace — requires approval
+
+  # ── External boundary ─────────────────────────────────────────────────────
+  # All messaging and web posting cross the external boundary.
+
+  send_direct_message:
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    description: Send a direct message to a Slack user
+
+  send_channel_message:
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    description: Post a message to a Slack channel
+
+  invite_user_to_slack:
+    action_class: external_boundary
+    risk_class: high
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: false
+    description: Send a Slack workspace invitation to an external email address
+
+  post_webpage:
+    action_class: external_boundary
+    risk_class: high
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: false
+    description: Post content to an external URL
+
+# ── Predicates (action resolution) ───────────────────────────────────────────
+predicates:
+  get_channels:
+    - action: get_channels
+  read_channel_messages:
+    - action: read_channel_messages
+  read_inbox:
+    - action: read_inbox
+  get_users_in_channel:
+    - action: get_users_in_channel
+  get_webpage:
+    - action: get_webpage
+  add_user_to_channel:
+    - action: add_user_to_channel
+  remove_user_from_slack:
+    - action: remove_user_from_slack
+  send_direct_message:
+    - action: send_direct_message
+  send_channel_message:
+    - action: send_channel_message
+  invite_user_to_slack:
+    - action: invite_user_to_slack
+  post_webpage:
+    - action: post_webpage
+
+# ── Escalation rules ──────────────────────────────────────────────────────────
+escalation_rules:
+  remove_user_from_slack:
+    condition: always
+    reason: "remove_user_from_slack requires explicit approval — irreversible workspace action"
+    rule_id: "ESC-SL-001"
+  send_direct_message:
+    condition: tainted
+    reason: "send_direct_message with tainted context denied — injection containment"
+    rule_id: "ESC-SL-002"
+  send_channel_message:
+    condition: tainted
+    reason: "send_channel_message with tainted context denied — injection containment"
+    rule_id: "ESC-SL-003"
+  invite_user_to_slack:
+    condition: tainted
+    reason: "invite_user_to_slack with tainted context denied — injection containment"
+    rule_id: "ESC-SL-004"
+  post_webpage:
+    condition: tainted
+    reason: "post_webpage with tainted context denied — injection containment"
+    rule_id: "ESC-SL-005"
+
+# ── Provenance policy ─────────────────────────────────────────────────────────
+provenance_policy:
+  track_all_channels: true
+  inter_agent_default_trust: untrusted
+  propagate_through_summarize: true
+  propagate_through_quote: true
+  propagate_through_extract: true
+
+# ── Persistence policy ────────────────────────────────────────────────────────
+persistence_policy:
+  episode_scoped: true
+  persist_decisions: false
+  persist_taint_state: false

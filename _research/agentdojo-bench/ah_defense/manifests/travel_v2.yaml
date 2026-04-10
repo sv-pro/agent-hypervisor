@@ -1,0 +1,528 @@
+# travel_v2.yaml — Fail-closed manifest v2 for the travel suite.
+#
+# Architecture: ontology-first, provenance-aware, deterministic enforcement.
+# Default behaviour: DENY everything not explicitly defined and permitted.
+#
+# Invariants enforced:
+#   INV-001  Unknown action => deny
+#   INV-002  Missing manifest => deny
+#   INV-004  Schema mismatch => deny
+#   INV-005  Capability missing => deny
+#   INV-006  Tainted external action => deny
+#   INV-007  High-risk action => requireapproval, never silently allow
+#   INV-012  Actions not in ontology do not exist
+#   INV-014  Irreversible internal != harmless write
+#   INV-015  Approval path is explicit, narrow, auditable
+
+version: "2.0"
+suite: travel
+
+# ── Defaults (fail-closed) ────────────────────────────────────────────────────
+defaults:
+  unknown_action: deny
+  unknown_tool: deny
+  missing_capability: deny
+  schema_mismatch: deny
+  tainted_external: deny
+  unknown_transformation_taint: preserve
+
+# ── Trust channels ────────────────────────────────────────────────────────────
+trust_channels:
+  user:
+    trust_level: trusted
+    taints_by_default: false
+    description: Direct human input via the user interface
+  email:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Email content from external senders
+  web:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Web page content fetched from the internet
+  file:
+    trust_level: semi_trusted
+    taints_by_default: true
+    description: File content from the local filesystem
+  mcp:
+    trust_level: semi_trusted
+    taints_by_default: true
+    description: Model Context Protocol tool outputs
+  agent:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Input from another agent (inter-agent communication)
+
+# ── Trust levels ──────────────────────────────────────────────────────────────
+trust_levels:
+  - untrusted
+  - semi_trusted
+  - trusted
+
+# ── Capability matrix ─────────────────────────────────────────────────────────
+capabilities:
+  untrusted:
+    - read_only
+  semi_trusted:
+    - read_only
+    - internal_write
+  trusted:
+    - read_only
+    - internal_write
+    - external_boundary
+    - approve_irreversible
+
+# ── Action schemas ────────────────────────────────────────────────────────────
+# Only required parameters are listed; additional unknown params => deny.
+schemas:
+  # Read-only schemas (no required params beyond context)
+  get_user_information:   {}
+  get_all_hotels_in_city:
+    city: {type: str, required: true}
+  get_hotels_prices:
+    hotel_names: {type: list, required: true}
+  get_rating_reviews_for_hotels:
+    hotel_names: {type: list, required: true}
+  get_hotels_address:
+    hotel_name: {type: str, required: true}
+  get_all_restaurants_in_city:
+    city: {type: str, required: true}
+  get_cuisine_type_for_restaurants:
+    restaurant_names: {type: list, required: true}
+  get_restaurants_address:
+    restaurant_names: {type: list, required: true}
+  get_rating_reviews_for_restaurants:
+    restaurant_names: {type: list, required: true}
+  get_dietary_restrictions_for_all_restaurants:
+    restaurant_names: {type: list, required: true}
+  get_contact_information_for_restaurants:
+    restaurant_names: {type: list, required: true}
+  get_price_for_restaurants:
+    restaurant_names: {type: list, required: true}
+  check_restaurant_opening_hours:
+    restaurant_names: {type: list, required: true}
+  get_all_car_rental_companies_in_city:
+    city: {type: str, required: true}
+  get_car_types_available:
+    company_name: {type: list, required: true}
+  get_rating_reviews_for_car_rental:
+    company_name: {type: list, required: true}
+  get_car_fuel_options:
+    company_name: {type: list, required: true}
+  get_car_rental_address:
+    company_name: {type: list, required: true}
+  get_car_price_per_day:
+    company_name: {type: list, required: true}
+  get_flight_information:
+    departure_city: {type: str, required: true}
+    arrival_city: {type: str, required: true}
+  search_calendar_events:
+    query: {type: str, required: true}
+  get_day_calendar_events:
+    day: {type: str, required: true}
+
+  # Internal write schemas
+  reserve_hotel:
+    hotel: {type: str, required: true}
+    start_day: {type: str, required: true}
+    end_day: {type: str, required: true}
+  reserve_car_rental:
+    company: {type: str, required: true}
+    start_time: {type: str, required: true}
+    end_time: {type: str, required: true}
+  reserve_restaurant:
+    restaurant: {type: str, required: true}
+    start_time: {type: str, required: true}
+
+  # External boundary schemas
+  send_email:
+    recipients: {type: list, required: true}
+    subject: {type: str, required: true}
+    body: {type: str, required: true}
+  create_calendar_event:
+    title: {type: str, required: true}
+    start_time: {type: str, required: true}
+    end_time: {type: str, required: true}
+  cancel_calendar_event:
+    event_id: {type: str, required: true}
+
+# ── Action ontology ───────────────────────────────────────────────────────────
+actions:
+
+  # ── Read-only ─────────────────────────────────────────────────────────────
+  # Pure retrieval. Cannot modify state. Always permitted in trusted context.
+
+  get_user_information:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Read stored user profile data
+
+  get_all_hotels_in_city:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: List available hotels in a city
+
+  get_hotels_prices:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get price range for hotels
+
+  get_rating_reviews_for_hotels:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # reviews are user-generated content
+    description: Read user reviews for hotels
+
+  get_hotels_address:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get physical address of a hotel
+
+  get_all_restaurants_in_city:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: List available restaurants in a city
+
+  get_cuisine_type_for_restaurants:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get cuisine type for restaurants
+
+  get_restaurants_address:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get physical address of restaurants
+
+  get_rating_reviews_for_restaurants:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # reviews are user-generated content
+    description: Read user reviews for restaurants
+
+  get_dietary_restrictions_for_all_restaurants:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get dietary restriction info for restaurants
+
+  get_contact_information_for_restaurants:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get contact info for restaurants
+
+  get_price_for_restaurants:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get price-per-person for restaurants
+
+  check_restaurant_opening_hours:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Check opening hours for restaurants
+
+  get_all_car_rental_companies_in_city:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: List car rental companies in a city
+
+  get_car_types_available:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get available car types for a rental company
+
+  get_rating_reviews_for_car_rental:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # reviews are user-generated content
+    description: Read reviews for car rental companies
+
+  get_car_fuel_options:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get fuel options for car rental companies
+
+  get_car_rental_address:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get address of car rental companies
+
+  get_car_price_per_day:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get price per day for car rental companies
+
+  get_flight_information:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get flight information between cities
+
+  search_calendar_events:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Search calendar events by query
+
+  get_day_calendar_events:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Get calendar events for a specific day
+
+  # ── Reversible internal ────────────────────────────────────────────────────
+  # Modifies internal reservation state. Can be cancelled.
+
+  reserve_hotel:
+    action_class: reversible_internal
+    risk_class: medium
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Make an internal hotel reservation
+
+  reserve_car_rental:
+    action_class: reversible_internal
+    risk_class: medium
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Make an internal car rental reservation
+
+  reserve_restaurant:
+    action_class: reversible_internal
+    risk_class: medium
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Make an internal restaurant reservation
+
+  # ── External boundary ─────────────────────────────────────────────────────
+  # Communicates outside the agent world. Blocked when tainted (INV-006).
+
+  send_email:
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
+    irreversible: true
+    external_boundary: true
+    taint_passthrough: true
+    description: Send email to external recipients — crosses external boundary
+
+  create_calendar_event:
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    description: Create calendar event and notify participants via email
+
+  cancel_calendar_event:
+    action_class: external_boundary
+    risk_class: high
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: false
+    description: Cancel calendar event and notify participants via email
+
+# ── Predicates (action resolution) ───────────────────────────────────────────
+# Maps raw tool name + optional argument predicate => logical action name.
+predicates:
+  get_user_information:
+    - action: get_user_information
+  get_all_hotels_in_city:
+    - action: get_all_hotels_in_city
+  get_hotels_prices:
+    - action: get_hotels_prices
+  get_rating_reviews_for_hotels:
+    - action: get_rating_reviews_for_hotels
+  get_hotels_address:
+    - action: get_hotels_address
+  get_all_restaurants_in_city:
+    - action: get_all_restaurants_in_city
+  get_cuisine_type_for_restaurants:
+    - action: get_cuisine_type_for_restaurants
+  get_restaurants_address:
+    - action: get_restaurants_address
+  get_rating_reviews_for_restaurants:
+    - action: get_rating_reviews_for_restaurants
+  get_dietary_restrictions_for_all_restaurants:
+    - action: get_dietary_restrictions_for_all_restaurants
+  get_contact_information_for_restaurants:
+    - action: get_contact_information_for_restaurants
+  get_price_for_restaurants:
+    - action: get_price_for_restaurants
+  check_restaurant_opening_hours:
+    - action: check_restaurant_opening_hours
+  get_all_car_rental_companies_in_city:
+    - action: get_all_car_rental_companies_in_city
+  get_car_types_available:
+    - action: get_car_types_available
+  get_rating_reviews_for_car_rental:
+    - action: get_rating_reviews_for_car_rental
+  get_car_fuel_options:
+    - action: get_car_fuel_options
+  get_car_rental_address:
+    - action: get_car_rental_address
+  get_car_price_per_day:
+    - action: get_car_price_per_day
+  get_flight_information:
+    - action: get_flight_information
+  search_calendar_events:
+    - action: search_calendar_events
+  get_day_calendar_events:
+    - action: get_day_calendar_events
+  reserve_hotel:
+    - action: reserve_hotel
+  reserve_car_rental:
+    - action: reserve_car_rental
+  reserve_restaurant:
+    - action: reserve_restaurant
+  send_email:
+    - action: send_email
+  create_calendar_event:
+    - action: create_calendar_event
+  cancel_calendar_event:
+    - action: cancel_calendar_event
+
+# ── Escalation rules ──────────────────────────────────────────────────────────
+escalation_rules:
+  send_email:
+    condition: tainted
+    reason: "send_email with tainted context denied — injection containment"
+    rule_id: "ESC-TR-001"
+  create_calendar_event:
+    condition: tainted
+    reason: "create_calendar_event with tainted context denied — injection containment"
+    rule_id: "ESC-TR-002"
+  cancel_calendar_event:
+    condition: tainted
+    reason: "cancel_calendar_event with tainted context denied — injection containment"
+    rule_id: "ESC-TR-003"
+
+# ── Provenance policy ─────────────────────────────────────────────────────────
+provenance_policy:
+  track_all_channels: true
+  inter_agent_default_trust: untrusted
+  propagate_through_summarize: true
+  propagate_through_quote: true
+  propagate_through_extract: true
+
+# ── Persistence policy ────────────────────────────────────────────────────────
+persistence_policy:
+  episode_scoped: true
+  persist_decisions: false
+  persist_taint_state: false

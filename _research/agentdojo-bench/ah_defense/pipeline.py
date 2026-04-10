@@ -688,7 +688,56 @@ def build_ah_pipeline(
     ])
     pipeline.name = f"agent_hypervisor-{suite_name}"
 
+    # Wrap pipeline.query to reset episode state before each benchmark task.
+    # Without this, taint accumulated in one (user_task, injection_task) pair
+    # leaks into the next call — corrupting both utility and ASR measurements.
+    # INV-008: episode state must be scoped to a single agent episode.
+    _wrap_pipeline_with_episode_reset(
+        pipeline=pipeline,
+        compiled_manifest=compiled_manifest,
+        input_sanitizer=input_sanitizer,
+        taint_guard=taint_guard,
+        blocked_injector=blocked_injector,
+    )
+
     return pipeline
+
+
+def _wrap_pipeline_with_episode_reset(
+    pipeline: Any,
+    compiled_manifest: Any,
+    input_sanitizer: "AHInputSanitizer",
+    taint_guard: "AHTaintGuard",
+    blocked_injector: "AHBlockedCallInjector",
+) -> None:
+    """Wrap pipeline.query to reset episode + taint state before each invocation.
+
+    The benchmark runner calls pipeline.query once per (user_task, injection_task)
+    pair, reusing the same pipeline object.  Without a reset, taint from one task
+    leaks into the next, making measurements unreliable.
+
+    This wraps the same way as _wrap_pipeline_with_delay (consistent pattern).
+    INV-008: runtime state must not persist across episode boundaries.
+    """
+    original_query = pipeline.query
+
+    def _reset_and_query(*args: Any, **kwargs: Any) -> Any:
+        # Fresh taint/provenance state for this invocation (INV-008)
+        fresh_prov = ProvTaintState()
+        fresh_taint = TaintState()
+        fresh_episode = start_episode(compiled_manifest, trust_level="trusted")
+
+        input_sanitizer.prov_taint = fresh_prov
+        input_sanitizer.taint_state = fresh_taint
+        taint_guard.prov_taint = fresh_prov
+        taint_guard.taint_state = fresh_taint
+        taint_guard.episode = fresh_episode
+        blocked_injector.episode = fresh_episode
+
+        logger.debug("[AH] Episode reset: new episode_id=%s", fresh_episode.episode_id)
+        return original_query(*args, **kwargs)
+
+    pipeline.query = _reset_and_query
 
 
 def _get_call_id(tc: Any) -> str:

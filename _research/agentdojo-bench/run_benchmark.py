@@ -66,6 +66,29 @@ from ah_defense.taint_tracker import TaintState
 from ah_defense.canonicalizer import Canonicalizer
 from ah_defense.pipeline import AHInputSanitizer, AHTaintGuard
 
+# ---------------------------------------------------------------------------
+# Model support extension — add Claude 4.x and other post-0.1.35 models.
+# agentdojo's ModelsEnum tops out at claude-3-7-sonnet; newer models must be
+# registered manually.  MODEL_PROVIDERS is a plain dict so we can extend it
+# without forking the library.
+# ---------------------------------------------------------------------------
+_EXTRA_MODELS: dict[str, str] = {
+    # Claude 4.x (April 2025)
+    "claude-opus-4-6":    "anthropic",
+    "claude-sonnet-4-6":  "anthropic",
+    "claude-haiku-4-5":   "anthropic",
+    # Alias used by some Anthropic API clients
+    "claude-3-5-haiku-20241022": "anthropic",
+}
+
+try:
+    from agentdojo.models import MODEL_PROVIDERS
+    for _model_id, _provider in _EXTRA_MODELS.items():
+        if _model_id not in MODEL_PROVIDERS:
+            MODEL_PROVIDERS[_model_id] = _provider  # type: ignore[index]
+except Exception:
+    pass  # non-critical: benchmark still works with models already in the enum
+
 
 # ---------------------------------------------------------------------------
 # Defense names
