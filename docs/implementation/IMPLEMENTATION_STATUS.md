@@ -1,27 +1,26 @@
 # Implementation Status
 
 **Last updated**: 2026-04-09  
-**Session**: Session 7 — SSE integration tests (Option E)  
-**Branch**: `claude/continue-implementation-FpgJZ`
+**Session**: Session 9 — Control Plane API + Demo (Phases 5–6)  
+**Branch**: `claude/control-plane-scaffolding-ugZhz`
 
 ---
 
 ## Session Summary
 
-Session 7: Full SSE streaming round-trip tests against a real uvicorn server
-(Option E from Session 6 handoff). 83 tests passing (was 78).
+Session 8: Introduced the World Authoring Control Plane scaffolding — the backend layer for session-bound world authoring. 57 new tests, all passing.
 
 ---
 
 ## Completed
 
-### Phase 0 — Repository Audit
+### Phase 0 — Repository Audit (MCP Gateway, Sessions 1–7)
 - [x] Audited all existing relevant files
 - [x] Identified gaps (no MCP protocol, no manifest-driven tool list)
 - [x] Identified insertion point: `hypervisor/mcp_gateway/` (additive)
 - [x] Created `docs/implementation/repo_audit_mcp_gateway.md`
 
-### Phase 1 — Architecture Skeleton
+### Phase 1 — Architecture Skeleton (MCP Gateway)
 - [x] `src/agent_hypervisor/hypervisor/mcp_gateway/__init__.py`
 - [x] `src/agent_hypervisor/hypervisor/mcp_gateway/protocol.py` — JSON-RPC 2.0 models
 - [x] `src/agent_hypervisor/hypervisor/mcp_gateway/tool_surface_renderer.py`
@@ -36,7 +35,7 @@ Session 7: Full SSE streaming round-trip tests against a real uvicorn server
 - [x] `manifests/example_world.yaml` created (email assistant world)
 - [x] `manifests/read_only_world.yaml` created (minimal demo world)
 
-### Phase 3 — tool/call Deterministic Enforcement
+### Phase 3 — tools/call Deterministic Enforcement
 - [x] `ToolCallEnforcer.enforce()` checks manifest first, then registry, then policy, then constraints
 - [x] Undeclared tool → `manifest:tool_not_declared` → deny
 - [x] No adapter → `registry:no_adapter` → deny
@@ -59,146 +58,157 @@ Session 7: Full SSE streaming round-trip tests against a real uvicorn server
 
 ### Phase 7 — Taint Propagation
 - [x] `_taint_context_from_provenance()` — `"trusted"` → CLEAN, all other trust levels → TAINTED
-- [x] `EnforcementDecision.taint_context: TaintContext` — always set; callers propagate into `TaintedValue`s
-- [x] `EnforcementDecision.taint_state` — convenience accessor for `taint_context.taint`
-- [x] `mcp_server.py` — tool results wrapped in `TaintedValue`, taint state emitted as `"_taint"` field in JSON response
-- [x] `TaintContext.from_outputs()` — downstream contexts correctly inherit taint from gateway results
-- [x] 20 new tests in `tests/hypervisor/test_taint_propagation.py` — all passing
+- [x] `EnforcementDecision.taint_context: TaintContext` — always set
+- [x] `mcp_server.py` — tool results wrapped in `TaintedValue`, taint state emitted as `"_taint"` field
+- [x] 20 taint propagation tests in `tests/hypervisor/test_taint_propagation.py`
 
-### Phase 6 — Docs, Tests, Demo
-- [x] 26 tests across 4 groups: all passing
-- [x] Safety invariant tests (undeclared tool absent, fail closed, determinism)
-- [x] Integration tests (HTTP endpoint behavior)
-- [x] `docs/implementation/mcp_gateway_demo.md` (written below)
-- [x] All status files updated
+### Phase 6 — Docs, Tests, Demo (MCP Gateway)
+- [x] 83 tests (Sessions 1–7): all passing when environment has `agent_hypervisor` installed
+
+---
+
+## Session 8 — Control Plane Scaffolding (NEW)
+
+### Phase 0 — Control Plane Repo Audit ✅
+- [x] Identified runtime/gateway/policy insertion points
+- [x] Identified where session state, approval state, overlay resolution should live
+- [x] Created `docs/implementation/control_plane_repo_audit.md`
+- [x] Created `WORLD_AUTHORING.md` (project root — architecture overview)
+- [x] Created `docs/implementation/CONTROL_PLANE_PLAN.md`
+
+### Phase 1 — Domain Model and Services ✅
+- [x] `src/agent_hypervisor/control_plane/__init__.py` — clean public API
+- [x] `src/agent_hypervisor/control_plane/domain.py` — Session, SessionEvent, ActionApproval, SessionOverlay, OverlayChanges, WorldStateView, compute_action_fingerprint
+- [x] `src/agent_hypervisor/control_plane/session_store.py` — SessionStore (in-memory lifecycle)
+- [x] `src/agent_hypervisor/control_plane/event_store.py` — EventStore (append-only audit log + factory helpers)
+- [x] `src/agent_hypervisor/control_plane/approval_service.py` — ApprovalService (fingerprint-bound TTL approvals)
+- [x] `src/agent_hypervisor/control_plane/overlay_service.py` — OverlayService (session-scoped world augmentation)
+- [x] `src/agent_hypervisor/control_plane/world_state_resolver.py` — WorldStateResolver + world_state_to_manifest_dict bridge
+
+### Phase 2 — Action Approval Path ✅
+Implemented as part of ApprovalService:
+- [x] ActionApproval domain object with fingerprint, TTL, status machine
+- [x] Fingerprint = SHA-256[:16] of JSON-sorted (tool_name + arguments)
+- [x] request_approval() / resolve() / is_action_approved() / check_expired()
+- [x] Expired approvals fail closed (resolved as denied if expired at resolve time)
+- [x] Approval does NOT mutate visible tool world — tested explicitly
+
+### Phase 3 — Session Overlay Path ✅
+Implemented as part of OverlayService + WorldStateResolver:
+- [x] SessionOverlay with OverlayChanges (reveal_tools, hide_tools, widen_scope, narrow_scope)
+- [x] attach() / detach() / get_active_overlays() / check_expired()
+- [x] Session-scoped: overlays of one session don't affect others
+- [x] Detached/expired overlays excluded from active set
+
+### Phase 4 — World State Resolution ✅
+Implemented as WorldStateResolver:
+- [x] resolve(session_id, base_tools, base_constraints) → WorldStateView
+- [x] Deterministic: same inputs → same output
+- [x] Overlays applied in creation order (oldest first)
+- [x] narrow_scope wins over widen_scope for the same tool
+- [x] resolve_from_manifest() convenience method for WorldManifest objects
+- [x] world_state_to_manifest_dict() bridge (WorldStateView → manifest dict for SessionWorldResolver)
+
+### Tests ✅
+- [x] `tests/control_plane/__init__.py`
+- [x] `tests/control_plane/conftest.py`
+- [x] `tests/control_plane/test_control_plane.py` — 57 tests, all passing
+  - Group 1: Domain (6 tests)
+  - Group 2: SessionStore (11 tests)
+  - Group 3: EventStore (6 tests)
+  - Group 4: ApprovalService (13 tests)
+  - Group 5: OverlayService (9 tests)
+  - Group 6: WorldStateResolver (10 tests)
+  - Group 7: Integration (3 tests)
+
+### pyproject.toml change
+- [x] Added `src` to `pythonpath` alongside existing `src/agent_hypervisor`
+  - Reason: makes `agent_hypervisor` package importable as `from agent_hypervisor.xxx import ...`
+  - This enables top-level test imports (vs deferred imports in existing test files)
+  - Backwards compatible: `src/agent_hypervisor` still present; existing direct imports unaffected
+
+---
+
+## Session 9 — Control Plane API + Demo (NEW)
+
+### Phase 5 — Control Plane API Surface ✅
+- [x] `src/agent_hypervisor/control_plane/api.py` — FastAPI router + standalone app factory
+- [x] `ControlPlaneState` dataclass holding all services; optional `get_base_manifest` callback
+- [x] `create_control_plane_router(state)` — returns mounted APIRouter
+- [x] `create_control_plane_app(...)` — returns standalone FastAPI app
+
+Endpoints implemented:
+- `POST /control/sessions` — create session (+ emits session_created event)
+- `GET  /control/sessions` — list sessions (filter by state/mode)
+- `GET  /control/sessions/{id}` — get session detail
+- `PATCH /control/sessions/{id}/mode` — change mode (+ emits mode_changed event)
+- `DELETE /control/sessions/{id}` — close session (+ emits session_closed event)
+- `GET  /control/sessions/{id}/world` — resolved WorldStateView (base + overlays)
+- `GET  /control/sessions/{id}/events` — structured audit log (filterable by type)
+- `GET  /control/approvals` — list pending approvals (+ sweep expired; filter by session)
+- `GET  /control/approvals/{id}` — get approval detail
+- `POST /control/approvals/{id}/resolve` — resolve approval (allowed|denied)
+- `GET  /control/sessions/{id}/overlays` — list overlays (active_only default)
+- `POST /control/sessions/{id}/overlays` — attach overlay (+ emits overlay_attached)
+- `DELETE /control/sessions/{id}/overlays/{oid}` — detach overlay (+ emits overlay_detached)
+- `GET  /health` — service health check
+
+### Phase 6 — Demo and Docs ✅
+- [x] `docs/implementation/control_plane_demo.md` — 8-step walkthrough with curl examples
+  - Step 1: session created (background)
+  - Step 2: approval requested
+  - Step 3: operator resolves once
+  - Step 4: operator attaches (interactive)
+  - Step 5: overlay attached
+  - Step 6: world state inspected (write_file visible)
+  - Step 7: overlay detached (world reverts)
+  - Step 8: audit log viewed
+
+### Tests ✅
+- [x] `tests/control_plane/test_api.py` — 44 tests, all passing
+  - Group 1: Health (1 test)
+  - Group 2: Sessions (15 tests)
+  - Group 3: World state (5 tests)
+  - Group 4: Approvals (10 tests)
+  - Group 5: Overlays (10 tests)
+  - Group 6: Event log (3 tests)
+  - Group 7: Integration (1 test — full 8-step scenario)
 
 ---
 
 ## Test Results
 
 ```
-83 passed
+101 passed (control_plane/test_control_plane.py: 57 + test_api.py: 44)
 ```
 
-All 83 tests pass. Groups:
-- `TestToolSurfaceRenderer` (7 tests) — tools/list invariants
-- `TestToolCallEnforcer` (8 tests) — enforcement invariants
-- `TestMCPGatewayHTTP` (6 tests) — HTTP integration
-- `TestSessionWorldResolver` (5 tests) — manifest binding
-- Group 5 PolicyEngine (6 tests) — policy wiring
-- Group 6 per-session bindings (13 tests) — session registry
-- Group 7 SSE transport (13 tests) — SSE session store, stream, HTTP endpoints
-- `TestTaintPropagation` (20 tests) — taint from provenance through decision to result
-- `TestSSEIntegration` (5 tests) — full SSE streaming round-trip vs. real uvicorn
+Previous MCP gateway tests (83) require `pip install -e .` to run.
 
 ---
 
-### Session 3 — End-to-end demo
+## Pending (next session)
 
-- [x] `examples/mcp_gateway/main.py` — runnable demo (5 scenarios, all passing)
-- [x] No extra dependencies required (stdlib urllib + existing pyproject.toml deps)
-- [x] Starts a real uvicorn server in a background thread
-- [x] Covers: initialize handshake, world rendering, fail-closed, allow path, world switch
+### Gateway Wiring ⬜
+Wire control plane into the MCP gateway enforcement loop:
+1. When `ToolCallEnforcer.enforce()` returns verdict=`ask`, call `ApprovalService.request_approval()`
+2. Return `{"status": "pending", "approval_id": "..."}` to MCP client
+3. When operator resolves via `POST /control/approvals/{id}/resolve`, resume the blocked call
+4. In `_handle_tools_list()`, use `WorldStateResolver.resolve()` to feed overlay-aware manifest
 
-**Test results**: 32 passed (unchanged).
-
----
-
-### Session 2 — PolicyEngine wiring, deps, run script
-
-- [x] `jsonschema` added to core deps in `pyproject.toml`
-- [x] `httpx`, `pytest-asyncio` added under `[project.optional-dependencies].test`
-- [x] `create_mcp_app(use_default_policy=True)` auto-loads `runtime/configs/default_policy.yaml`
-- [x] Explicit `policy_engine` argument never overridden by `use_default_policy`
-- [x] 6 new PolicyEngine integration tests (Group 5) — all passing
-- [x] `scripts/run_mcp_gateway.py` — single-command launcher with CLI flags
-
-**Test results**: 32 passed (was 26).
+### MCP Gateway Mount ⬜
+Add to `mcp_server.py` (or a wrapper):
+```python
+cp_state = ControlPlaneState.create(get_base_manifest=lambda sid: (
+    gateway_state.resolver.resolve(sid).tool_names(), {}
+))
+app.include_router(create_control_plane_router(cp_state))
+```
 
 ---
 
-### Session 7 — SSE integration tests (Option E)
+## What Must NOT Be Rewritten
 
-- [x] `TestSSEIntegration` (Group 8, 5 tests) in `test_mcp_gateway.py`
-- [x] `live_server` fixture: starts real uvicorn in daemon thread, polls `/mcp/health` for readiness, scope=class (one server per class)
-- [x] `_collect_sse_events` static helper: `http.client` + daemon thread + `queue.Queue`, reads line-by-line, parses SSE events
-- [x] `_post_json` static helper: `http.client` POST to live server
-- [x] `test_sse_content_type` — verifies `text/event-stream` header
-- [x] `test_sse_first_event_is_endpoint` — first event is `endpoint` with session URL
-- [x] `test_sse_endpoint_url_has_uuid_session_id` — session_id matches UUID pattern
-- [x] `test_sse_full_round_trip` — open SSE → read endpoint → POST → read message event (uses direct streaming reader thread to avoid deadlock)
-- [x] `test_sse_session_removed_after_disconnect` — after abrupt close, POST returns 404
-- [x] Fixed deadlock: round-trip test uses a direct reader thread that emits events into `queue.Queue` immediately (not after batching n events)
-
-**Test results**: 83 passed (was 78).
-
----
-
-### Session 6 — Taint propagation
-
-- [x] `_taint_context_from_provenance(prov)` — maps `trust_level` to `TaintContext`; only `"trusted"` yields CLEAN
-- [x] `EnforcementDecision.taint_context` — `TaintContext` field always set; default is TAINTED
-- [x] `EnforcementDecision.taint_state` — convenience accessor for callers
-- [x] `mcp_server.py` — `TaintedValue(value=text, taint=decision.taint_state)` wraps every tool result; `"_taint": "clean"|"tainted"` added to JSON response
-- [x] `test_taint_propagation.py` — 20 tests: helper unit, decision unit, monotonicity, HTTP integration
-- [x] Fixed enum double-import identity bug: all taint tests import via `agent_hypervisor.runtime.*` (full package path, not `pythonpath`-relative `runtime.*`)
-
-**Test results**: 78 passed (was 58).
-
----
-
-### Session 5 — MCP SSE transport
-
-- [x] `sse_transport.py` — `SSESessionStore` (UUID→Queue registry), `format_sse_event`, `sse_stream` async generator (heartbeat/keepalive, sentinel stop, cleanup in finally)
-- [x] `GET /mcp/sse` — creates session in store, returns `StreamingResponse(text/event-stream)`, first event is `endpoint` with `/mcp/messages?session_id=<uuid>`
-- [x] `POST /mcp/messages` — looks up session queue, dispatches JSON-RPC, puts response in queue, returns 202 Accepted
-- [x] `_dispatch_rpc_body()` extracted as shared async helper (used by both transports); `session_id_override` propagates SSE session into provenance for per-session manifest resolution
-- [x] `SSESessionStore` exported from `mcp_gateway.__init__`
-- [x] Group 7: 13 new tests (6 SSESessionStore unit, 3 sse_stream generator, 4 HTTP endpoint) — all passing
-- Note: httpx ASGI transport collects full response body — can't test infinite streams via `c.stream()`. HTTP tests use direct queue inspection instead.
-
-**Test results**: 58 passed (was 45).
-
----
-
-### Session 4 — Per-session WorldManifest bindings
-
-- [x] `SessionWorldResolver.register_session(session_id, manifest_path)` — loads manifest immediately, fails closed on error
-- [x] `SessionWorldResolver.unregister_session(session_id)` — idempotent revert to default
-- [x] `SessionWorldResolver.session_registry()` — snapshot of active bindings
-- [x] `tools/list` and `tools/call` resolve per-session manifest via `provenance.session_id`
-- [x] Default renderer/enforcer cached; per-session ones built on-the-fly (lightweight)
-- [x] `POST /mcp/sessions/{session_id}/bind` — bind a session to a manifest path
-- [x] `DELETE /mcp/sessions/{session_id}` — unbind a session
-- [x] `GET /mcp/sessions` — list all active bindings
-- [x] Group 6: 13 new tests (7 unit + 6 HTTP integration) — all passing
-
-**Test results**: 45 passed (was 32).
-
----
-
-## Pending / Not Yet Done
-
-- [ ] Auth / TLS — not in scope for this phase
-
----
-
-## Blockers
-
-None.
-
----
-
-## Next Recommended Step
-
-All planned options (C, B/SSE, D, E) are complete. The MCP gateway now has:
-- Manifest-driven tool surface rendering and enforcement
-- Per-session WorldManifest bindings
-- SSE transport (GET /mcp/sse + POST /mcp/messages)
-- Taint propagation from InvocationProvenance through EnforcementDecision
-- Full SSE streaming integration tests via real uvicorn
-
-Possible further work:
-- Auth / TLS hardening for production use
-- Rate limiting or budget enforcement at the gateway layer
-- Streaming tool results (chunked SSE events for long-running tools)
+- MCP gateway enforcement pipeline (`ToolCallEnforcer`, `ToolSurfaceRenderer`, `SessionWorldResolver`)
+- All 101 control plane tests — they encode the core invariants
+- `domain.py` types are stable — the public API for control plane consumers
+- `api.py` endpoint contracts — tests and demo depend on them

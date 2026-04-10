@@ -1,88 +1,143 @@
-# Handoff Note
+# Handoff Note — Session 10
 
 **Date**: 2026-04-09  
-**Session**: Session 7 — SSE integration tests (Option E)  
-**Branch**: `claude/continue-implementation-FpgJZ`
+**Branch**: `claude/control-plane-scaffolding-ugZhz`  
+**Session**: Gateway Wiring (Phase 7)
 
 ---
 
-## What Was Just Done
+## What Was Done
 
-Implemented Option E from the Session 6 handoff: full SSE streaming round-trip
-tests against a real uvicorn server.
+Wired the control plane into the MCP gateway enforcement loop. This is the bridge
+between the data plane (`ToolCallEnforcer`, `ToolSurfaceRenderer`) and the control
+plane services (`ApprovalService`, `OverlayService`, `WorldStateResolver`).
 
-### New test class: `TestSSEIntegration` (Group 8)
+### Files Modified
 
-5 tests in `tests/hypervisor/test_mcp_gateway.py`, all using a real uvicorn
-server in a daemon thread rather than httpx ASGI transport (which cannot test
-infinite SSE streams).
+```
+src/agent_hypervisor/hypervisor/mcp_gateway/tool_call_enforcer.py
+src/agent_hypervisor/hypervisor/mcp_gateway/mcp_server.py
+```
 
-**`live_server` fixture** (`scope="class"`):
-- Starts uvicorn with a minimal read_file world manifest
-- Polls `/mcp/health` until ready (max 5 s)
-- Yields `(host, port, base_url)` to all tests in the class
-- Sets `server.should_exit = True` on teardown (daemon thread, clean shutdown)
+### Files Created
 
-**Static helpers**:
-- `_collect_sse_events(host, port, path, n_events, timeout)` — opens SSE connection
-  in a daemon thread using `http.client`, reads line-by-line, parses
-  `event:` / `data:` lines into dicts, forwards parsed events via `queue.Queue`
-- `_post_json(host, port, path, body)` — `http.client` POST, returns `(status_code, dict)`
-
-**Tests**:
-
-1. `test_sse_content_type` — verifies `GET /mcp/sse` returns `Content-Type: text/event-stream`
-2. `test_sse_first_event_is_endpoint` — first SSE event is `event: endpoint` with `data: /mcp/messages?session_id=<uuid>`
-3. `test_sse_endpoint_url_has_uuid_session_id` — session_id in endpoint data matches UUID regex
-4. `test_sse_full_round_trip` — full protocol sequence:
-   - Opens SSE in a direct streaming reader thread (emits events immediately)
-   - Main thread reads the `endpoint` event → extracts `messages_path`
-   - Main thread POSTs `tools/list` to `messages_path` → 202 Accepted
-   - Main thread reads `message` event → verifies JSON-RPC result contains `read_file`
-5. `test_sse_session_removed_after_disconnect` — opens SSE, reads endpoint, closes abruptly, waits 0.3 s, verifies POST returns 404
-
-**Key design decision — direct streaming reader thread**:
-The initial round-trip implementation used `_collect_sse_events(n_events=2)` in a
-wrapper thread that forwarded events to the main thread only after collecting both.
-This deadlocked: the reader waited for event 2, but the main thread needed event 1
-(endpoint) first before it could POST to trigger event 2.
-
-Fixed by using a direct `_streaming_reader` function (defined inline) that emits
-each parsed event to `queue.Queue` immediately after parsing, without batching.
-The main thread then interleaves: get event 1 → POST → get event 2.
-
-### Test results: 83 passed (was 78)
+```
+tests/hypervisor/test_gateway_wiring.py   ← 23 integration tests, all passing
+```
 
 ---
 
-## What to Do Next
+## Changes in Detail
 
-All planned implementation options (C, B/SSE, D, E) are complete.
+### tool_call_enforcer.py
 
-Remaining work is either production-hardening or new feature areas:
+- Added `asked` property to `EnforcementDecision`:
+  ```python
+  @property
+  def asked(self) -> bool:
+      """True when the policy engine returned 'ask' and a control plane can handle it."""
+      return self.verdict == "ask"
+  ```
+- Changed `_evaluate_policy()` to return a real `EnforcementDecision(verdict="ask")`
+  instead of collapsing it to "deny". This is the key change that makes "ask" verdicts
+  routable to an approval workflow rather than silently denied.
 
-- **Auth / TLS**: The gateway currently accepts any request. Adding bearer token
-  auth or mTLS would be needed before production deployment.
+### mcp_server.py
 
-- **Rate limiting / budget enforcement**: The economic layer (`src/agent_hypervisor/economic/`)
-  exists but is not wired into the MCP gateway. Integrating budget enforcement at
-  the gateway layer would let manifests declare per-tool cost limits.
-
-- **Streaming tool results**: Currently, tool results are returned as a single JSON
-  blob. Long-running tools (e.g., code execution) could benefit from streaming
-  partial results back as additional SSE events.
+- `MCPGatewayState.__init__` now accepts `control_plane: Optional[ControlPlaneState]`
+- `create_mcp_app()` accepts `control_plane` and:
+  - Auto-configures the `get_base_manifest` bridge if not already set
+  - Mounts `create_control_plane_router(control_plane)` on the same FastAPI app
+- `sse_endpoint` auto-registers new SSE sessions with `control_plane.session_store`
+- `_handle_tools_list()` checks for active overlays via `WorldStateResolver` when
+  a control plane is wired; if overlays are active, synthesizes a modified manifest
+  via `world_state_to_manifest_dict()` and feeds it to `ToolSurfaceRenderer`
+- `_handle_tools_call()` checks `decision.asked`:
+  - With control plane + session_id: routes to `ApprovalService.request_approval()`,
+    returns `{"status": "pending_approval", "approval_id": ...}` to caller
+  - Without control plane or session_id: fails closed (deny)
 
 ---
 
-## Key Invariants to Preserve
+## Current Test Count
 
-- `live_server` fixture must be `scope="class"` — one server per class, shared
-  across tests (not per-test, which would be too slow)
-- The streaming reader thread must emit events immediately (not batch by n_events)
-  to avoid the deadlock in the round-trip test
-- `http.client.HTTPConnection.readline()` is the correct primitive for SSE — it
-  reads one line at a time without buffering the entire response
-- Daemon threads are safe here: they naturally die when the test process exits
-- 0.3 s sleep in `test_sse_session_removed_after_disconnect` gives uvicorn time to
-  run the `finally` block in `sse_stream` after TCP close — this is a real timing
-  dependency but 0.3 s is conservative enough for any CI environment
+```
+pytest tests/control_plane/   →  101 passed (57 domain/service + 44 API)
+pytest tests/hypervisor/test_gateway_wiring.py  →  23 passed
+```
+
+Note: `tests/hypervisor/test_mcp_gateway.py` has 21 pre-existing failures due to
+`pytest-asyncio` not being installed (async test functions). These predate this
+session and are not caused by our changes.
+
+---
+
+## Architecture (Final State)
+
+```
+HTTP Client (operator/UI)
+        ↓
+FastAPI Control Plane Router (/control/*)   ← mounted on same app
+        ↓
+ControlPlaneState
+  ├── SessionStore       ← auto-populated by SSE session creation
+  ├── EventStore         ← append-only audit log
+  ├── ApprovalService    ← receives "ask" verdicts from enforcement
+  ├── OverlayService     ← session-scoped world augmentation
+  └── WorldStateResolver ← base_tools + overlays → WorldStateView
+        ↓ get_base_manifest bridge
+MCPGatewayState
+  ├── resolver           → WorldManifest
+  ├── enforcer           → EnforcementDecision (allow | deny | ask)
+  └── control_plane      → ControlPlaneState (new)
+        ↓
+ToolSurfaceRenderer / ToolCallEnforcer   [data plane]
+  ↑
+  WorldStateView (via world_state_to_manifest_dict) when overlays active
+```
+
+---
+
+## What Remains
+
+### High Value
+
+1. **Approval resolution feedback loop** — when an approval is resolved via
+   `PATCH /control/approvals/{id}`, the MCP session should be notified so it can
+   retry the tool call. Currently the caller must re-issue the tool call manually.
+
+2. **Persistent storage** — all stores are in-memory. A SQLite or Redis backend
+   would survive restarts.
+
+### Lower Priority
+
+3. **WebSocket live updates** — currently the operator must poll `/control/sessions/{id}/world`
+   to see overlay changes reflected in real time.
+
+4. **Auth layer** — control plane endpoints have no auth. Fine for local/demo; needs
+   API key or JWT for production.
+
+5. **RBAC** — distinguish "end user" (can resolve own approvals) from "operator"
+   (can attach overlays and manage sessions).
+
+---
+
+## Key Invariants Preserved
+
+1. No LLM in enforcement path ✅
+2. Base manifest never mutated at runtime ✅
+3. All runtime world changes are session-scoped overlays ✅
+4. One-off approvals do not widen the world ✅
+5. Operator augmentation is explicit and auditable ✅
+6. Unknown capabilities still fail closed ✅
+7. Control plane ≠ data plane ✅
+8. "ask" without a control plane still fails closed ✅
+
+---
+
+## Do Not Touch
+
+- `tests/control_plane/test_control_plane.py` — domain + service invariants
+- `tests/control_plane/test_api.py` — API contract tests
+- `domain.py` — stable types; downstream code imports from here
+- `tests/hypervisor/test_gateway_wiring.py` — gateway wiring invariants

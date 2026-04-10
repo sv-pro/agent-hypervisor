@@ -29,4 +29,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src/agent_hypervisor"]
+pythonpath = ["src/agent_hypervisor", "src"]

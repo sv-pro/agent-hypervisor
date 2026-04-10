@@ -62,6 +62,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agent_hypervisor.runtime.taint import TaintedValue
+from agent_hypervisor.compiler.schema import manifest_from_dict
+from agent_hypervisor.control_plane.api import ControlPlaneState
+from agent_hypervisor.control_plane.world_state_resolver import world_state_to_manifest_dict
 from .sse_transport import SSESessionStore, sse_stream
 
 
@@ -110,10 +113,12 @@ class MCPGatewayState:
         manifest_path: Path,
         registry: Optional[ToolRegistry] = None,
         policy_engine: Optional[Any] = None,
+        control_plane: Optional[ControlPlaneState] = None,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.registry = registry or build_default_registry()
         self.policy_engine = policy_engine
+        self.control_plane = control_plane
 
         self.resolver = SessionWorldResolver(self.manifest_path)
         self._rebuild_components()
@@ -170,6 +175,7 @@ def create_mcp_app(
     registry: Optional[ToolRegistry] = None,
     policy_engine: Optional[Any] = None,
     use_default_policy: bool = False,
+    control_plane: Optional[ControlPlaneState] = None,
 ) -> FastAPI:
     """
     Build and return the FastAPI MCP gateway application.
@@ -187,6 +193,12 @@ def create_mcp_app(
                              provenance-aware enforcement (external_document arguments
                              to side-effect tools are denied; read-only tools are
                              always allowed).
+        control_plane:       Optional ControlPlaneState. When provided:
+                             - The control plane router is mounted at /control/*.
+                             - tools/call "ask" verdicts create approval requests
+                               instead of failing closed.
+                             - tools/list reflects active session overlays.
+                             - New SSE sessions are auto-registered in the session store.
 
     Returns:
         FastAPI app ready to serve with uvicorn.
@@ -202,11 +214,35 @@ def create_mcp_app(
         from agent_hypervisor.hypervisor.policy_engine import PolicyEngine
         policy_engine = PolicyEngine.from_yaml(_DEFAULT_POLICY_PATH)
 
+    # Wire the control plane manifest bridge (lazy — resolved per request).
+    if control_plane is not None and control_plane.get_base_manifest is None:
+        # Auto-configure the bridge so the control plane can resolve world state
+        # from the gateway's manifest layer. The lambda captures `state` after it
+        # is constructed below via a mutable cell to avoid forward-reference issues.
+        _state_cell: list = []
+
+        def _gateway_manifest_bridge(session_id: str):
+            gw = _state_cell[0]
+            manifest = gw.resolver.resolve(session_id)
+            base_tools = manifest.tool_names()
+            base_constraints = {
+                c.tool: c.constraints
+                for c in manifest.capabilities
+                if c.constraints
+            }
+            return base_tools, base_constraints
+
+        control_plane.get_base_manifest = _gateway_manifest_bridge
+    else:
+        _state_cell = []
+
     state = MCPGatewayState(
         manifest_path=manifest_path,
         registry=registry,
         policy_engine=policy_engine,
+        control_plane=control_plane,
     )
+    _state_cell.append(state)  # wire bridge to real state
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -229,6 +265,12 @@ def create_mcp_app(
     app.state.gw = state
     sse_store = SSESessionStore()
     app.state.sse_store = sse_store
+
+    # Mount control plane router when a ControlPlaneState is provided
+    if control_plane is not None:
+        from agent_hypervisor.control_plane.api import create_control_plane_router
+        app.state.control_plane = control_plane
+        app.include_router(create_control_plane_router(control_plane))
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 dispatcher
@@ -303,6 +345,18 @@ def create_mcp_app(
         store: SSESessionStore = app.state.sse_store
         session_id, queue = store.create_session()
         endpoint_url = f"/mcp/messages?session_id={session_id}"
+
+        # Auto-register new SSE session with the control plane (if wired)
+        if control_plane is not None:
+            gw: MCPGatewayState = app.state.gw
+            manifest = gw.resolver.resolve(session_id)
+            try:
+                control_plane.session_store.create(
+                    manifest_id=manifest.workflow_id,
+                    session_id=session_id,
+                )
+            except ValueError:
+                pass  # already registered — safe to ignore
 
         return StreamingResponse(
             sse_stream(session_id, queue, endpoint_url, store),
@@ -544,8 +598,29 @@ def _handle_tools_list(
     If the session has a registered manifest, that world is used; otherwise
     the gateway-level default is used. The MCP client sees only these tools —
     undeclared tools do not exist.
+
+    When a control plane is wired, active session overlays are applied on top
+    of the base manifest before rendering. A tool revealed by an overlay is
+    visible only if the registry also has an adapter for it.
     """
     manifest = state.resolver.resolve(session_id=provenance.session_id)
+
+    if state.control_plane is not None and provenance.session_id:
+        # Apply session overlays: resolve world state, synthesise overlay manifest
+        base_tools = manifest.tool_names()
+        base_constraints = {
+            c.tool: c.constraints
+            for c in manifest.capabilities
+            if c.constraints
+        }
+        view = state.control_plane.resolver.resolve(
+            provenance.session_id, base_tools, base_constraints
+        )
+        if view.active_overlay_ids:
+            overlay_manifest = manifest_from_dict(world_state_to_manifest_dict(view))
+            tools = state.renderer_for(overlay_manifest).render()
+            return {"tools": [t.model_dump() for t in tools]}
+
     tools = state.renderer_for(manifest).render()
     return {
         "tools": [t.model_dump() for t in tools],
@@ -584,6 +659,35 @@ def _handle_tools_call(
     # Resolve per-session manifest and enforce
     manifest = state.resolver.resolve(session_id=provenance.session_id)
     decision = state.enforcer_for(manifest).enforce(tool_name, arguments, provenance)
+
+    if decision.asked:
+        # Policy engine returned "ask": route to approval workflow if control plane
+        # is present; otherwise fail closed (treat as deny).
+        if state.control_plane is not None and provenance.session_id:
+            approval = state.control_plane.approval_service.request_approval(
+                session_id=provenance.session_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                requested_by=provenance.source,
+                event_store=state.control_plane.event_store,
+            )
+            return make_result(request_id, {
+                "status": "pending_approval",
+                "approval_id": approval.approval_id,
+                "tool_name": tool_name,
+                "message": (
+                    f"Tool call '{tool_name}' requires operator approval. "
+                    f"Resolve via POST /control/approvals/{approval.approval_id}/resolve"
+                ),
+            })
+        else:
+            # No control plane or no session → fail closed
+            return make_error(
+                request_id,
+                MCP_TOOL_DENIED,
+                f"Tool call denied: requires approval (no control plane configured)",
+                data={"reason": decision.reason, "rule": decision.matched_rule},
+            )
 
     if decision.denied:
         # Choose error code: not-in-world vs. policy-denied
