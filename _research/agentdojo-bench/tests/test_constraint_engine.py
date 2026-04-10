@@ -433,8 +433,9 @@ class TestTaintContainment:
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
-        # Passes taint check; hits escalation (requires_approval=True)
-        assert result.verdict == REQUIRE_APPROVAL
+        # send_email is external_boundary with requires_approval=false: taint containment is the
+        # primary defence. Clean context means the call is user-requested — should be ALLOW.
+        assert result.verdict == ALLOW
 
     def test_inter_agent_input_untrusted(self, manifest: CompiledManifest):
         """INV-006: inter-agent input defaults to untrusted."""
@@ -456,18 +457,21 @@ class TestTaintContainment:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestEscalation:
-    def test_send_email_requires_approval_clean_context(self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState):
+    def test_send_email_allowed_clean_context(self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState):
+        """send_email is external_boundary with requires_approval=false.
+        Taint containment is the primary defence: clean context => ALLOW (user-requested)."""
         intent = make_intent("send_email", "send_email",
                              args={"recipients": ["x@y.com"], "subject": "s", "body": "b"})
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
-        assert result.verdict == REQUIRE_APPROVAL
-        assert result.reason_code == "APPROVAL_REQUIRED"
-        assert result.violated_invariant == "INV-007"
+        assert result.verdict == ALLOW
+        assert result.reason_code == "ALL_CHECKS_PASSED"
 
     def test_delete_file_requires_approval(self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState):
-        """INV-014: Irreversible internal action requires approval."""
+        """INV-014: Irreversible internal action requires approval.
+        delete_file is irreversible_internal + external_boundary=false, so taint containment
+        does NOT protect it — requires_approval=true is the safety net."""
         intent = make_intent("delete_file", "delete_file", args={"file_id": "f123"})
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
@@ -476,15 +480,18 @@ class TestEscalation:
         assert result.violated_invariant == "INV-007"
 
     def test_delete_email_requires_approval(self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState):
+        """INV-014: Irreversible internal action requires approval."""
         intent = make_intent("delete_email", "delete_email", args={"email_id": "e001"})
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
         assert result.verdict == REQUIRE_APPROVAL
 
-    def test_create_calendar_with_participants_requires_approval(
+    def test_create_calendar_with_participants_allowed_clean_context(
         self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState
     ):
+        """create_calendar_event_with_participants is external_boundary, requires_approval=false.
+        Clean context => ALLOW; taint containment blocks it when tainted."""
         intent = make_intent(
             "create_calendar_event", "create_calendar_event_with_participants",
             args={"title": "M", "start_time": "10:00", "end_time": "11:00",
@@ -493,37 +500,42 @@ class TestEscalation:
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
-        assert result.verdict == REQUIRE_APPROVAL
+        assert result.verdict == ALLOW
 
-    def test_add_calendar_event_participants_requires_approval(
+    def test_add_calendar_event_participants_allowed_clean_context(
         self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState
     ):
+        """add_calendar_event_participants is external_boundary, requires_approval=false.
+        Clean context => ALLOW; taint containment blocks it when tainted."""
         intent = make_intent("add_calendar_event_participants", "add_calendar_event_participants",
                              args={"event_id": "ev1", "participants": ["b@corp.com"]})
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
-        assert result.verdict == REQUIRE_APPROVAL
+        assert result.verdict == ALLOW
 
-    def test_share_file_requires_approval(
+    def test_share_file_allowed_clean_context(
         self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState
     ):
+        """share_file is external_boundary, requires_approval=false.
+        Clean context => ALLOW; taint containment blocks it when tainted."""
         intent = make_intent("share_file", "share_file",
                              args={"file_id": "f1", "recipients": ["c@corp.com"]})
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
-        assert result.verdict == REQUIRE_APPROVAL
+        assert result.verdict == ALLOW
 
     def test_matched_rule_id_present_for_escalation(
         self, manifest: CompiledManifest, clean_prov_taint: ProvTaintState
     ):
-        """INV-015: approval path must be auditable (rule_id present)."""
-        intent = make_intent("send_email", "send_email",
-                             args={"recipients": ["x@y.com"], "subject": "s", "body": "b"})
+        """INV-015: approval path must be auditable (rule_id present).
+        Uses delete_file which has requires_approval=true and rule_id ESC-WS-004."""
+        intent = make_intent("delete_file", "delete_file", args={"file_id": "f1"})
         result = validate_intent(intent, manifest=manifest, taint_state=clean_prov_taint,
                                  trust_level="trusted",
                                  capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
+        assert result.verdict == REQUIRE_APPROVAL
         assert result.matched_rule_id is not None
         assert len(result.matched_rule_id) > 0
 
@@ -630,16 +642,17 @@ class TestEpisodeScoping:
 
         intent = make_intent("send_email", "send_email",
                              args={"recipients": ["x@y.com"], "subject": "s", "body": "b"})
-        # ep1 with taint => deny
+        # ep1 with taint => deny (taint containment law)
         r1 = validate_intent(intent, manifest=manifest, taint_state=pt1,
                              trust_level="trusted",
                              capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
-        # ep2 clean => requireapproval (not deny due to taint)
+        # ep2 clean => allow (send_email has requires_approval=false; taint is absent so
+        # containment does not fire — call is user-requested)
         r2 = validate_intent(intent, manifest=manifest, taint_state=pt2,
                              trust_level="trusted",
                              capabilities=frozenset(["read_only", "internal_write", "external_boundary", "approve_irreversible"]))
         assert r1.verdict == DENY
-        assert r2.verdict == REQUIRE_APPROVAL
+        assert r2.verdict == ALLOW
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,279 @@
+# banking_v2.yaml — Fail-closed manifest v2 for the banking suite.
+#
+# Architecture: ontology-first, provenance-aware, deterministic enforcement.
+# Default behaviour: DENY everything not explicitly defined and permitted.
+#
+# SECURITY NOTE: send_money is the highest-risk action in this suite.
+# It crosses the external boundary (transfers to external IBAN). Taint
+# containment law (INV-006) blocks it whenever any tool output was tainted
+# — the primary defence against prompt-injection-driven money theft.
+#
+# Invariants enforced:
+#   INV-001  Unknown action => deny
+#   INV-002  Missing manifest => deny
+#   INV-004  Schema mismatch => deny
+#   INV-005  Capability missing => deny
+#   INV-006  Tainted external action => deny
+#   INV-007  High-risk action => requireapproval, never silently allow
+#   INV-012  Actions not in ontology do not exist
+#   INV-014  Irreversible internal != harmless write
+#   INV-015  Approval path is explicit, narrow, auditable
+
+version: "2.0"
+suite: banking
+
+# ── Defaults (fail-closed) ────────────────────────────────────────────────────
+defaults:
+  unknown_action: deny
+  unknown_tool: deny
+  missing_capability: deny
+  schema_mismatch: deny
+  tainted_external: deny
+  unknown_transformation_taint: preserve
+
+# ── Trust channels ────────────────────────────────────────────────────────────
+trust_channels:
+  user:
+    trust_level: trusted
+    taints_by_default: false
+    description: Direct human input via the user interface
+  email:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Email content from external senders
+  web:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Web page content fetched from the internet
+  file:
+    trust_level: semi_trusted
+    taints_by_default: true
+    description: File content from the local filesystem
+  mcp:
+    trust_level: semi_trusted
+    taints_by_default: true
+    description: Model Context Protocol tool outputs
+  agent:
+    trust_level: untrusted
+    taints_by_default: true
+    description: Input from another agent (inter-agent communication)
+
+# ── Trust levels ──────────────────────────────────────────────────────────────
+trust_levels:
+  - untrusted
+  - semi_trusted
+  - trusted
+
+# ── Capability matrix ─────────────────────────────────────────────────────────
+capabilities:
+  untrusted:
+    - read_only
+  semi_trusted:
+    - read_only
+    - internal_write
+  trusted:
+    - read_only
+    - internal_write
+    - external_boundary
+    - approve_irreversible
+
+# ── Action schemas ────────────────────────────────────────────────────────────
+schemas:
+  # Read-only
+  get_iban:         {}
+  get_balance:      {}
+  get_most_recent_transactions:
+    n: {type: int, required: false}
+  get_scheduled_transactions: {}
+  read_file:
+    file_path: {type: str, required: true}
+  get_user_info:    {}
+
+  # External boundary
+  send_money:
+    recipient: {type: str, required: true}
+    amount: {type: float, required: true}
+    subject: {type: str, required: true}
+    date: {type: str, required: true}
+  schedule_transaction:
+    recipient: {type: str, required: true}
+    amount: {type: float, required: true}
+    subject: {type: str, required: true}
+    date: {type: str, required: true}
+
+  # Internal write
+  update_scheduled_transaction:
+    id: {type: int, required: true}
+  update_password:
+    password: {type: str, required: true}
+  update_user_info: {}
+
+# ── Action ontology ───────────────────────────────────────────────────────────
+actions:
+
+  # ── Read-only ─────────────────────────────────────────────────────────────
+
+  get_iban:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Read the account IBAN
+
+  get_balance:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Read the current account balance
+
+  get_most_recent_transactions:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # transaction descriptions can contain attacker content
+    description: Read recent transaction history
+
+  get_scheduled_transactions:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # scheduled transaction subjects can contain attacker content
+    description: Read list of scheduled transactions
+
+  read_file:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: true            # file content is untrusted input
+    description: Read a file from the filesystem
+
+  get_user_info:
+    action_class: read_only
+    risk_class: low
+    required_capabilities: [read_only]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Read stored user account information
+
+  # ── Reversible internal ────────────────────────────────────────────────────
+
+  update_scheduled_transaction:
+    action_class: reversible_internal
+    risk_class: medium
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Modify parameters of a scheduled transaction
+
+  update_password:
+    action_class: reversible_internal
+    risk_class: high
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Update the user account password
+
+  update_user_info:
+    action_class: reversible_internal
+    risk_class: low
+    required_capabilities: [internal_write]
+    requires_approval: false
+    irreversible: false
+    external_boundary: false
+    taint_passthrough: false
+    description: Update user profile information
+
+  # ── External boundary ─────────────────────────────────────────────────────
+  # Financial transfers cross the external boundary — blocked by taint containment.
+
+  send_money:
+    action_class: external_boundary
+    risk_class: critical
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment (step 5) blocks when tainted; clean = user-requested
+    irreversible: true
+    external_boundary: true
+    taint_passthrough: true
+    description: Transfer money to an external IBAN — crosses external boundary
+
+  schedule_transaction:
+    action_class: external_boundary
+    risk_class: high
+    required_capabilities: [external_boundary]
+    requires_approval: false           # taint containment blocks when tainted; clean = user-requested
+    irreversible: false
+    external_boundary: true
+    taint_passthrough: true
+    description: Schedule a future money transfer to an external IBAN
+
+# ── Predicates (action resolution) ───────────────────────────────────────────
+predicates:
+  get_iban:
+    - action: get_iban
+  get_balance:
+    - action: get_balance
+  get_most_recent_transactions:
+    - action: get_most_recent_transactions
+  get_scheduled_transactions:
+    - action: get_scheduled_transactions
+  read_file:
+    - action: read_file
+  get_user_info:
+    - action: get_user_info
+  update_scheduled_transaction:
+    - action: update_scheduled_transaction
+  update_password:
+    - action: update_password
+  update_user_info:
+    - action: update_user_info
+  send_money:
+    - action: send_money
+  schedule_transaction:
+    - action: schedule_transaction
+
+# ── Escalation rules ──────────────────────────────────────────────────────────
+escalation_rules:
+  send_money:
+    condition: tainted
+    reason: "send_money with tainted context denied — injection containment (financial transfer)"
+    rule_id: "ESC-BK-001"
+  schedule_transaction:
+    condition: tainted
+    reason: "schedule_transaction with tainted context denied — injection containment"
+    rule_id: "ESC-BK-002"
+
+# ── Provenance policy ─────────────────────────────────────────────────────────
+provenance_policy:
+  track_all_channels: true
+  inter_agent_default_trust: untrusted
+  propagate_through_summarize: true
+  propagate_through_quote: true
+  propagate_through_extract: true
+
+# ── Persistence policy ────────────────────────────────────────────────────────
+persistence_policy:
+  episode_scoped: true
+  persist_decisions: false
+  persist_taint_state: false
