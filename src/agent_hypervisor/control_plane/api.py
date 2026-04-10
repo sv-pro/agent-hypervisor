@@ -61,6 +61,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from .approval_broadcaster import ApprovalBroadcaster
 from .approval_service import ApprovalService
 from .domain import (
     APPROVAL_STATUS_ALLOWED,
@@ -68,9 +69,11 @@ from .domain import (
     SESSION_MODE_BACKGROUND,
     SESSION_MODE_INTERACTIVE,
     OverlayChanges,
+    ScopedVerdict,
 )
 from .event_store import EventStore, make_session_created, make_session_closed, make_mode_changed
 from .overlay_service import OverlayService
+from .participant_registry import ParticipantRegistry
 from .session_store import SessionStore
 from .world_state_resolver import WorldStateResolver
 
@@ -89,14 +92,16 @@ class ControlPlaneState:
     get_base_manifest to bridge to the gateway's manifest layer.
 
     Attributes:
-        session_store:      Session lifecycle store.
-        event_store:        Append-only audit log.
-        approval_service:   One-off action approval service.
-        overlay_service:    Session overlay service.
-        resolver:           WorldStateResolver (stateless; reads from stores above).
-        get_base_manifest:  Optional callable: (session_id) → (list[str], dict).
-                            Returns (base_tools, base_constraints) for a session.
-                            If None, world state endpoints return an empty base.
+        session_store:       Session lifecycle store.
+        event_store:         Append-only audit log.
+        approval_service:    One-off action approval service.
+        overlay_service:     Session overlay service.
+        resolver:            WorldStateResolver (stateless; reads from stores above).
+        participant_registry: Registry of participants eligible to vote on approvals.
+        broadcaster:         Fans out approval events to participant SSE queues.
+        get_base_manifest:   Optional callable: (session_id) → (list[str], dict).
+                             Returns (base_tools, base_constraints) for a session.
+                             If None, world state endpoints return an empty base.
     """
 
     session_store: SessionStore
@@ -104,6 +109,8 @@ class ControlPlaneState:
     approval_service: ApprovalService
     overlay_service: OverlayService
     resolver: WorldStateResolver
+    participant_registry: ParticipantRegistry = field(default_factory=ParticipantRegistry)
+    broadcaster: ApprovalBroadcaster = field(default_factory=ApprovalBroadcaster)
     get_base_manifest: Optional[Callable[[str], tuple[list[str], dict]]] = None
 
     @classmethod
@@ -124,12 +131,16 @@ class ControlPlaneState:
         approval_service = ApprovalService(default_ttl_seconds=default_ttl_seconds)
         overlay_service = OverlayService()
         resolver = WorldStateResolver(session_store, overlay_service)
+        participant_registry = ParticipantRegistry()
+        broadcaster = ApprovalBroadcaster()
         return cls(
             session_store=session_store,
             event_store=event_store,
             approval_service=approval_service,
             overlay_service=overlay_service,
             resolver=resolver,
+            participant_registry=participant_registry,
+            broadcaster=broadcaster,
             get_base_manifest=get_base_manifest,
         )
 
@@ -162,6 +173,21 @@ class AttachOverlayRequest(BaseModel):
     widen_scope: dict[str, Any] = {}
     narrow_scope: dict[str, Any] = {}
     additional_constraints: dict[str, Any] = {}
+
+
+class RegisterParticipantRequest(BaseModel):
+    session_id: str
+    roles: list[str]   # e.g. ["user", "operator"]
+
+
+class ScopedVerdictItem(BaseModel):
+    scope: str     # "one_off" | "session" | "world"
+    verdict: str   # "allow" | "deny"
+    participant_id: str = ""
+
+
+class RespondToApprovalRequest(BaseModel):
+    verdicts: list[ScopedVerdictItem]
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +531,152 @@ def create_control_plane_router(state: ControlPlaneState) -> APIRouter:
             "session_id": session_id,
         })
 
+    # ------------------------------------------------------------------
+    # Participants (multi-scope approval system)
+    # ------------------------------------------------------------------
+
+    @router.post("/participants", status_code=201)
+    def register_participant(body: RegisterParticipantRequest) -> JSONResponse:
+        """
+        Register a participant that can respond to approval requests.
+
+        A participant is an operator/user session identified by its SSE
+        session_id. It holds one or more roles that determine which approval
+        scopes it can vote on:
+          user     → one_off scope
+          operator → session scope
+          admin    → world scope
+
+        Registering the same session_id again updates the roles (upsert).
+        Participants receive "approval_requested" SSE events when approvals
+        are created.
+        """
+        reg = state.participant_registry.register(
+            session_id=body.session_id,
+            roles=set(body.roles),
+        )
+        return JSONResponse(reg.to_dict(), status_code=201)
+
+    @router.delete("/participants/{session_id}")
+    def unregister_participant(session_id: str) -> JSONResponse:
+        """
+        Unregister a participant.
+
+        Safe to call even if the session is not currently registered.
+        """
+        removed = state.participant_registry.unregister(session_id)
+        return JSONResponse({
+            "status": "unregistered" if removed else "not_registered",
+            "session_id": session_id,
+        })
+
+    @router.get("/participants")
+    def list_participants() -> JSONResponse:
+        """List all registered participants."""
+        regs = state.participant_registry.list_all()
+        return JSONResponse({
+            "participants": [r.to_dict() for r in regs],
+            "count": len(regs),
+        })
+
+    # ------------------------------------------------------------------
+    # Multi-scope approval response (new in Phase 8)
+    # ------------------------------------------------------------------
+
+    @router.patch("/approvals/{approval_id}/respond")
+    def respond_to_approval(
+        approval_id: str,
+        body: RespondToApprovalRequest,
+    ) -> JSONResponse:
+        """
+        Submit scoped verdicts for a pending approval.
+
+        Body::
+
+            {
+              "verdicts": [
+                {"scope": "one_off",  "verdict": "allow", "participant_id": "..."},
+                {"scope": "session",  "verdict": "allow", "participant_id": "..."},
+                {"scope": "world",    "verdict": "deny",  "participant_id": "..."}
+              ]
+            }
+
+        Each verdict fires its side effect immediately:
+          one_off allow  → marks the fingerprint approved (tool call can be retried)
+          session allow  → creates a SessionOverlay revealing the tool
+          world   allow  → stub (no-op)
+
+        Verdicts are idempotent per scope: duplicate scope submissions are ignored.
+
+        The tool call UNBLOCKS as soon as any scope provides "allow".
+        The originator receives an "approval_resolved" SSE event so the client
+        knows to retry.
+
+        An expired approval always results in denial regardless of verdict content.
+
+        Returns 404 if approval not found; 409 if already in a terminal state.
+        """
+        approval = state.approval_service.get(approval_id)
+        if approval is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Approval not found: {approval_id!r}",
+            )
+
+        # Snapshot pre-respond state to detect first allow.
+        was_allowed_before = _has_allow_verdict(approval)
+
+        # Build ScopedVerdict objects from the request body.
+        verdicts = [
+            ScopedVerdict(
+                scope=v.scope,
+                verdict=v.verdict,
+                participant_id=v.participant_id,
+            )
+            for v in body.verdicts
+        ]
+
+        try:
+            updated = state.approval_service.respond(
+                approval_id=approval_id,
+                verdicts=verdicts,
+                overlay_service=state.overlay_service,
+                session_store=state.session_store,
+                event_store=state.event_store,
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Approval not found: {approval_id!r}",
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+        # Notify the originator via SSE if an allow verdict was just received.
+        is_allowed_now = _has_allow_verdict(updated)
+        if is_allowed_now and not was_allowed_before:
+            effective_verdict = "allow"
+            state.broadcaster.notify_originator(
+                originator_session_id=updated.session_id,
+                approval=updated,
+                effective_verdict=effective_verdict,
+            )
+
+        return JSONResponse(updated.to_dict())
+
     return router
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _has_allow_verdict(approval: Any) -> bool:
+    """Return True if any scoped_verdict on the approval is an allow."""
+    for sv in approval.scoped_verdicts:
+        if sv.verdict == "allow":
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +724,7 @@ def create_control_plane_app(
             "sessions": cp_state.session_store.count(),
             "approvals": cp_state.approval_service.count(),
             "overlays": cp_state.overlay_service.count(),
+            "participants": cp_state.participant_registry.count(),
         })
 
     return app

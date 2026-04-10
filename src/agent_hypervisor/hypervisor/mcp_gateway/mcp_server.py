@@ -271,6 +271,8 @@ def create_mcp_app(
         from agent_hypervisor.control_plane.api import create_control_plane_router
         app.state.control_plane = control_plane
         app.include_router(create_control_plane_router(control_plane))
+        # Wire the broadcaster to the SSE store so it can push events to queues.
+        control_plane.broadcaster.set_sse_store(sse_store)
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 dispatcher
@@ -664,22 +666,40 @@ def _handle_tools_call(
         # Policy engine returned "ask": route to approval workflow if control plane
         # is present; otherwise fail closed (treat as deny).
         if state.control_plane is not None and provenance.session_id:
-            approval = state.control_plane.approval_service.request_approval(
+            # Pre-check: if the action was explicitly allowed (operator said
+            # "allow" via resolve() or one_off scoped verdict via respond()),
+            # skip the approval workflow and proceed to adapter dispatch.
+            if state.control_plane.approval_service.has_explicit_allow(
                 session_id=provenance.session_id,
                 tool_name=tool_name,
                 arguments=arguments,
-                requested_by=provenance.source,
-                event_store=state.control_plane.event_store,
-            )
-            return make_result(request_id, {
-                "status": "pending_approval",
-                "approval_id": approval.approval_id,
-                "tool_name": tool_name,
-                "message": (
-                    f"Tool call '{tool_name}' requires operator approval. "
-                    f"Resolve via POST /control/approvals/{approval.approval_id}/resolve"
-                ),
-            })
+            ):
+                pass  # fall through to adapter dispatch below
+            else:
+                approval = state.control_plane.approval_service.request_approval(
+                    session_id=provenance.session_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    requested_by=provenance.source,
+                    event_store=state.control_plane.event_store,
+                )
+                # Broadcast to all registered participants.
+                try:
+                    state.control_plane.broadcaster.broadcast_approval_requested(
+                        approval=approval,
+                        participant_registry=state.control_plane.participant_registry,
+                    )
+                except Exception:
+                    pass  # fail-open: never crash the enforcement path
+                return make_result(request_id, {
+                    "status": "pending_approval",
+                    "approval_id": approval.approval_id,
+                    "tool_name": tool_name,
+                    "message": (
+                        f"Tool call '{tool_name}' requires operator approval. "
+                        f"Resolve via PATCH /control/approvals/{approval.approval_id}/respond"
+                    ),
+                })
         else:
             # No control plane or no session → fail closed
             return make_error(

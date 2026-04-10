@@ -24,11 +24,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .domain import (
+    APPROVAL_SCOPE_ONE_OFF,
+    APPROVAL_SCOPE_SESSION,
+    APPROVAL_SCOPE_WORLD,
     APPROVAL_STATUS_ALLOWED,
     APPROVAL_STATUS_DENIED,
     APPROVAL_STATUS_EXPIRED,
+    APPROVAL_STATUS_PARTIALLY_RESOLVED,
     APPROVAL_STATUS_PENDING,
+    APPROVAL_STATUS_RESOLVED,
     ActionApproval,
+    OverlayChanges,
+    ScopedVerdict,
     compute_action_fingerprint,
 )
 from .event_store import EventStore, make_approval_requested, make_approval_resolved
@@ -198,8 +205,9 @@ class ApprovalService:
         """
         now = datetime.now(timezone.utc)
         expired = []
+        _sweepable = {APPROVAL_STATUS_PENDING, APPROVAL_STATUS_PARTIALLY_RESOLVED}
         for approval in self._approvals.values():
-            if approval.status != APPROVAL_STATUS_PENDING:
+            if approval.status not in _sweepable:
                 continue
             if not approval.expires_at:
                 continue
@@ -250,6 +258,117 @@ class ApprovalService:
             approvals = [a for a in approvals if a.status == status]
         return sorted(approvals, key=lambda a: a.created_at)
 
+    def respond(
+        self,
+        approval_id: str,
+        verdicts: list,
+        overlay_service: Optional[Any] = None,
+        session_store: Optional[Any] = None,
+        event_store: Optional[EventStore] = None,
+    ) -> ActionApproval:
+        """
+        Submit one or more scoped verdicts for a pending approval.
+
+        Each entry in ``verdicts`` must be a ScopedVerdict. Verdicts are
+        idempotent per scope: if a verdict for a scope is already recorded,
+        the new verdict for that scope is ignored (no double side-effect).
+
+        Side effects fired immediately on receipt (if not already fired):
+          one_off allow  → marks the approval as fingerprint-approved so the
+                           originating tool call can be retried.
+          session allow  → creates a SessionOverlay (reveal_tool) for the session.
+          world   allow  → no-op stub.
+          any     deny   → recorded; no structural side effect.
+
+        Status progression:
+          pending            → partially_resolved (after first new verdict)
+          partially_resolved → resolved (after all three scopes have verdicts)
+          any status         → expired   (if TTL already passed when called)
+
+        Fail-closed: expired approvals always result in the approval being
+        marked expired and no side effects are applied.
+
+        Args:
+            approval_id:    The approval to respond to.
+            verdicts:       List of ScopedVerdict objects.
+            overlay_service: Required for session-scope allow side effect.
+            session_store:  Required for session-scope allow side effect.
+            event_store:    Optional; forwarded to overlay_service for audit.
+
+        Returns:
+            The updated ActionApproval.
+
+        Raises:
+            KeyError:    If approval_id is not found.
+            RuntimeError: If the approval is already in a terminal state
+                          (allowed/denied/expired/resolved) and not partially_resolved.
+        """
+        approval = self._require(approval_id)
+
+        # Fail closed: expired approval → mark expired, apply no verdicts.
+        if approval.is_expired():
+            if approval.status not in (APPROVAL_STATUS_EXPIRED,):
+                approval.status = APPROVAL_STATUS_EXPIRED
+            return approval
+
+        # Only pending and partially_resolved approvals can accept new verdicts.
+        _active_statuses = {APPROVAL_STATUS_PENDING, APPROVAL_STATUS_PARTIALLY_RESOLVED}
+        if approval.status not in _active_statuses:
+            raise RuntimeError(
+                f"Approval {approval_id!r} is already in terminal state "
+                f"(status={approval.status!r})."
+            )
+
+        existing_scopes = {sv.scope for sv in approval.scoped_verdicts}
+
+        for verdict in verdicts:
+            # Idempotent: skip if this scope already has a recorded verdict.
+            if verdict.scope in existing_scopes:
+                continue
+
+            # Record the verdict first.
+            approval.scoped_verdicts.append(verdict)
+            existing_scopes.add(verdict.scope)
+
+            # Fire scope-specific side effects.
+            if verdict.verdict == "allow":
+                if verdict.scope == APPROVAL_SCOPE_ONE_OFF:
+                    # Fingerprint approval: the tool call can be retried and will
+                    # succeed. We rely on is_action_approved() checking scoped_verdicts.
+                    pass  # side effect is is_action_approved() returning True
+
+                elif verdict.scope == APPROVAL_SCOPE_SESSION:
+                    # Create a SessionOverlay that reveals the tool for this session.
+                    if overlay_service is not None and session_store is not None:
+                        session = session_store.get(approval.session_id)
+                        manifest_id = (
+                            session.manifest_id if session is not None else "unknown"
+                        )
+                        changes = OverlayChanges(reveal_tools=[approval.tool_name])
+                        overlay_service.attach(
+                            session_id=approval.session_id,
+                            parent_manifest_id=manifest_id,
+                            created_by=verdict.participant_id or "approval_service",
+                            changes=changes,
+                            session_store=session_store,
+                            event_store=event_store,
+                        )
+
+                elif verdict.scope == APPROVAL_SCOPE_WORLD:
+                    # Stub: global approval is not yet implemented.
+                    pass
+
+        # Update status based on how many scopes now have verdicts.
+        _all_scopes = {APPROVAL_SCOPE_ONE_OFF, APPROVAL_SCOPE_SESSION, APPROVAL_SCOPE_WORLD}
+        recorded_scopes = {sv.scope for sv in approval.scoped_verdicts}
+        if recorded_scopes:
+            if _all_scopes <= recorded_scopes:
+                approval.status = APPROVAL_STATUS_RESOLVED
+            else:
+                approval.status = APPROVAL_STATUS_PARTIALLY_RESOLVED
+
+        return approval
+
     def is_action_approved(
         self,
         session_id: str,
@@ -257,14 +376,47 @@ class ApprovalService:
         arguments: dict[str, Any],
     ) -> bool:
         """
-        Check whether a concrete action has a valid pending approval.
+        Check whether a concrete action has a valid (pending or allowed) approval.
 
-        This does NOT consume the approval. The approval remains pending
-        until explicitly resolved. One approval = one authorization for
-        the fingerprint, not unlimited reuse.
+        Returns True if there is a non-expired approval in either pending or
+        allowed state for the exact fingerprint in the given session. This is
+        the backward-compatible check used by callers that treat "a pending
+        approval exists" as "this action is queued for authorization".
 
-        Returns True only if there is a non-expired pending approval
-        for the exact fingerprint in the given session.
+        Note: This is a point-in-time check. Callers must resolve the
+        approval immediately after using it to prevent double-use.
+
+        See also: has_explicit_allow() for the stricter check used by the
+        gateway pre-check to determine if execution can actually proceed.
+        """
+        fingerprint = compute_action_fingerprint(tool_name, arguments)
+        for approval in self._approvals.values():
+            if (
+                approval.session_id == session_id
+                and approval.action_fingerprint == fingerprint
+                and approval.status in (APPROVAL_STATUS_PENDING, APPROVAL_STATUS_ALLOWED)
+                and not approval.is_expired()
+            ):
+                return True
+        return False
+
+    def has_explicit_allow(
+        self,
+        session_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> bool:
+        """
+        Check whether a concrete action has been explicitly allowed.
+
+        Stricter than is_action_approved(): returns True only if an operator
+        has affirmatively allowed the action via either:
+          1. Old mechanism: resolve() setting status=allowed.
+          2. New multi-scope mechanism: respond() with a one_off "allow" scoped
+             verdict.
+
+        Used by the gateway pre-check to determine if a tool call that would
+        normally route to the approval workflow can instead proceed directly.
 
         Note: This is a point-in-time check. Callers must resolve the
         approval immediately after using it to prevent double-use.
@@ -272,12 +424,18 @@ class ApprovalService:
         fingerprint = compute_action_fingerprint(tool_name, arguments)
         for approval in self._approvals.values():
             if (
-                approval.session_id == session_id
-                and approval.action_fingerprint == fingerprint
-                and approval.status == APPROVAL_STATUS_PENDING
-                and not approval.is_expired()
+                approval.session_id != session_id
+                or approval.action_fingerprint != fingerprint
+                or approval.is_expired()
             ):
+                continue
+            # Old mechanism: explicit allow via resolve()
+            if approval.status == APPROVAL_STATUS_ALLOWED:
                 return True
+            # New mechanism: one_off allow scoped verdict via respond()
+            for sv in approval.scoped_verdicts:
+                if sv.scope == APPROVAL_SCOPE_ONE_OFF and sv.verdict == "allow":
+                    return True
         return False
 
     def count(self) -> int:
