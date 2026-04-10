@@ -109,6 +109,36 @@ Files modified:
 Files created:
 - `tests/hypervisor/test_gateway_wiring.py` — 23 integration tests
 
+### Phase 8 — Multi-Scope Approval System ✅
+**Branch**: `claude/phase-8-multi-scope-approvals-irzP0`
+
+Files modified:
+- `src/agent_hypervisor/control_plane/domain.py`
+  - Added `APPROVAL_SCOPE_ONE_OFF / SESSION / WORLD` constants
+  - Added `APPROVAL_STATUS_PARTIALLY_RESOLVED / RESOLVED` constants
+  - Added `ScopedVerdict` dataclass: `{scope, verdict, participant_id, timestamp}`
+  - Added `ParticipantRegistration` dataclass: `{participant_id, session_id, roles}`
+  - Extended `ActionApproval` with `scoped_verdicts: list[ScopedVerdict]`
+- `src/agent_hypervisor/control_plane/approval_service.py`
+  - Added `respond()`: scoped verdict processing with idempotency and side effects
+  - Added `has_explicit_allow()`: stricter check for gateway pre-check
+  - Updated `check_expired()` to sweep `partially_resolved` approvals
+- `src/agent_hypervisor/control_plane/api.py`
+  - `ControlPlaneState` now includes `participant_registry` and `broadcaster` fields
+  - New endpoints: `POST/DELETE/GET /control/participants`, `PATCH /control/approvals/{id}/respond`
+  - `POST /control/approvals/{id}/resolve` retained for backwards compat
+- `src/agent_hypervisor/hypervisor/mcp_gateway/mcp_server.py`
+  - `create_mcp_app()` wires `broadcaster.set_sse_store(sse_store)` when CP present
+  - `_handle_tools_call()` pre-checks `has_explicit_allow()` before approval workflow
+  - Broadcasts `approval_requested` to participants on new approval creation
+
+Files created:
+- `src/agent_hypervisor/control_plane/participant_registry.py` — ParticipantRegistry
+- `src/agent_hypervisor/control_plane/approval_broadcaster.py` — ApprovalBroadcaster
+- `tests/control_plane/test_phase8.py` — 52 new tests
+
+**Test totals**: 176 passing across all control plane + gateway wiring suites.
+
 ---
 
 ## Non-Goals (this phase)

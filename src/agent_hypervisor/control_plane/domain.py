@@ -52,6 +52,87 @@ APPROVAL_STATUS_PENDING = "pending"
 APPROVAL_STATUS_ALLOWED = "allowed"
 APPROVAL_STATUS_DENIED = "denied"
 APPROVAL_STATUS_EXPIRED = "expired"
+APPROVAL_STATUS_PARTIALLY_RESOLVED = "partially_resolved"
+APPROVAL_STATUS_RESOLVED = "resolved"
+
+# Approval scopes (multi-scope approval system)
+APPROVAL_SCOPE_ONE_OFF = "one_off"    # user role: allow/deny this fingerprint once (TTL-bound)
+APPROVAL_SCOPE_SESSION = "session"    # operator role: allow/deny for this session (SessionOverlay)
+APPROVAL_SCOPE_WORLD = "world"        # admin role: allow/deny globally (stub)
+
+
+# ---------------------------------------------------------------------------
+# ScopedVerdict
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ScopedVerdict:
+    """
+    A single verdict for one approval scope from one participant.
+
+    Scopes:
+    - one_off:  User role — allow/deny this exact fingerprint once (TTL-bound).
+                Side effect: marks the ActionApproval as fingerprint-approved.
+    - session:  Operator role — allow/deny for the lifetime of this session.
+                Side effect: creates a SessionOverlay (reveal_tool) on allow.
+    - world:    Admin role — allow/deny globally.
+                Side effect: stub (no-op) for now.
+
+    Invariants:
+    - scope must be one of APPROVAL_SCOPE_*.
+    - verdict must be "allow" or "deny".
+    - timestamp is set at creation time (immutable after creation).
+    """
+
+    scope: str                   # one_off | session | world
+    verdict: str                 # allow | deny
+    participant_id: str = ""     # identity of the participant making this decision
+    timestamp: str = field(default_factory=lambda: _now())
+
+    def to_dict(self) -> dict:
+        return {
+            "scope": self.scope,
+            "verdict": self.verdict,
+            "participant_id": self.participant_id,
+            "timestamp": self.timestamp,
+        }
+
+
+# ---------------------------------------------------------------------------
+# ParticipantRegistration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ParticipantRegistration:
+    """
+    A registered participant that can respond to approval requests.
+
+    A participant holds a set of roles which map to approval scopes:
+      user     → one_off scope
+      operator → session scope
+      admin    → world scope
+
+    A single participant may hold multiple roles simultaneously and can
+    respond with verdicts for all applicable scopes in one PATCH request.
+
+    Invariants:
+    - participant_id is the session_id of the participant's SSE connection.
+    - roles is a set; duplicates are ignored.
+    - Registered participants receive "approval_requested" SSE events.
+    """
+
+    participant_id: str          # SSE session_id used to route events
+    session_id: str              # same as participant_id (SSE session)
+    roles: set                   # {"user", "operator", "admin"} — any subset
+    registered_at: str = field(default_factory=lambda: _now())
+
+    def to_dict(self) -> dict:
+        return {
+            "participant_id": self.participant_id,
+            "session_id": self.session_id,
+            "roles": sorted(self.roles),
+            "registered_at": self.registered_at,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +255,7 @@ class ActionApproval:
     created_at: str = field(default_factory=lambda: _now())
     resolved_at: Optional[str] = None
     resolved_by: Optional[str] = None
+    scoped_verdicts: list = field(default_factory=list)  # list[ScopedVerdict]
 
     def is_expired(self) -> bool:
         """Return True if this approval has passed its expiry time."""
@@ -203,6 +285,7 @@ class ActionApproval:
             "created_at": self.created_at,
             "resolved_at": self.resolved_at,
             "resolved_by": self.resolved_by,
+            "scoped_verdicts": [sv.to_dict() for sv in self.scoped_verdicts],
         }
 
 
