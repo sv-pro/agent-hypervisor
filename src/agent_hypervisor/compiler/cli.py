@@ -8,6 +8,7 @@ import click
 
 from .enforcer import Decision, EvalResult, Step, evaluate
 from .manifest import load_manifest, manifest_summary, save_manifest
+from .migrate import migrate_v1_to_v2
 from .observe import load_trace
 from .profile import build_manifest
 from .render import render_manifest, render_summary
@@ -315,6 +316,46 @@ def cmd_demo():
         "calls are excluded from the compiled manifest — only safe=True "
         "calls contribute to the capability profile."
     )
+
+
+@cli.command("migrate")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.option("--output", "-o", default=None, help="Output path for the v2 manifest YAML.")
+def cmd_migrate(manifest_file: str, output: str | None):
+    """Migrate a v1 World Manifest to v2 format.
+
+    \b
+    Reads MANIFEST_FILE (v1 format) and writes a v2 stub with TODO markers
+    for sections that require human review before the v2 compiler will accept it.
+
+    \b
+    Required review sections: entities, actors, trust_zones, side_effect_surfaces,
+    transition_policies. The migration tool fills in stubs with conservative defaults.
+
+    \b
+    Example:
+      ahc migrate workspace.yaml --output workspace_v2.yaml
+    """
+    source = Path(manifest_file)
+    dest = Path(output) if output else source.parent / f"{source.stem}_v2.yaml"
+
+    try:
+        v2_yaml = migrate_v1_to_v2(source)
+    except Exception as exc:
+        click.echo(_col(f"Migration failed: {exc}", _RED), err=True)
+        raise SystemExit(1)
+
+    dest.write_text(v2_yaml)
+    click.echo(_col(f"v2 manifest written to: {dest}", _GREEN))
+    click.echo()
+    click.echo("Next steps:")
+    click.echo("  1. Review all sections marked # TODO in the output file.")
+    click.echo("  2. Fill in: entities, actors, trust_zones, side_effect_surfaces,")
+    click.echo("              transition_policies.")
+    click.echo("  3. Validate with: ahc validate " + str(dest))
+    click.echo()
+    click.echo(_col("  The agent is free. The world is not.", _BOLD))
+    click.echo()
 
 
 @cli.command("run")
