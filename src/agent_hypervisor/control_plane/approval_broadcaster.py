@@ -10,6 +10,19 @@ Two distinct event types are broadcast:
    tool call) when any approval scope returns "allow". This unblocks the client
    so it can retry the tool call.
 
+SSE framing:
+  Control-plane notifications use a named SSE event type so clients can
+  distinguish them from JSON-RPC responses:
+
+    event: approval
+    data: {"type": "approval_requested", ...}
+
+  Clients listen via:
+    source.addEventListener("approval", (e) => { ... });
+
+  Raw JSON-RPC responses pushed by the MCP layer use the default "message"
+  event type and are unaffected.
+
 Architecture:
 - ApprovalBroadcaster holds an optional reference to the SSESessionStore.
 - The SSESessionStore is wired in by create_mcp_app() after the sse_store is
@@ -142,7 +155,13 @@ class ApprovalBroadcaster:
 
     def _push_to_session(self, session_id: str, payload: str) -> bool:
         """
-        Push a raw JSON string to a session's SSE queue.
+        Push a control-plane SSE frame to a session's queue.
+
+        Frames use the named event type ``approval`` so clients can distinguish
+        them from JSON-RPC ``message`` events::
+
+            event: approval
+            data: {"type": "approval_requested", ...}
 
         Uses put_nowait() so it is safe to call from synchronous handlers.
         Returns False and logs a warning on any failure.
@@ -152,8 +171,10 @@ class ApprovalBroadcaster:
         queue = self._sse_store.get_queue(session_id)
         if queue is None:
             return False
+        # Wrap payload in a named SSE event frame.
+        frame = f"event: approval\ndata: {payload}\n\n"
         try:
-            queue.put_nowait(payload)
+            queue.put_nowait(frame)
             return True
         except Exception as exc:
             log.warning(
