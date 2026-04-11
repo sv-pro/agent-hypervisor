@@ -6,6 +6,9 @@ from pathlib import Path
 
 import click
 
+from .coverage import analyze_coverage
+from .differ import diff_manifests
+from .draft import draft_manifest_to_file
 from .enforcer import Decision, EvalResult, Step, evaluate
 from .manifest import load_manifest, manifest_summary, save_manifest
 from .migrate import migrate_v1_to_v2
@@ -13,6 +16,9 @@ from .observe import load_trace
 from .profile import build_manifest
 from .render import render_manifest, render_summary
 from .schema import CapabilityConstraint, WorldManifest, manifest_to_dict
+from .simulate import simulate_trace
+from .test_runner import run_scenario_file, validate_scenario_file
+from .tune import suggest_edits
 
 # ── formatting helpers ──────────────────────────────────────────────────────
 
@@ -316,6 +322,521 @@ def cmd_demo():
         "calls are excluded from the compiled manifest — only safe=True "
         "calls contribute to the capability profile."
     )
+
+
+@cli.command("validate")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output errors as JSON.")
+def cmd_validate(manifest_file: str, as_json: bool):
+    """Validate a World Manifest against the v2 schema.
+
+    \b
+    Checks:
+      - version must be "2.0"
+      - Required sections present (manifest.name, actions, trust_channels, capability_matrix)
+      - Field types and enum values
+      - Cross-references (entity.data_class, zone.entities, action.confirmation_class, etc.)
+    """
+    import json as _json
+
+    from .loader_v2 import ManifestV2ValidationError, load as load_v2
+    from .loader import ManifestValidationError, load as load_v1
+
+    path = Path(manifest_file)
+    click.echo()
+
+    # Try v2 first, fall back to v1 for version detection
+    try:
+        load_v2(path)
+        if as_json:
+            click.echo(_json.dumps({"valid": True, "errors": []}))
+        else:
+            click.echo(_col(f"  {path.name}", _BOLD))
+            click.echo(_col("  valid", _GREEN) + "  Schema v2.0 — all checks passed")
+        click.echo()
+        return
+    except ManifestV2ValidationError as e:
+        msg = str(e)
+        if as_json:
+            click.echo(_json.dumps({"valid": False, "errors": [msg]}))
+        else:
+            click.echo(_col(f"  {path.name}", _BOLD))
+            click.echo(_col("  INVALID", _RED))
+            click.echo()
+            for line in msg.splitlines():
+                click.echo(f"  {line}")
+        click.echo()
+        raise SystemExit(1)
+
+
+@cli.command("simulate")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.argument("trace_file", type=click.Path(exists=True))
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output decision table as JSON.")
+def cmd_simulate(manifest_file: str, trace_file: str, as_json: bool):
+    """Dry-run a trace against a manifest and print the decision table.
+
+    \b
+    Replays each tool call in TRACE_FILE against MANIFEST_FILE without
+    executing real tools. Shows what would be allowed, denied, or escalated.
+
+    \b
+    Example:
+      ahc simulate manifests/workspace_v2.yaml traces/email_exfil.json
+    """
+    import json as _json
+
+    from .loader_v2 import ManifestV2ValidationError, load as load_v2
+
+    try:
+        manifest = load_v2(Path(manifest_file))
+    except ManifestV2ValidationError as e:
+        click.echo(_col(f"Manifest validation failed: {e}", _RED), err=True)
+        raise SystemExit(1)
+
+    trace = load_trace(trace_file)
+    result = simulate_trace(trace, manifest)
+
+    if as_json:
+        import dataclasses
+        click.echo(_json.dumps(
+            {
+                "manifest": result.manifest_name,
+                "trace": result.trace_id,
+                "decisions": [dataclasses.asdict(d) for d in result.decisions],
+                "summary": {
+                    "allowed": result.allowed_count,
+                    "denied": result.denied_count,
+                    "approval": result.approval_count,
+                },
+            },
+            indent=2,
+        ))
+        return
+
+    click.echo()
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(_col(f"  ahc simulate — {result.manifest_name}", _BOLD))
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(f"  Manifest : {manifest_file}")
+    click.echo(f"  Trace    : {trace_file}  ({trace.workflow_id})")
+    click.echo(f"  Steps    : {len(result.decisions)}")
+    click.echo()
+    click.echo(_col("─" * 62, _DIM))
+
+    for d in result.decisions:
+        tool_str = f"{d.tool:<28}"
+        if d.outcome == "ALLOW":
+            out = _col("ALLOW", _GREEN)
+        elif d.outcome == "REQUIRE_APPROVAL":
+            out = _col("APPROVAL", _YELLOW)
+        else:
+            out = _col("DENY ", _RED)
+
+        taint_tag = _col(" [tainted]", _YELLOW) if d.tainted else ""
+        action_tag = _col(f" → {d.action_name}", _DIM) if d.action_name else ""
+        click.echo(f"  {tool_str}  {out}{taint_tag}{action_tag}")
+        if d.outcome != "ALLOW":
+            click.echo(f"  {' ' * 28}  {_col(d.reason, _DIM)}")
+
+    click.echo(_col("─" * 62, _DIM))
+    click.echo(
+        f"  {_col(str(result.allowed_count), _GREEN)} allowed  "
+        f"| {_col(str(result.denied_count), _RED)} denied  "
+        f"| {_col(str(result.approval_count), _YELLOW)} approval"
+    )
+    click.echo()
+    click.echo(_col("  The agent is free. The world is not.", _BOLD))
+    click.echo()
+
+
+@cli.command("diff")
+@click.argument("old_manifest", type=click.Path(exists=True))
+@click.argument("new_manifest", type=click.Path(exists=True))
+@click.option("--section", default=None, help="Show only changes in this section.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output diff as JSON.")
+def cmd_diff(old_manifest: str, new_manifest: str, section: str | None, as_json: bool):
+    """Show structural diff between two manifest versions.
+
+    \b
+    Compares actions, trust_channels, capability_matrix, taint_rules,
+    and v2 world-model sections (entities, actors, data_classes, etc.).
+
+    \b
+    Example:
+      ahc diff manifests/workspace_v1.yaml manifests/workspace_v2.yaml
+    """
+    import json as _json
+    import yaml as _yaml
+
+    def _load_any(path: str) -> dict:
+        with open(path) as f:
+            return _yaml.safe_load(f)
+
+    old = _load_any(old_manifest)
+    new = _load_any(new_manifest)
+    diff = diff_manifests(old, new)
+
+    if as_json:
+        import dataclasses
+        click.echo(_json.dumps(
+            {
+                "old": diff.old_name,
+                "new": diff.new_name,
+                "summary": diff.summary(),
+                "changes": [dataclasses.asdict(c) for c in diff.changes],
+            },
+            indent=2,
+        ))
+        return
+
+    changes = diff.changes_in_section(section) if section else diff.changes
+
+    click.echo()
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(_col(f"  ahc diff", _BOLD))
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(f"  old : {old_manifest}  ({diff.old_name})")
+    click.echo(f"  new : {new_manifest}  ({diff.new_name})")
+    click.echo()
+
+    if not changes:
+        click.echo(_col("  No changes", _GREEN))
+        click.echo()
+        return
+
+    click.echo(_col(f"  {diff.summary()}", _BOLD))
+    click.echo(_col("─" * 62, _DIM))
+    click.echo()
+
+    current_section = None
+    for change in sorted(changes, key=lambda c: (c.section, c.kind, c.key)):
+        if change.section != current_section:
+            current_section = change.section
+            click.echo(_col(f"  [{current_section}]", _BOLD))
+
+        if change.kind == "added":
+            prefix = _col("[+]", _GREEN)
+        elif change.kind == "removed":
+            prefix = _col("[-]", _RED)
+        else:
+            prefix = _col("[~]", _YELLOW)
+
+        click.echo(f"    {prefix} {change}")
+
+    click.echo()
+
+
+@cli.command("coverage")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.argument("trace_files", type=click.Path(exists=True), nargs=-1)
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output coverage as JSON.")
+def cmd_coverage(manifest_file: str, trace_files: tuple[str, ...], as_json: bool):
+    """Show which manifest actions were exercised across traces.
+
+    \b
+    Identifies: covered actions, uncovered (dead) actions, and over-restricted
+    actions (triggered but always denied).
+
+    \b
+    Example:
+      ahc coverage manifests/workspace_v2.yaml traces/*.json
+    """
+    import json as _json
+
+    from .loader_v2 import ManifestV2ValidationError, load as load_v2
+
+    if not trace_files:
+        click.echo(_col("No trace files provided. Pass one or more trace JSON files.", _RED), err=True)
+        raise SystemExit(1)
+
+    try:
+        manifest = load_v2(Path(manifest_file))
+    except ManifestV2ValidationError as e:
+        click.echo(_col(f"Manifest validation failed: {e}", _RED), err=True)
+        raise SystemExit(1)
+
+    traces = [load_trace(f) for f in trace_files]
+    report = analyze_coverage(manifest, traces)
+
+    if as_json:
+        import dataclasses
+        click.echo(_json.dumps(
+            {
+                "manifest": report.manifest_name,
+                "traces": report.total_traces,
+                "calls": report.total_calls,
+                "coverage_pct": report.coverage_pct,
+                "covered": report.covered_actions,
+                "uncovered": report.uncovered_actions,
+                "over_restricted": report.over_restricted_actions,
+                "per_action": {
+                    name: dataclasses.asdict(ac)
+                    for name, ac in report.action_coverage.items()
+                },
+            },
+            indent=2,
+        ))
+        return
+
+    click.echo()
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(_col(f"  ahc coverage — {report.manifest_name}", _BOLD))
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(f"  Manifest : {manifest_file}")
+    click.echo(f"  Traces   : {report.total_traces}  ({report.total_calls} calls)")
+    click.echo(f"  Coverage : {report.summary()}")
+    click.echo()
+
+    if report.covered_actions:
+        click.echo(_col("  Covered actions:", _BOLD))
+        for name in report.covered_actions:
+            ac = report.action_coverage[name]
+            bar = (
+                f"allow={ac.allow_count}  "
+                f"deny_policy={ac.deny_policy_count}  "
+                f"approval={ac.approval_count}"
+            )
+            click.echo(f"    {_col('✓', _GREEN)}  {name:<40}  {_col(bar, _DIM)}")
+
+    if report.uncovered_actions:
+        click.echo()
+        click.echo(_col("  Uncovered (dead rules):", _BOLD))
+        for name in report.uncovered_actions:
+            click.echo(f"    {_col('○', _YELLOW)}  {name}")
+
+    if report.over_restricted_actions:
+        click.echo()
+        click.echo(_col("  Over-restricted (always denied — consider tuning):", _BOLD))
+        for name in report.over_restricted_actions:
+            click.echo(f"    {_col('✗', _RED)}  {name}")
+
+    click.echo()
+
+
+@cli.command("tune")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.argument("trace_file", type=click.Path(exists=True))
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output suggestions as JSON.")
+def cmd_tune(manifest_file: str, trace_file: str, as_json: bool):
+    """Suggest manifest edits for failing decisions in a trace.
+
+    \b
+    Replays TRACE_FILE against MANIFEST_FILE, then for each denied or
+    approval-required decision, suggests the minimal manifest edit that
+    would change the outcome.
+
+    \b
+    All suggestions are deterministic — no LLM is used.
+    For LLM-assisted authoring, use: ahc draft
+
+    \b
+    Example:
+      ahc tune manifests/workspace_v2.yaml traces/failing_trace.json
+    """
+    import json as _json
+    import dataclasses
+
+    from .loader_v2 import ManifestV2ValidationError, load as load_v2
+
+    try:
+        manifest = load_v2(Path(manifest_file))
+    except ManifestV2ValidationError as e:
+        click.echo(_col(f"Manifest validation failed: {e}", _RED), err=True)
+        raise SystemExit(1)
+
+    trace = load_trace(trace_file)
+    sim = simulate_trace(trace, manifest)
+    failing = [d for d in sim.decisions if not d.allowed]
+    result = suggest_edits(manifest, failing)
+
+    if as_json:
+        click.echo(_json.dumps(
+            {
+                "manifest": manifest.get("manifest", {}).get("name", "unknown") if isinstance(manifest, dict) else "unknown",
+                "trace": trace.workflow_id,
+                "failing_decisions": len(failing),
+                "suggestions": [dataclasses.asdict(s) for s in result.suggestions],
+            },
+            indent=2,
+        ))
+        return
+
+    manifest_name = manifest.get("manifest", {}).get("name", "unknown") if isinstance(manifest, dict) else "unknown"
+    click.echo()
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(_col(f"  ahc tune — {manifest_name}", _BOLD))
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(f"  Manifest : {manifest_file}")
+    click.echo(f"  Trace    : {trace_file}  ({trace.workflow_id})")
+    click.echo(f"  Failing  : {len(failing)} decisions")
+    click.echo()
+
+    if not failing:
+        click.echo(_col("  No failing decisions — nothing to tune.", _GREEN))
+        click.echo()
+        return
+
+    click.echo(_col("  Failing decisions:", _BOLD))
+    for d in failing:
+        click.echo(f"    {_col('✗', _RED)}  {d.tool}  →  {d.outcome}  {_col(d.reason, _DIM)}")
+
+    click.echo()
+    click.echo(_col(f"  Suggestions ({result.summary()}):", _BOLD))
+    click.echo(_col("─" * 62, _DIM))
+
+    for i, s in enumerate(result.suggestions, 1):
+        click.echo()
+        click.echo(f"  {_col(f'[{i}]', _BOLD)}  {_col(s.kind, _YELLOW)}  {s.section}.{s.key}")
+        click.echo(f"       {_col(s.rationale, _DIM)}")
+        click.echo()
+        click.echo("       YAML patch:")
+        for line in s.yaml_patch().splitlines():
+            click.echo(f"         {_col(line, _DIM)}")
+
+    click.echo()
+    click.echo(_col("  Review all suggestions before applying. Security properties may change.", _BOLD))
+    click.echo()
+
+
+@cli.command("draft")
+@click.option(
+    "--description", "-d", required=True,
+    help="Natural-language description of the agent and its world.",
+)
+@click.option("--output", "-o", default=None, help="Output path for the drafted manifest YAML.")
+@click.option("--model", default="claude-opus-4-6", show_default=True, help="Claude model to use.")
+@click.option("--api-key", default=None, envvar="ANTHROPIC_API_KEY", help="Anthropic API key.")
+def cmd_draft(description: str, output: str | None, model: str, api_key: str | None):
+    """Draft a World Manifest from a natural-language description.
+
+    \b
+    Uses the Claude API at design-time to generate a manifest YAML.
+    The LLM is NOT on the execution path — it participates only here.
+
+    \b
+    The generated manifest is a starting point. Review and run
+    'ahc validate' before using it in production.
+
+    \b
+    Example:
+      ahc draft --description "Email assistant that reads and sends emails"
+      ahc draft -d "File manager with read, write, delete" -o my_manifest.yaml
+    """
+    dest = Path(output) if output else Path("draft_manifest.yaml")
+
+    click.echo()
+    click.echo(_col("  Drafting manifest via Claude API...", _DIM))
+    click.echo()
+
+    try:
+        path = draft_manifest_to_file(description, dest, model=model, api_key=api_key)
+    except ImportError as e:
+        click.echo(_col(f"  {e}", _RED), err=True)
+        raise SystemExit(1)
+    except ValueError as e:
+        click.echo(_col(f"  {e}", _RED), err=True)
+        raise SystemExit(1)
+
+    click.echo(_col(f"  Draft written to: {path}", _GREEN))
+    click.echo()
+    click.echo("  Next steps:")
+    click.echo("    1. Review the generated YAML — especially action_class, risk_class,")
+    click.echo("       external_boundary, and requires_approval fields.")
+    click.echo(f"    2. Validate: ahc validate {path}")
+    click.echo(f"    3. Test:     ahc test {path} scenarios.yaml")
+    click.echo()
+
+
+@cli.command("test")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.argument("scenario_file", type=click.Path(exists=True))
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output report as JSON.")
+@click.option("--fail-fast", is_flag=True, default=False, help="Stop on first failure.")
+def cmd_test(manifest_file: str, scenario_file: str, as_json: bool, fail_fast: bool):
+    """Run a YAML scenario test suite against a manifest.
+
+    \b
+    Scenario file format:
+      scenarios:
+        - name: "Allow: read email"
+          tool: get_unread_emails
+          params: {}
+          expect: allow         # allow | deny | absent | policy | approval
+          tainted: false
+
+    \b
+    Example:
+      ahc test manifests/workspace_v2.yaml tests/workspace_scenarios.yaml
+    """
+    import json as _json
+    import dataclasses
+
+    from .loader_v2 import ManifestV2ValidationError, load as load_v2
+
+    # Validate scenario file first
+    errors = validate_scenario_file(scenario_file)
+    if errors:
+        click.echo(_col("Scenario file validation failed:", _RED), err=True)
+        for e in errors:
+            click.echo(f"  {e}", err=True)
+        raise SystemExit(1)
+
+    try:
+        manifest = load_v2(Path(manifest_file))
+    except ManifestV2ValidationError as e:
+        click.echo(_col(f"Manifest validation failed: {e}", _RED), err=True)
+        raise SystemExit(1)
+
+    report = run_scenario_file(scenario_file, manifest)
+
+    if as_json:
+        click.echo(_json.dumps(
+            {
+                "manifest": report.manifest_name,
+                "scenario_file": report.scenario_file,
+                "passed": report.passed_count,
+                "failed": report.failed_count,
+                "total": report.total,
+                "results": [dataclasses.asdict(r) for r in report.results],
+            },
+            indent=2,
+        ))
+        return
+
+    click.echo()
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(_col(f"  ahc test — {report.manifest_name}", _BOLD))
+    click.echo(_col("=" * 62, _BOLD))
+    click.echo(f"  Manifest  : {manifest_file}")
+    click.echo(f"  Scenarios : {scenario_file}")
+    click.echo()
+
+    for r in report.results:
+        if r.passed:
+            status = _col("PASS", _GREEN)
+        else:
+            status = _col("FAIL", _RED)
+        name = f"{r.name:<42}"
+        click.echo(f"  {status}  {name}")
+        if not r.passed:
+            click.echo(
+                f"       expected={r.expected}  actual={r.actual}  "
+                f"{_col(r.reason, _DIM)}"
+            )
+        if fail_fast and not r.passed:
+            click.echo()
+            click.echo(_col("  Stopped at first failure (--fail-fast)", _YELLOW))
+            break
+
+    click.echo(_col("─" * 62, _DIM))
+    if report.all_passed:
+        click.echo(_col(f"  {report.summary()}", _GREEN))
+    else:
+        click.echo(_col(f"  {report.summary()}", _RED))
+    click.echo()
+    if not report.all_passed:
+        raise SystemExit(1)
 
 
 @cli.command("migrate")
