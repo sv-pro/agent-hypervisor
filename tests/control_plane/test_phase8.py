@@ -72,6 +72,23 @@ def _sv(scope: str, verdict: str, pid: str = "p1") -> ScopedVerdict:
     return ScopedVerdict(scope=scope, verdict=verdict, participant_id=pid)
 
 
+def _parse_sse_frame(frame: str) -> dict:
+    """
+    Parse a control-plane SSE frame into a dict.
+
+    Frames have the format::
+
+        event: approval
+        data: {...JSON...}
+
+    Strips the frame header lines and returns the parsed JSON payload.
+    """
+    for line in frame.split("\n"):
+        if line.startswith("data: "):
+            return json.loads(line[len("data: "):])
+    raise ValueError(f"No data line found in SSE frame: {frame!r}")
+
+
 # ---------------------------------------------------------------------------
 # 1. Domain: constants and dataclasses
 # ---------------------------------------------------------------------------
@@ -429,7 +446,7 @@ class TestApprovalBroadcaster:
         count = bc.broadcast_approval_requested(approval, reg)
         assert count == 1
         assert not queue.empty()
-        payload = json.loads(queue.get_nowait())
+        payload = _parse_sse_frame(queue.get_nowait())
         assert payload["type"] == "approval_requested"
         assert payload["approval_id"] == approval.approval_id
         assert payload["tool_name"] == "tool"
@@ -456,7 +473,7 @@ class TestApprovalBroadcaster:
 
         result = bc.notify_originator("sess-o", approval, "allow")
         assert result is True
-        payload = json.loads(queue.get_nowait())
+        payload = _parse_sse_frame(queue.get_nowait())
         assert payload["type"] == "approval_resolved"
         assert payload["approval_id"] == approval.approval_id
         assert payload["effective_verdict"] == "allow"
@@ -708,7 +725,7 @@ class TestFullRoundTrip:
         # Step 4: Broadcast to participants.
         n = state.broadcaster.broadcast_approval_requested(approval, state.participant_registry)
         assert n == 1
-        payload = json.loads(participant_queue.get_nowait())
+        payload = _parse_sse_frame(participant_queue.get_nowait())
         assert payload["type"] == "approval_requested"
         assert payload["approval_id"] == approval.approval_id
         assert payload["tool_name"] == "write_file"
@@ -727,7 +744,7 @@ class TestFullRoundTrip:
 
         # Step 6: Originator is notified.
         state.broadcaster.notify_originator("agent-sess", approval, "allow")
-        notification = json.loads(originator_queue.get_nowait())
+        notification = _parse_sse_frame(originator_queue.get_nowait())
         assert notification["type"] == "approval_resolved"
         assert notification["effective_verdict"] == "allow"
 

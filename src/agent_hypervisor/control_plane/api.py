@@ -407,6 +407,10 @@ def create_control_plane_router(state: ControlPlaneState) -> APIRouter:
 
         An expired approval always resolves as "denied" regardless of the
         requested decision (fail-closed rule).
+
+        When the decision is "allowed", an ``approval_resolved`` SSE event is
+        pushed to the originating session so the MCP client can automatically
+        retry the tool call without manual re-issue.
         """
         if body.decision not in (APPROVAL_STATUS_ALLOWED, APPROVAL_STATUS_DENIED):
             raise HTTPException(
@@ -425,6 +429,18 @@ def create_control_plane_router(state: ControlPlaneState) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"Approval not found: {approval_id!r}")
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+
+        # Notify the originating session so it can retry the tool call.
+        # Fail-open: broadcaster errors must never crash the response path.
+        effective_verdict = "allow" if resolved.status == APPROVAL_STATUS_ALLOWED else "deny"
+        try:
+            state.broadcaster.notify_originator(
+                originator_session_id=resolved.session_id,
+                approval=resolved,
+                effective_verdict=effective_verdict,
+            )
+        except Exception:
+            pass
 
         return JSONResponse(resolved.to_dict())
 

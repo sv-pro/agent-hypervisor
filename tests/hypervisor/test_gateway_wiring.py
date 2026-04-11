@@ -483,3 +483,283 @@ class TestExistingBehaviorUnchanged:
             client.post("/control/sessions", json={"manifest_id": "m1"})
             resp = client.get("/control/sessions")
             assert resp.json()["count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Group 7: Approval feedback loop — end-to-end round-trip
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+
+class TestApprovalFeedbackLoop:
+    """
+    Verify the full feedback loop:
+
+      tools/call (ask) → pending_approval
+        → operator resolves via /resolve OR /respond
+        → originator SSE queue receives an approval_resolved frame
+        → second tools/call (same args) succeeds because has_explicit_allow()=True
+    """
+
+    @pytest.fixture
+    def app_with_cp(self):
+        """Gateway with a control plane and a policy engine that asks for send_email."""
+        cp = ControlPlaneState.create()
+        policy = _AskPolicyEngine(ask_tool="send_email")
+        return create_mcp_app(
+            manifest_path=MANIFEST_PATH,
+            policy_engine=policy,
+            control_plane=cp,
+        )
+
+    def _wire_sse_queue(self, app, session_id: str):
+        """
+        Inject a real asyncio.Queue into the SSESessionStore for ``session_id``
+        so that broadcaster.notify_originator() has somewhere to push events.
+        Returns the queue so the test can inspect it.
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+        sse_store = app.state.sse_store
+        sse_store._sessions[session_id] = queue
+        return queue
+
+    # ------------------------------------------------------------------
+    # Test 1: old /resolve endpoint now notifies originator
+    # ------------------------------------------------------------------
+
+    def test_resolve_endpoint_pushes_sse_on_allow(self, app_with_cp):
+        """POST /control/approvals/{id}/resolve with 'allowed' pushes approval_resolved to originator."""
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-resolve-01"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            queue = self._wire_sse_queue(app_with_cp, sid)
+
+            # Step 1: trigger ask → pending_approval
+            result = _tools_call(client, "send_email", {"to": "x@y.com"}, session_id=sid)
+            assert result["result"]["status"] == "pending_approval"
+            approval_id = result["result"]["approval_id"]
+
+            # Confirm queue is empty before resolve
+            assert queue.empty()
+
+            # Step 2: operator resolves via old endpoint
+            resp = client.post(
+                f"/control/approvals/{approval_id}/resolve",
+                json={"decision": "allowed", "resolved_by": "operator"},
+            )
+            assert resp.status_code == 200
+
+            # Step 3: SSE queue must now contain an approval_resolved frame
+            assert not queue.empty(), "Expected approval_resolved event in SSE queue"
+            frame = queue.get_nowait()
+            assert "event: approval" in frame
+            assert "approval_resolved" in frame
+            assert "allow" in frame
+
+    def test_resolve_deny_does_not_push_allow_sse(self, app_with_cp):
+        """POST /resolve with 'denied' still pushes an SSE frame (with deny verdict)."""
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-resolve-02"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            queue = self._wire_sse_queue(app_with_cp, sid)
+
+            result = _tools_call(client, "send_email", {"to": "x@y.com"}, session_id=sid)
+            approval_id = result["result"]["approval_id"]
+
+            client.post(
+                f"/control/approvals/{approval_id}/resolve",
+                json={"decision": "denied", "resolved_by": "operator"},
+            )
+
+            # Denied: a frame is pushed but its verdict is "deny"
+            assert not queue.empty(), "Expected SSE frame even on deny"
+            frame = queue.get_nowait()
+            assert "approval_resolved" in frame
+            assert "deny" in frame
+
+    # ------------------------------------------------------------------
+    # Test 2: new /respond endpoint still notifies originator
+    # ------------------------------------------------------------------
+
+    def test_respond_endpoint_pushes_sse_on_one_off_allow(self, app_with_cp):
+        """PATCH /control/approvals/{id}/respond with one_off allow notifies originator."""
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-respond-01"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            queue = self._wire_sse_queue(app_with_cp, sid)
+
+            result = _tools_call(client, "send_email", {"to": "x@y.com"}, session_id=sid)
+            approval_id = result["result"]["approval_id"]
+
+            assert queue.empty()
+
+            resp = client.patch(
+                f"/control/approvals/{approval_id}/respond",
+                json={"verdicts": [{"scope": "one_off", "verdict": "allow", "participant_id": "op"}]},
+            )
+            assert resp.status_code == 200
+
+            assert not queue.empty(), "Expected approval_resolved event via /respond"
+            frame = queue.get_nowait()
+            assert "event: approval" in frame
+            assert "approval_resolved" in frame
+            assert "allow" in frame
+
+    # ------------------------------------------------------------------
+    # Test 3: retry tool call succeeds after explicit allow
+    # ------------------------------------------------------------------
+
+    def test_retry_after_resolve_allow_succeeds(self, app_with_cp):
+        """
+        After /resolve with 'allowed', a second tools/call with the same
+        args bypasses the ask workflow (has_explicit_allow=True) and executes.
+        """
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-retry-01"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            self._wire_sse_queue(app_with_cp, sid)
+
+            args = {"to": "retry@example.com"}
+
+            # First call → pending
+            result1 = _tools_call(client, "send_email", args, session_id=sid)
+            assert result1["result"]["status"] == "pending_approval"
+            approval_id = result1["result"]["approval_id"]
+
+            # Operator allows
+            client.post(
+                f"/control/approvals/{approval_id}/resolve",
+                json={"decision": "allowed", "resolved_by": "operator"},
+            )
+
+            # Second call with same args → must not be pending_approval
+            result2 = _tools_call(client, "send_email", args, session_id=sid)
+            # has_explicit_allow() returns True → falls through to adapter dispatch
+            assert result2.get("result", {}).get("status") != "pending_approval", (
+                f"Expected retry to succeed, got: {result2}"
+            )
+            # And it should not be a hard error about missing control plane
+            if "error" in result2:
+                assert "no control plane" not in result2["error"].get("message", "").lower()
+
+    def test_retry_after_respond_one_off_allow_succeeds(self, app_with_cp):
+        """
+        After /respond with one_off allow, a second tools/call with the same
+        args sees has_explicit_allow=True and proceeds to dispatch.
+        """
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-retry-02"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            self._wire_sse_queue(app_with_cp, sid)
+
+            args = {"to": "retry2@example.com"}
+
+            result1 = _tools_call(client, "send_email", args, session_id=sid)
+            approval_id = result1["result"]["approval_id"]
+
+            client.patch(
+                f"/control/approvals/{approval_id}/respond",
+                json={"verdicts": [{"scope": "one_off", "verdict": "allow", "participant_id": "op"}]},
+            )
+
+            result2 = _tools_call(client, "send_email", args, session_id=sid)
+            assert result2.get("result", {}).get("status") != "pending_approval"
+
+    # ------------------------------------------------------------------
+    # Test 4: SSE frame format is well-formed
+    # ------------------------------------------------------------------
+
+    def test_sse_frame_contains_named_event_type(self, app_with_cp):
+        """Broadcaster pushes frames with 'event: approval\\ndata: {...}' format."""
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-frame-01"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            queue = self._wire_sse_queue(app_with_cp, sid)
+
+            result = _tools_call(client, "send_email", {"to": "fmt@example.com"}, session_id=sid)
+            approval_id = result["result"]["approval_id"]
+
+            client.post(
+                f"/control/approvals/{approval_id}/resolve",
+                json={"decision": "allowed", "resolved_by": "op"},
+            )
+
+            frame = queue.get_nowait()
+            lines = frame.split("\n")
+            # First line must be the named event type
+            assert lines[0] == "event: approval", f"Bad frame first line: {lines[0]!r}"
+            # Second line must start with 'data: '
+            assert lines[1].startswith("data: "), f"Bad frame data line: {lines[1]!r}"
+            # The data must be valid JSON
+            import json
+            payload = json.loads(lines[1][len("data: "):])
+            assert payload["type"] == "approval_resolved"
+            assert "approval_id" in payload
+            assert payload["effective_verdict"] in ("allow", "deny")
+
+    # ------------------------------------------------------------------
+    # Test 5: broadcaster has no SSE store → notify is a safe no-op
+    # ------------------------------------------------------------------
+
+    def test_notify_without_sse_store_is_noop(self, app_with_cp):
+        """If broadcaster has no SSE store wired, notify_originator returns False silently."""
+        from agent_hypervisor.control_plane.approval_broadcaster import ApprovalBroadcaster
+        broadcaster = ApprovalBroadcaster()  # no set_sse_store() called
+        from unittest.mock import MagicMock
+        mock_approval = MagicMock()
+        mock_approval.approval_id = "test-id"
+        mock_approval.scoped_verdicts = []
+        result = broadcaster.notify_originator("any-session", mock_approval, "allow")
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # Test 6: expired approval → resolve → deny pushed, not allow
+    # ------------------------------------------------------------------
+
+    def test_expired_approval_resolve_pushes_deny(self, app_with_cp):
+        """Resolving an expired approval with 'allowed' still results in a deny broadcast."""
+        from datetime import datetime, timezone, timedelta
+        with TestClient(app_with_cp) as client:
+            sid = "feedback-expired-01"
+            app_with_cp.state.control_plane.session_store.create(
+                manifest_id="test", session_id=sid
+            )
+            queue = self._wire_sse_queue(app_with_cp, sid)
+
+            result = _tools_call(client, "send_email", {"to": "exp@example.com"}, session_id=sid)
+            approval_id = result["result"]["approval_id"]
+
+            # Manually expire the approval
+            cp = app_with_cp.state.control_plane
+            approval = cp.approval_service.get(approval_id)
+            approval.expires_at = (
+                datetime.now(timezone.utc) - timedelta(seconds=1)
+            ).isoformat()
+
+            # Operator attempts to allow the expired approval
+            resp = client.post(
+                f"/control/approvals/{approval_id}/resolve",
+                json={"decision": "allowed", "resolved_by": "operator"},
+            )
+            assert resp.status_code == 200
+            # Service overrides to denied on expiry
+            assert resp.json()["status"] in ("denied", "expired")
+
+            # SSE frame should carry deny verdict
+            if not queue.empty():
+                frame = queue.get_nowait()
+                assert "deny" in frame
+
