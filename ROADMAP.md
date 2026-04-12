@@ -108,7 +108,7 @@ Full results: `research/benchmarks/agentdojo/results.md`
 | Deliverable | Issue | What it enables |
 | --- | --- | --- |
 | Docker local stack | #31 | `docker compose up` starts a complete working demo |
-| Web UI | #32 | Tabs for manifests, decisions, traces, provenance, benchmark runs |
+| Web UI | #32 | **Phase 1 delivered:** decisions + approvals + sessions ops UI. **Remaining:** manifest editor/simulator, provenance explorer, benchmark runs |
 | Hello-world tutorial | #33 | A developer can wire up a new agent in under an hour |
 | Positioning and comparisons | #34 | Clear differentiation from guardrails, sandboxes, and policy engines |
 
@@ -124,7 +124,7 @@ Stage 3 is a mini-product, not a universal framework. The scope is bounded: one 
 | M2 Core Engine | Complete |
 | M3 Tool Boundary | Complete |
 | M4 Proof | Complete — 0% ASR, 80% utility (clean + under attack) on 560-pair workspace benchmark |
-| M5 Beta Product | In progress — Docker stack present, hello-world and positioning docs complete; Web UI (#32) pending |
+| M5 Beta Product | In progress — Docker stack present, hello-world and positioning docs complete; Web UI partially complete (ops dashboard shipped, advanced tabs pending) |
 
 ---
 
@@ -144,6 +144,17 @@ The benchmark report (`benchmarks/reports/report-v1.md`) shows measurable contai
 
 **Stage 3 (Beta Product):**
 A developer unfamiliar with the project can run `docker compose up`, complete the hello-world tutorial, and understand where the architecture's guarantees end — without reading the whitepaper.
+
+### M5 / Web UI Acceptance Checklist (explicit)
+
+- [x] Approvals/decisions dashboard (pending, resolved, filterable status)
+- [x] Session timeline/inspection surface
+- [x] Policy/version/traces visibility for operators
+- [ ] Manifest editor with inline validation (`ahc validate`)
+- [ ] Simulation panel (`ahc simulate`) and decision table preview
+- [ ] Diff/coverage/tuning views (`ahc diff`, `ahc coverage`, `ahc tune`)
+- [ ] Provenance graph explorer tab
+- [ ] Benchmark run/report tab
 
 ---
 
