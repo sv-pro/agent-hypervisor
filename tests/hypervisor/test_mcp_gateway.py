@@ -136,6 +136,49 @@ class TestToolSurfaceRenderer:
         names = [t.name for t in renderer.render()]
         assert names == ["send_email", "read_file"]
 
+    def test_input_schema_enforces_path_globs(self):
+        """paths constraints should become JSON Schema path assertions."""
+        from jsonschema import validate, ValidationError
+        from agent_hypervisor.compiler.schema import WorldManifest, CapabilityConstraint
+        from agent_hypervisor.hypervisor.mcp_gateway import ToolSurfaceRenderer
+
+        manifest = WorldManifest(
+            workflow_id="paths-world",
+            capabilities=[
+                CapabilityConstraint(tool="read_file", constraints={"paths": ["/safe/*"]})
+            ],
+        )
+        registry = _make_registry(["read_file"])
+        renderer = ToolSurfaceRenderer(manifest, registry)
+
+        schema = renderer.render()[0].inputSchema
+        validate(instance={"path": "/safe/report.txt"}, schema=schema)
+        with pytest.raises(ValidationError):
+            validate(instance={"path": "/etc/passwd"}, schema=schema)
+
+    def test_input_schema_enforces_domain_enum(self):
+        """domains constraints should become JSON Schema enum assertions."""
+        from jsonschema import validate, ValidationError
+        from agent_hypervisor.compiler.schema import WorldManifest, CapabilityConstraint
+        from agent_hypervisor.hypervisor.mcp_gateway import ToolSurfaceRenderer
+
+        manifest = WorldManifest(
+            workflow_id="domains-world",
+            capabilities=[
+                CapabilityConstraint(
+                    tool="http_post",
+                    constraints={"domains": ["internal.local", "api.partner.com"]},
+                )
+            ],
+        )
+        registry = _make_registry(["http_post"])
+        renderer = ToolSurfaceRenderer(manifest, registry)
+
+        schema = renderer.render()[0].inputSchema
+        validate(instance={"domain": "internal.local"}, schema=schema)
+        with pytest.raises(ValidationError):
+            validate(instance={"domain": "evil.example"}, schema=schema)
+
 
 # ---------------------------------------------------------------------------
 # Group 2: ToolCallEnforcer

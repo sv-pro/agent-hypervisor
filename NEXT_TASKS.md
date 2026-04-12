@@ -16,11 +16,11 @@
   - Reconcile roadmap/status wording with current implemented UI surface.
   - Add a short “remaining gaps” list.
 
-- [-] **T2 — Enforce manifest constraints as real JSON Schema in MCP tool surface**
+- [x] **T2 — Enforce manifest constraints as real JSON Schema in MCP tool surface** *(PR: this branch / pending number)*
   - Convert current `x-ah-constraints` metadata into validated schema assertions where possible.
   - Add/extend tests for accepted + rejected payloads.
 
-- [ ] **T3 — Harden approval/ASK runtime pathway**
+- [-] **T3 — Harden approval/ASK runtime pathway**
   - Resolve key gaps keeping approval gate in “experimental”.
   - Ensure deterministic state transitions and persistence/recovery behavior are covered by tests.
 
