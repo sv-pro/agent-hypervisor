@@ -108,7 +108,7 @@ Full results: `research/benchmarks/agentdojo/results.md`
 | Deliverable | Issue | What it enables |
 | --- | --- | --- |
 | Docker local stack | #31 | `docker compose up` starts a complete working demo |
-| Web UI | #32 | **Phase 1 delivered:** decisions + approvals + sessions ops UI. **Remaining:** manifest editor/simulator, provenance explorer, benchmark runs |
+| Web UI | #32 | **Phase 1 delivered:** manifests/decisions/traces/provenance/benchmark-report ops tabs. **Remaining:** manifest editor/simulator, diff/coverage/tune, provenance graph explorer, benchmark run trigger |
 | Hello-world tutorial | #33 | A developer can wire up a new agent in under an hour |
 | Positioning and comparisons | #34 | Clear differentiation from guardrails, sandboxes, and policy engines |
 
@@ -124,7 +124,7 @@ Stage 3 is a mini-product, not a universal framework. The scope is bounded: one 
 | M2 Core Engine | Complete |
 | M3 Tool Boundary | Complete |
 | M4 Proof | Complete — 0% ASR, 80% utility (clean + under attack) on 560-pair workspace benchmark |
-| M5 Beta Product | In progress — Docker stack present, hello-world and positioning docs complete; Web UI partially complete (ops dashboard shipped, advanced tabs pending) |
+| M5 Beta Product | In progress — Docker stack present, hello-world and positioning docs complete; Web UI ops tabs shipped (manifests/decisions/traces/provenance/benchmark reports), authoring/simulation features pending |
 
 ---
 
@@ -153,8 +153,8 @@ A developer unfamiliar with the project can run `docker compose up`, complete th
 - [ ] Manifest editor with inline validation (`ahc validate`)
 - [ ] Simulation panel (`ahc simulate`) and decision table preview
 - [ ] Diff/coverage/tuning views (`ahc diff`, `ahc coverage`, `ahc tune`)
-- [ ] Provenance graph explorer tab
-- [ ] Benchmark run/report tab
+- [ ] Provenance graph explorer tab (current UI shows provenance rule table; graph explorer pending)
+- [ ] Benchmark run trigger tab (current UI renders benchmark reports from `_research/benchmarks/reports/`)
 
 ---
 

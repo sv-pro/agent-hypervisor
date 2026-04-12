@@ -29,7 +29,7 @@ The `program_layer` package is an **optional execution abstraction** that sits *
 | `sandbox_runtime.py` | `SandboxRuntime` | Minimal restricted execution environment |
 | `program_executor.py` | `ProgramExecutor` | Runs programs in sandbox |
 | `task_compiler.py` | `DeterministicTaskCompiler` | Compiles tasks to execution plans |
-| `interfaces.py` | `Executor` protocol | Protocol definition for executor implementations |
+| `interfaces.py` | `TaskCompiler`, `Executor`, `ProgramRegistry` | Protocols plus `ProgramRegistry` store/load stub interface |
 
 ## Execution Plan Types
 
@@ -105,6 +105,11 @@ Error types: `"timeout"`, `"security"`, `"runtime"`, `"validation"`.
 2. **Fail closed.** Unknown error → `SandboxError`; exceeds timeout → `SandboxTimeoutError`; forbidden AST node → `SandboxSecurityError`.
 3. **Offline by default.** No network, subprocess, or filesystem access permitted in sandbox.
 4. **Explicit bindings only.** The sandbox environment contains only what `allowed_bindings` declares.
+
+## Current implementation status
+
+- `ProgramRegistry.store()` and `ProgramRegistry.load()` are intentionally stubbed and raise `NotImplementedError` (planned persistence work).
+- `DeterministicTaskCompiler` + `ProgramExecutor` are implemented for current sandbox execution flow.
 
 ## See Also
 

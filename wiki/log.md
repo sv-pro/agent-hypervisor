@@ -1,5 +1,14 @@
 # Wiki Log
 
+## [2026-04-12] housekeeping | Roadmap/task reconciliation + wiki sync
+
+Performed a housekeeping pass to align planning docs and wiki summaries with current code state:
+
+- Updated `ROADMAP.md` M5/Web UI wording to match shipped tabs (`manifests`, `decisions`, `traces`, `provenance`, benchmark report viewer) while keeping authoring/simulation features as remaining work.
+- Clarified acceptance checklist language so "provenance graph explorer" and "benchmark run trigger" stay explicitly pending, with notes that rule-table/report-view surfaces already exist.
+- Updated `NEXT_TASKS.md` T3 note to reflect that approval persistence/recovery primitives already exist and that remaining work is hardening/parity.
+- Synced `wiki/code/program_layer.md` with real API surface by documenting `interfaces.py` as `TaskCompiler` + `Executor` + `ProgramRegistry`, and explicitly calling out `ProgramRegistry` persistence as still stubbed.
+
 ## [2026-04-10] ingest | Control plane, gateway wiring, and multi-scope approval system
 
 Reflected PRs #88 and #89 into the wiki. Three major features landed:

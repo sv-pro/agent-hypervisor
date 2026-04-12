@@ -21,8 +21,9 @@
   - Add/extend tests for accepted + rejected payloads.
 
 - [-] **T3 — Harden approval/ASK runtime pathway**
-  - Resolve key gaps keeping approval gate in “experimental”.
+  - Resolve remaining gaps keeping approval gate in “experimental”.
   - Ensure deterministic state transitions and persistence/recovery behavior are covered by tests.
+  - 2026-04-12 audit note: approval persistence/recovery primitives are present (`ApprovalStore`, gateway recovery path); remaining work is to close any edge-case/runtime parity gaps before promoting maturity.
 
 - [ ] **T4 — Implement ProgramRegistry persistence interface**
   - Implement `store()` and `load()` with a concrete backend.
