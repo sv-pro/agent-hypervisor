@@ -18,6 +18,8 @@ Invariants:
 
 from __future__ import annotations
 
+import fnmatch
+
 from agent_hypervisor.compiler.schema import WorldManifest
 from agent_hypervisor.hypervisor.gateway.tool_registry import ToolRegistry
 
@@ -84,11 +86,44 @@ class ToolSurfaceRenderer:
         """
         Build a JSON Schema for the tool's inputSchema field.
 
-        Currently generates a permissive schema. Constraints from the manifest
-        are recorded as metadata but not yet enforced as JSON Schema assertions.
-        A future phase can derive tighter schemas from constraint specs.
+        Emits a permissive object schema and translates known manifest
+        constraints into JSON Schema assertions when possible:
+
+        - paths   -> properties.path {anyOf: [{pattern: ...}, ...]}
+        - domains -> properties.domain {enum: [...]}
+
+        Unknown constraint keys are preserved in metadata under
+        x-ah-constraints for auditability and forward compatibility.
         """
-        schema: dict = {"type": "object", "properties": {}}
-        if constraints:
-            schema["x-ah-constraints"] = constraints
+        schema: dict = {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": True,
+        }
+        if not constraints:
+            return schema
+
+        # Preserve full source constraints for explainability.
+        schema["x-ah-constraints"] = constraints
+
+        properties = schema["properties"]
+
+        paths = constraints.get("paths")
+        if isinstance(paths, list) and paths:
+            patterns = []
+            for path_glob in paths:
+                if isinstance(path_glob, str) and path_glob:
+                    patterns.append({"pattern": fnmatch.translate(path_glob)})
+            if patterns:
+                properties["path"] = {"type": "string", "anyOf": patterns}
+
+        domains = constraints.get("domains")
+        if isinstance(domains, list) and domains:
+            allowed_domains = [d for d in domains if isinstance(d, str) and d]
+            if allowed_domains:
+                properties["domain"] = {
+                    "type": "string",
+                    "enum": allowed_domains,
+                }
+
         return schema

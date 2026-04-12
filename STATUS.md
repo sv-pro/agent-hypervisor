@@ -177,6 +177,7 @@ This document describes the maturity and classification of every major component
 |------|--------|-------|
 | `Dockerfile` | 🔵 Supported | Basic container; not hardened for production |
 | `docker-compose.yml` | 🔵 Supported | Local demo stack |
+| Web UI (ops dashboard) | 🔵 Supported | Decisions, traces, and provenance views are implemented; manifest/benchmark authoring tabs remain roadmap work |
 | `pyproject.toml` | 🔵 Supported | Unified; install with `pip install -e .` |
 | CI (GitHub Actions) | 🔵 Supported | `tests/` coverage |
 
