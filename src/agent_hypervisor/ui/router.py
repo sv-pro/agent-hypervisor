@@ -1,21 +1,27 @@
 """
 router.py — Web UI FastAPI router for Agent Hypervisor.
 
-Serves a dashboard at /ui with five tabs:
+Serves a dashboard at /ui with seven tabs:
   - Manifests:  Loaded world manifest and visible tool surface.
+  - Editor:     Inline YAML manifest editor with validate and save.
   - Decisions:  Approval queue and resolved action authorizations (policy reasoning).
   - Traces:     Session event logs — tool calls, mode changes, approvals.
-  - Provenance: Active provenance firewall policy rules.
+  - Provenance: Active provenance firewall policy rules with flow visualization.
+  - Simulator:  Dry-run tool call evaluation against the loaded manifest.
   - Benchmarks: AgentDojo benchmark run results.
 
 Mount via create_ui_router() and app.include_router() in create_mcp_app().
 
 Data API (all GET, JSON):
-  /ui/api/status      — gateway status + manifest summary
-  /ui/api/decisions   — all approvals (pending + history)
-  /ui/api/traces      — sessions with their event logs
-  /ui/api/provenance  — provenance policy rule list
-  /ui/api/benchmarks  — benchmark report files
+  /ui/api/status              — gateway status + manifest summary
+  /ui/api/manifest/source     — raw YAML text of the loaded manifest file
+  /ui/api/manifest/validate   — validate YAML content against manifest schema (POST)
+  /ui/api/manifest/save       — write content to disk and hot-reload (POST)
+  /ui/api/decisions           — all approvals (pending + history)
+  /ui/api/traces              — sessions with their event logs
+  /ui/api/provenance          — provenance policy rule list
+  /ui/api/simulate            — dry-run a tool call against the manifest (POST)
+  /ui/api/benchmarks          — benchmark report files
 """
 
 from __future__ import annotations
@@ -24,8 +30,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+
+from agent_hypervisor.compiler.schema import manifest_from_dict
+from agent_hypervisor.compiler.enforcer import Step, evaluate
 
 _STATIC = Path(__file__).parent / "static"
 # Reports live in _research/ at the repo root.
@@ -158,5 +167,119 @@ def create_ui_router(
                 except Exception:
                     pass
         return JSONResponse({"reports": reports, "count": len(reports)})
+
+    # ── Manifest Editor API ───────────────────────────────────────────────────
+
+    @router.get("/ui/api/manifest/source")
+    def api_manifest_source() -> JSONResponse:
+        """Return the raw YAML text of the currently loaded manifest file."""
+        path = gw_state.manifest_path
+        try:
+            content = Path(path).read_text(encoding="utf-8")
+        except Exception as exc:
+            return JSONResponse(
+                {"content": "", "path": str(path), "error": str(exc)},
+                status_code=500,
+            )
+        return JSONResponse({"content": content, "path": str(path)})
+
+    @router.post("/ui/api/manifest/validate")
+    async def api_manifest_validate(request: Request) -> JSONResponse:
+        """Parse and validate YAML manifest content without writing to disk."""
+        body = await request.json()
+        content = body.get("content", "")
+        errors: list[str] = []
+        try:
+            raw = yaml.safe_load(content)
+            if not isinstance(raw, dict):
+                errors.append("Manifest must be a YAML mapping at the top level.")
+            else:
+                try:
+                    manifest_from_dict(raw)
+                except KeyError as exc:
+                    errors.append(f"Missing required field: {exc}")
+                except Exception as exc:
+                    errors.append(f"Schema error: {exc}")
+        except yaml.YAMLError as exc:
+            errors.append(f"YAML syntax error: {exc}")
+        return JSONResponse({"valid": len(errors) == 0, "errors": errors})
+
+    @router.post("/ui/api/manifest/save")
+    async def api_manifest_save(request: Request) -> JSONResponse:
+        """Validate, write manifest content to disk, and hot-reload the gateway."""
+        body = await request.json()
+        content = body.get("content", "")
+
+        # Validate before writing
+        errors: list[str] = []
+        try:
+            raw = yaml.safe_load(content)
+            if not isinstance(raw, dict):
+                errors.append("Manifest must be a YAML mapping at the top level.")
+            else:
+                try:
+                    manifest_from_dict(raw)
+                except KeyError as exc:
+                    errors.append(f"Missing required field: {exc}")
+                except Exception as exc:
+                    errors.append(f"Schema error: {exc}")
+        except yaml.YAMLError as exc:
+            errors.append(f"YAML syntax error: {exc}")
+
+        if errors:
+            return JSONResponse(
+                {"status": "validation_failed", "errors": errors},
+                status_code=400,
+            )
+
+        path = gw_state.manifest_path
+        try:
+            Path(path).write_text(content, encoding="utf-8")
+        except Exception as exc:
+            return JSONResponse(
+                {"status": "write_failed", "error": str(exc)},
+                status_code=500,
+            )
+
+        ok = gw_state.reload_manifest()
+        return JSONResponse({
+            "status": "saved" if ok else "saved_reload_failed",
+            "path": str(path),
+            "reloaded": ok,
+        })
+
+    # ── Simulator API ─────────────────────────────────────────────────────────
+
+    @router.post("/ui/api/simulate")
+    async def api_simulate(request: Request) -> JSONResponse:
+        """Dry-run a tool call through the enforcer against the loaded manifest."""
+        body = await request.json()
+        tool = body.get("tool", "")
+        action = body.get("action", "")
+        resource = body.get("resource", "")
+        tainted = bool(body.get("tainted", False))
+
+        manifest = gw_state.resolver.manifest
+        if manifest is None:
+            return JSONResponse({"error": "No manifest loaded"}, status_code=503)
+
+        input_sources = ["tainted"] if tainted else []
+        step = Step(tool=tool, action=action, resource=resource, input_sources=input_sources)
+        result = evaluate(step, manifest)
+
+        return JSONResponse({
+            "decision": result.decision.value,
+            "reason": result.reason,
+            "allowed": result.allowed,
+            "denied": result.denied,
+            "failure_type": result.failure_type,
+            "step": {
+                "tool": tool,
+                "action": action,
+                "resource": resource,
+                "tainted": tainted,
+                "display_name": step.display_name,
+            },
+        })
 
     return router

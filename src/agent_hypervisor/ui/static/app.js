@@ -15,6 +15,12 @@ let expandedDecisionId = null;
 // Traces tab state
 let selectedSessionId = null;
 
+// Editor tab state — never auto-refreshed so edits aren't clobbered
+let editorDirty = false;
+
+// Provenance tab state
+let provenanceViewMode = 'flow'; // 'flow' | 'table'
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -34,16 +40,23 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
   clearInterval(refreshTimer);
-  loadTab(tab);
-  refreshTimer = setInterval(() => loadTab(tab), REFRESH_MS);
+  if (tab === 'editor') {
+    // Load once on switch; do not poll — avoids clobbering unsaved edits
+    loadEditor();
+  } else {
+    loadTab(tab);
+    refreshTimer = setInterval(() => loadTab(tab), REFRESH_MS);
+  }
 }
 
 async function loadTab(tab) {
   try {
     if (tab === 'manifests')  await loadManifests();
+    // Editor is not auto-refreshed to protect unsaved edits
     if (tab === 'decisions')  await loadDecisions();
     if (tab === 'traces')     await loadTraces();
     if (tab === 'provenance') await loadProvenance();
+    if (tab === 'simulator')  await loadSimulator();
     if (tab === 'benchmarks') await loadBenchmarks();
     lastRefresh = Date.now();
     setRefreshLabel();
@@ -151,6 +164,109 @@ async function reloadManifest() {
     await loadManifests();
   } catch (e) {
     console.error('[ui] reload failed', e);
+  }
+}
+
+// ── Editor tab ────────────────────────────────────────────────────────────
+
+async function loadEditor(forceReload) {
+  const panel = document.getElementById('tab-editor');
+  // Only fetch from disk if the panel is empty or a reload was explicitly requested
+  const textarea = panel.querySelector('.editor-textarea');
+  if (textarea && !forceReload) return; // Preserve unsaved edits on tab re-focus
+
+  let data;
+  try {
+    data = await apiFetch('/ui/api/manifest/source');
+  } catch (e) {
+    panel.innerHTML = emptyState('Cannot load manifest', String(e));
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="editor-layout">
+      <div class="editor-toolbar">
+        <span class="editor-path mono small">${esc(data.path)}</span>
+        <div class="editor-actions">
+          <button class="btn btn-sm" onclick="editorReloadFromDisk()">Reload from disk</button>
+          <button class="btn btn-sm" id="editor-validate-btn" onclick="editorValidate()">Validate</button>
+          <button class="btn btn-sm btn-allow" id="editor-save-btn" onclick="editorSave()">Save &amp; Reload</button>
+        </div>
+      </div>
+      <textarea
+        id="editor-textarea"
+        class="editor-textarea"
+        spellcheck="false"
+        autocomplete="off"
+        oninput="editorMarkDirty()"
+      >${esc(data.content)}</textarea>
+      <div id="editor-status" class="editor-status"></div>
+    </div>
+  `;
+  editorDirty = false;
+}
+
+function editorMarkDirty() {
+  editorDirty = true;
+  const status = document.getElementById('editor-status');
+  if (status) status.innerHTML = '<span class="editor-status-msg muted">Unsaved changes</span>';
+}
+
+function editorReloadFromDisk() {
+  if (editorDirty) {
+    if (!confirm('You have unsaved changes. Reload from disk and discard them?')) return;
+  }
+  editorDirty = false;
+  loadEditor(true);
+}
+
+async function editorValidate() {
+  const ta = document.getElementById('editor-textarea');
+  const status = document.getElementById('editor-status');
+  if (!ta || !status) return;
+
+  status.innerHTML = '<span class="editor-status-msg muted">Validating…</span>';
+  try {
+    const resp = await fetch('/ui/api/manifest/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: ta.value }),
+    });
+    const data = await resp.json();
+    if (data.valid) {
+      status.innerHTML = '<span class="editor-status-msg ok">Valid — no errors found</span>';
+    } else {
+      const errList = data.errors.map(e => `<div class="editor-error-item">${esc(e)}</div>`).join('');
+      status.innerHTML = `<div class="editor-status-msg error">Validation failed</div>${errList}`;
+    }
+  } catch (e) {
+    status.innerHTML = `<span class="editor-status-msg error">Request failed: ${esc(String(e))}</span>`;
+  }
+}
+
+async function editorSave() {
+  const ta = document.getElementById('editor-textarea');
+  const status = document.getElementById('editor-status');
+  if (!ta || !status) return;
+
+  status.innerHTML = '<span class="editor-status-msg muted">Saving…</span>';
+  try {
+    const resp = await fetch('/ui/api/manifest/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: ta.value }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      const reloadNote = data.reloaded ? 'Gateway reloaded.' : 'Gateway reload failed — check logs.';
+      status.innerHTML = `<span class="editor-status-msg ok">Saved to <span class="mono">${esc(data.path)}</span>. ${reloadNote}</span>`;
+      editorDirty = false;
+    } else {
+      const errList = (data.errors || [data.error]).map(e => `<div class="editor-error-item">${esc(e)}</div>`).join('');
+      status.innerHTML = `<div class="editor-status-msg error">${esc(data.status || 'Error')}</div>${errList}`;
+    }
+  } catch (e) {
+    status.innerHTML = `<span class="editor-status-msg error">Request failed: ${esc(String(e))}</span>`;
   }
 }
 
@@ -424,6 +540,9 @@ function renderProvenance(data) {
   const askCount   = data.rules.filter(r => r.verdict === 'ask').length;
   const allowCount = data.rules.filter(r => r.verdict === 'allow').length;
 
+  const flowBtn  = provenanceViewMode === 'flow'  ? 'active' : '';
+  const tableBtn = provenanceViewMode === 'table' ? 'active' : '';
+
   panel.innerHTML = `
     <div class="stats-row">
       <div class="stat"><div class="stat-val">${data.count}</div><div class="stat-label">rules</div></div>
@@ -438,6 +557,52 @@ function renderProvenance(data) {
       Source: <span class="mono small">${esc(data.source || '—')}</span>
     </div>
 
+    <div class="view-toggle" style="margin-bottom:16px">
+      <button class="filter-btn ${flowBtn}"  onclick="setProvenanceView('flow')">Flow view</button>
+      <button class="filter-btn ${tableBtn}" onclick="setProvenanceView('table')">Table view</button>
+    </div>
+
+    ${provenanceViewMode === 'flow'
+      ? renderProvenanceFlow(data.rules)
+      : renderProvenanceTable(data.rules)
+    }
+  `;
+}
+
+function setProvenanceView(mode) {
+  provenanceViewMode = mode;
+  loadProvenance();
+}
+
+function renderProvenanceFlow(rules) {
+  // Group rules by provenance source for visual clarity
+  const byProvenance = {};
+  for (const r of rules) {
+    const key = r.provenance || '*';
+    if (!byProvenance[key]) byProvenance[key] = [];
+    byProvenance[key].push(r);
+  }
+
+  const groups = Object.entries(byProvenance).map(([prov, rulesInGroup]) => {
+    const rows = rulesInGroup.map(r => `
+      <div class="flow-rule">
+        <span class="flow-node flow-prov">${esc(r.provenance || '*')}</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node flow-tool mono">${esc(r.tool || '*')}</span>
+        ${r.argument ? `<span class="flow-arrow">·</span><span class="flow-node flow-arg mono">${esc(r.argument)}</span>` : ''}
+        <span class="flow-arrow">→</span>
+        <span class="flow-node tag ${verdictTagCls(r.verdict)}">${esc(r.verdict || '—')}</span>
+        ${r.id ? `<span class="muted small mono" style="margin-left:8px">${esc(r.id)}</span>` : ''}
+      </div>
+    `).join('');
+    return `<div class="flow-group">${rows}</div>`;
+  });
+
+  return `<div class="flow-list">${groups.join('')}</div>`;
+}
+
+function renderProvenanceTable(rules) {
+  return `
     <table class="data-table">
       <thead>
         <tr>
@@ -450,7 +615,7 @@ function renderProvenance(data) {
         </tr>
       </thead>
       <tbody>
-        ${data.rules.map((r, i) => `
+        ${rules.map((r, i) => `
           <tr>
             <td class="muted small">${i + 1}</td>
             <td class="mono small">${esc(r.id || '—')}</td>
@@ -466,6 +631,121 @@ function renderProvenance(data) {
 
 function verdictTagCls(v) {
   return { allow: 'tag-allow', ask: 'tag-ask', deny: 'tag-deny' }[v] || 'tag-muted';
+}
+
+// ── Simulator tab ─────────────────────────────────────────────────────────
+
+async function loadSimulator() {
+  const panel = document.getElementById('tab-simulator');
+  // Only render the form skeleton if it doesn't exist yet; preserve field values on poll
+  if (panel.querySelector('.sim-form')) return;
+
+  let tools = [];
+  try {
+    const status = await apiFetch('/ui/api/status');
+    tools = status.manifest.visible_tools || [];
+  } catch (_) {}
+
+  const toolOptions = tools.length
+    ? tools.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')
+    : '<option value="">— no tools in manifest —</option>';
+
+  panel.innerHTML = `
+    <div class="sim-layout">
+      <div class="sim-form-card">
+        <div class="section-title">Tool call</div>
+        <div class="sim-form">
+          <div class="sim-field">
+            <label class="sim-label">Tool</label>
+            <div class="sim-input-row">
+              <select id="sim-tool" class="sim-select" oninput="simSyncTool()">
+                <option value="">— type or select —</option>
+                ${toolOptions}
+              </select>
+              <input id="sim-tool-custom" class="sim-input mono" placeholder="or type tool name" oninput="simSyncCustom()">
+            </div>
+          </div>
+          <div class="sim-field">
+            <label class="sim-label">Action</label>
+            <input id="sim-action" class="sim-input mono" placeholder="e.g. push, exec, read">
+          </div>
+          <div class="sim-field">
+            <label class="sim-label">Resource</label>
+            <input id="sim-resource" class="sim-input mono" placeholder="e.g. /path/to/file, origin, https://…">
+          </div>
+          <div class="sim-field sim-field-inline">
+            <label class="sim-label">Tainted input</label>
+            <input id="sim-tainted" type="checkbox" class="sim-checkbox">
+            <span class="muted small">Mark inputs as tainted (simulates prompt-injection context)</span>
+          </div>
+          <button class="btn btn-sm btn-allow" style="margin-top:8px" onclick="runSimulation()">Run simulation</button>
+        </div>
+      </div>
+      <div id="sim-result" class="sim-result-card" style="display:none"></div>
+    </div>
+  `;
+}
+
+function simSyncTool() {
+  const sel = document.getElementById('sim-tool');
+  const custom = document.getElementById('sim-tool-custom');
+  if (sel && custom && sel.value) custom.value = sel.value;
+}
+
+function simSyncCustom() {
+  const sel = document.getElementById('sim-tool');
+  if (sel) sel.value = '';
+}
+
+async function runSimulation() {
+  const tool     = (document.getElementById('sim-tool-custom')?.value || document.getElementById('sim-tool')?.value || '').trim();
+  const action   = (document.getElementById('sim-action')?.value || '').trim();
+  const resource = (document.getElementById('sim-resource')?.value || '').trim();
+  const tainted  = document.getElementById('sim-tainted')?.checked || false;
+  const result   = document.getElementById('sim-result');
+  if (!result) return;
+
+  if (!tool) {
+    result.style.display = 'block';
+    result.innerHTML = `<div class="sim-result-inner error"><span class="tag tag-deny">error</span> Tool name is required.</div>`;
+    return;
+  }
+
+  result.style.display = 'block';
+  result.innerHTML = `<div class="sim-result-inner"><div class="loading"><div class="spinner"></div>Evaluating…</div></div>`;
+
+  try {
+    const resp = await fetch('/ui/api/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, action, resource, tainted }),
+    });
+    const data = await resp.json();
+
+    const decisionCls = data.allowed ? 'tag-allow' : data.decision === 'REQUIRE_APPROVAL' ? 'tag-ask' : 'tag-deny';
+    const taintNote = tainted
+      ? `<div class="sim-taint-note"><span class="tag tag-deny">tainted</span> Input marked as tainted — this simulates data from an untrusted provenance source.</div>`
+      : '';
+
+    result.innerHTML = `
+      <div class="sim-result-inner">
+        <div class="sim-verdict">
+          <span class="tag ${decisionCls} sim-verdict-tag">${esc(data.decision)}</span>
+          <span class="sim-reason">${esc(data.reason)}</span>
+        </div>
+        ${taintNote}
+        <div class="kv-list" style="margin-top:14px">
+          <div class="kv"><span class="k">display_name</span><span class="v mono">${esc(data.step.display_name)}</span></div>
+          <div class="kv"><span class="k">tool</span>        <span class="v mono">${esc(data.step.tool)}</span></div>
+          ${action   ? `<div class="kv"><span class="k">action</span>   <span class="v mono">${esc(data.step.action)}</span></div>` : ''}
+          ${resource ? `<div class="kv"><span class="k">resource</span> <span class="v mono">${esc(data.step.resource)}</span></div>` : ''}
+          ${data.failure_type ? `<div class="kv"><span class="k">failure</span>  <span class="v mono">${esc(data.failure_type)}</span></div>` : ''}
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    result.innerHTML = `<div class="sim-result-inner error"><span class="tag tag-deny">error</span> ${esc(String(e))}</div>`;
+  }
 }
 
 // ── Benchmarks tab ────────────────────────────────────────────────────────
