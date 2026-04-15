@@ -14,8 +14,9 @@ import { ApprovalQueueSection } from './ApprovalQueueSection';
 import { TraceSection } from './TraceSection';
 import { WorldStateSection } from './WorldStateSection';
 import { WorldEditor } from '../world_editor/WorldEditor';
+import { CompareWorldsView } from '../compare/CompareWorldsView';
 
-type MainView = 'agent' | 'world';
+type MainView = 'agent' | 'world' | 'compare';
 
 interface Props {
   mode: 'naive' | 'governed';
@@ -78,12 +79,18 @@ export function SidePanelApp({
           >
             Governed
           </button>
-          {/* View toggle */}
+          {/* View toggles */}
           <button
             onClick={() => setView(view === 'world' ? 'agent' : 'world')}
-            style={headerBtn(view === 'world', '#e8f0fe')}
+            style={headerBtn(view === 'world', '#e8f5e9')}
           >
             World
+          </button>
+          <button
+            onClick={() => setView(view === 'compare' ? 'agent' : 'compare')}
+            style={headerBtn(view === 'compare', '#e8f0fe')}
+          >
+            Compare
           </button>
         </div>
       </div>
@@ -119,6 +126,25 @@ export function SidePanelApp({
             versions={versionHistory}
             onApply={onApplyManifest}
             onRollback={onRollbackWorld}
+          />
+        </>
+      )}
+
+      {/* Compare View */}
+      {view === 'compare' && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <h3 style={sectionTitle}>Comparative Playground</h3>
+            <button
+              onClick={() => setView('agent')}
+              style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, border: '1px solid #ddd', cursor: 'pointer', background: '#f8f8f8' }}
+            >
+              ← Back
+            </button>
+          </div>
+          <CompareWorldsView
+            versions={versionHistory}
+            activeVersionId={activeWorld?.version_id ?? null}
           />
         </>
       )}
