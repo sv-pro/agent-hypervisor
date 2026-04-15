@@ -13,13 +13,17 @@ export interface DecisionTrace {
   rule_description: string;
   explanation: string;
   decision: PolicyDecision;
-  simulated: boolean;      // true when simulation mode was active and converted 'allow' → 'simulate'
-  approval_id?: string;    // present when this trace entry was the result of an approved ApprovalRequest
+  simulated: boolean;            // true when simulation mode converted 'allow' → 'simulate'
+  approval_id?: string;          // present when created by an approved ApprovalRequest
   timestamp: string;
+  // Phase 3: world version provenance
+  active_world_version?: string; // WorldVersionRecord.version_id
+  active_world_id?: string;      // CompiledWorld.world_id
+  rule_version?: number;         // WorldManifest.version
 }
 
 export function makeTrace(
-  input: Omit<DecisionTrace, 'id' | 'timestamp'> & { simulated?: boolean }
+  input: Omit<DecisionTrace, 'id' | 'timestamp' | 'simulated'> & { simulated?: boolean }
 ): DecisionTrace {
   return {
     id: crypto.randomUUID(),

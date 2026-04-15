@@ -7,6 +7,7 @@ import type { WorldStateSnapshot } from '../../core/world_state';
 import type { MemoryEntry } from '../../core/memory';
 import type { IntentType } from '../../core/intent';
 import { buildWorldStateSnapshot } from '../../core/world_state';
+import type { ActiveWorldState, WorldVersionRecord } from '../../world/manifest_schema';
 import { SidePanelApp } from '../../ui/sidepanel/SidePanelApp';
 
 interface RemoteState {
@@ -16,6 +17,9 @@ interface RemoteState {
   trace: DecisionTrace[];
   approval_queue: ApprovalRequest[];
   world_state: WorldStateSnapshot;
+  // Phase 3
+  active_world: ActiveWorldState | null;
+  version_history: WorldVersionRecord[];
 }
 
 const defaultState: RemoteState = {
@@ -24,7 +28,9 @@ const defaultState: RemoteState = {
   memory: [],
   trace: [],
   approval_queue: [],
-  world_state: buildWorldStateSnapshot()
+  world_state: buildWorldStateSnapshot(),
+  active_world: null,
+  version_history: []
 };
 
 function SidePanelRoot() {
@@ -36,7 +42,7 @@ function SidePanelRoot() {
   useEffect(() => {
     function fetchState() {
       chrome.runtime.sendMessage({ type: 'GET_STATE' }, (resp) => {
-        if (chrome.runtime.lastError) return; // ignore if background is sleeping
+        if (chrome.runtime.lastError) return;
         if (resp?.ok) setRemoteState(resp.state as RemoteState);
       });
     }
@@ -68,7 +74,6 @@ function SidePanelRoot() {
       if (!resp?.ok) return;
       if (resp.event) setCurrentEvent(resp.event as SemanticEvent);
       if (resp.state) setRemoteState(resp.state as RemoteState);
-      // Update lastTrace immediately from the response
       if (resp.governed?.trace) setLastTrace(resp.governed.trace as DecisionTrace);
     });
   }
@@ -76,6 +81,40 @@ function SidePanelRoot() {
   function handleResolveApproval(approval_id: string, status: 'approved' | 'denied') {
     chrome.runtime.sendMessage({ type: 'RESOLVE_APPROVAL', approval_id, status }, (resp) => {
       if (resp?.state) setRemoteState(resp.state as RemoteState);
+    });
+  }
+
+  async function handleApplyManifest(source: string, note?: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'APPLY_MANIFEST', source, note }, (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(String(chrome.runtime.lastError.message)));
+          return;
+        }
+        if (resp?.ok) {
+          setRemoteState(resp.state as RemoteState);
+          resolve();
+        } else {
+          reject(new Error(resp?.error ?? 'Unknown error applying manifest'));
+        }
+      });
+    });
+  }
+
+  async function handleRollbackWorld(version_id: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'ROLLBACK_WORLD', version_id }, (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(String(chrome.runtime.lastError.message)));
+          return;
+        }
+        if (resp?.ok) {
+          setRemoteState(resp.state as RemoteState);
+          resolve();
+        } else {
+          reject(new Error(resp?.error ?? 'Unknown error during rollback'));
+        }
+      });
     });
   }
 
@@ -89,10 +128,14 @@ function SidePanelRoot() {
       approvalQueue={remoteState.approval_queue}
       memory={remoteState.memory}
       worldState={remoteState.world_state}
+      activeWorld={remoteState.active_world}
+      versionHistory={remoteState.version_history}
       onSetMode={handleSetMode}
       onToggleSimulation={handleToggleSimulation}
       onRunAction={handleRunAction}
       onResolveApproval={handleResolveApproval}
+      onApplyManifest={handleApplyManifest}
+      onRollbackWorld={handleRollbackWorld}
     />
   );
 }

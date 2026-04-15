@@ -1,5 +1,7 @@
 import type { IntentProposal } from './intent';
 import type { SemanticEvent } from './semantic_event';
+import type { CompiledWorld } from '../world/manifest_schema';
+import { evaluatePolicyFromWorld } from './world_runtime';
 
 export type PolicyDecision = 'allow' | 'deny' | 'ask' | 'simulate';
 
@@ -51,7 +53,28 @@ export const POLICY_RULES: PolicyRuleDescriptor[] = [
   }
 ];
 
-export function evaluatePolicy(event: SemanticEvent, intent: IntentProposal): PolicyResult {
+/**
+ * Evaluate a policy decision.
+ *
+ * When `compiledWorld` is supplied the decision is delegated to the dynamic
+ * world runtime, which reads rules from the active world manifest.
+ *
+ * When `compiledWorld` is absent the legacy hardcoded rules below are used.
+ * This fallback ensures backward-compatibility during the transition period
+ * and on first-run before the balanced_world preset is activated.
+ */
+export function evaluatePolicy(
+  event: SemanticEvent,
+  intent: IntentProposal,
+  compiledWorld?: CompiledWorld
+): PolicyResult {
+  if (compiledWorld) {
+    return evaluatePolicyFromWorld(compiledWorld, event, intent);
+  }
+  return evaluatePolicyLegacy(event, intent);
+}
+
+function evaluatePolicyLegacy(event: SemanticEvent, intent: IntentProposal): PolicyResult {
   // Rule 1: Always allow summarization
   if (intent.intent_type === 'summarize_page') {
     return {
