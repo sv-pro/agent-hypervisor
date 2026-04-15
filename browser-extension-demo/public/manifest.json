@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Agent Hypervisor Demo",
+  "version": "0.1.0",
+  "description": "Naive vs governed browser assistant demonstrating deterministic execution governance.",
+  "permissions": ["storage", "activeTab", "tabs", "scripting", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Browser Agent Hypervisor",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}
