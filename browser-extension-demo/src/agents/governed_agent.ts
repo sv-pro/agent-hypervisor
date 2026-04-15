@@ -5,12 +5,24 @@ import { createIntent, type IntentType } from '../core/intent';
 import { evaluatePolicy, type PolicyResult } from '../core/policy';
 import { createMemoryEntry, type MemoryEntry } from '../core/memory';
 import { makeTrace, type DecisionTrace } from '../core/trace';
+import { createApprovalRequest, type ApprovalRequest } from '../core/approval';
+import { applySimulationGuard } from '../core/simulation';
 
 export interface GovernedResult<T> {
   data?: T;
   policy: PolicyResult;
   trace: DecisionTrace;
+  pending?: false;
 }
+
+export interface GovernedPendingResult {
+  pending: true;
+  approvalRequest: ApprovalRequest;
+  policy: PolicyResult;
+  trace: DecisionTrace;
+}
+
+export type GovernedOutcome<T> = GovernedResult<T> | GovernedPendingResult;
 
 export class GovernedAgent {
   constructor(private readonly provider: AgentProvider) {}
@@ -22,21 +34,52 @@ export class GovernedAgent {
   async runIntent(
     event: SemanticEvent,
     intentType: IntentType,
-    execute: () => Promise<unknown> | unknown
-  ): Promise<GovernedResult<unknown>> {
+    execute: () => Promise<unknown> | unknown,
+    simulationMode = false,
+    approvalId?: string
+  ): Promise<GovernedOutcome<unknown>> {
     const intent = createIntent(event, intentType, {}, 'user_requested');
     const policy = evaluatePolicy(event, intent);
+
+    // When decision is 'ask', surface to approval queue rather than silently skipping
+    if (policy.decision === 'ask') {
+      const approvalRequest = createApprovalRequest(intent, event, policy);
+      const trace = makeTrace({
+        semantic_event_id: event.id,
+        intent_type: intentType,
+        trust_level: event.trust_level,
+        taint: event.taint,
+        rule_hit: policy.rule_hit,
+        rule_id: policy.rule_id,
+        rule_description: policy.rule_description,
+        explanation: policy.explanation,
+        decision: 'ask',
+        simulated: false
+      });
+      return { pending: true, approvalRequest, policy, trace };
+    }
+
+    // Apply simulation guard: converts 'allow' → 'simulate' when simulation mode is on
+    const effectiveDecision = applySimulationGuard(policy.decision, simulationMode);
+    const simulated = effectiveDecision === 'simulate' && policy.decision === 'allow';
+
     const trace = makeTrace({
       semantic_event_id: event.id,
       intent_type: intentType,
       trust_level: event.trust_level,
       taint: event.taint,
       rule_hit: policy.rule_hit,
-      decision: policy.decision
+      rule_id: policy.rule_id,
+      rule_description: policy.rule_description,
+      explanation: policy.explanation,
+      decision: effectiveDecision,
+      simulated,
+      ...(approvalId ? { approval_id: approvalId } : {})
     });
 
-    if (policy.decision !== 'allow') {
-      return { policy, trace };
+    // Only execute if the effective decision is 'allow'
+    if (effectiveDecision !== 'allow') {
+      return { policy: { ...policy, decision: effectiveDecision }, trace };
     }
 
     return { data: await execute(), policy, trace };
