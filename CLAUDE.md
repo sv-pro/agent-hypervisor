@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The core thesis: AI agent security should be addressed at the architecture level through deterministic enforcement, not probabilistic guardrails.
 
-**Current version**: 0.2.0
+**Current version**: 0.4.0
 **Python requirement**: >=3.10
 **Primary language**: Python
 
@@ -44,7 +44,9 @@ agent-hypervisor/
 │   ├── runtime/                # Provenance firewall, semantic examples
 │   ├── claude_like_runtime/    # Full working example
 │   └── compiler/               # Compiler workflow examples
-├── research/                   # AgentDojo benchmarks, traces, reports
+├── research/                   # Benchmarks, traces, research reports
+│   ├── agentdojo-bench/        # AgentDojo benchmark integration (M4)
+│   └── benchmarks/             # Benchmark results and methodology docs
 ├── demos/                      # Presentation decks, interactive playground
 ├── archive/                    # Historical experimental code (do not modify)
 ├── lab/                        # Archived PoC notebooks (do not modify)
@@ -218,6 +220,20 @@ docker build -t agent-hypervisor .
 - `dev` — Integration branch for completed features
 - Feature branches: `claude/<feature-name>-<id>` (AI) or descriptive names (human)
 - PRs merge into `dev`; `dev` merges into `master` for releases
+
+### GitHub Project
+
+Issues are tracked in [Project #7](https://github.com/users/sv-pro/projects/7).
+
+To view or update the board:
+
+```bash
+gh project item-list 7 --owner sv-pro --limit 50 --format json
+```
+
+Or use the `/gh-board` command for a full audit with drift detection.
+
+Issue → milestone mapping: M2 (#10–17), M3 (#18–23), M4 (#24–30), M5 (#31–34)
 
 ---
 
