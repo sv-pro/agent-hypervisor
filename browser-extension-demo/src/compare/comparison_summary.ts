@@ -7,6 +7,7 @@
 
 import type { CompiledWorld } from '../world/manifest_schema';
 import type { ActionSurface } from './action_surface';
+import type { ComparisonResult } from './comparison_engine';
 
 export interface TradeoffSummary {
   world_id: string;
@@ -159,4 +160,61 @@ export function formatComparisonMarkdown(
     ''
   ];
   return lines.join('\n');
+}
+
+/**
+ * Format a comparison result as JSON for export.
+ *
+ * Includes the full structural diff, divergence points, and tradeoff metrics
+ * so the output can be used in reports, GitHub issues, and design reviews.
+ */
+export function formatComparisonJson(
+  summary: ComparisonSummaryResult,
+  result: ComparisonResult,
+  scenarioLabel: string
+): string {
+  const payload = {
+    scenario: scenarioLabel,
+    scenario_input: result.scenario,
+    world_a: {
+      id: summary.world_a.world_id,
+      version: summary.world_a.world_version,
+      decision: result.world_a.policy.decision,
+      rule_id: result.world_a.policy.rule_id,
+      explanation: result.world_a.policy.explanation,
+      effective_trust: result.world_a.effective_trust,
+      effective_taint: result.world_a.effective_taint,
+      metrics: {
+        allowed: summary.world_a.allowed_count,
+        requires_approval: summary.world_a.ask_count,
+        denied: summary.world_a.deny_count,
+        simulated: summary.world_a.simulate_count,
+        read_only_actions: summary.world_a.read_only_count,
+        external_side_effect_actions: summary.world_a.external_side_effect_count,
+        deny_ask_rules: summary.world_a.deny_rule_count + summary.world_a.ask_rule_count
+      }
+    },
+    world_b: {
+      id: summary.world_b.world_id,
+      version: summary.world_b.world_version,
+      decision: result.world_b.policy.decision,
+      rule_id: result.world_b.policy.rule_id,
+      explanation: result.world_b.policy.explanation,
+      effective_trust: result.world_b.effective_trust,
+      effective_taint: result.world_b.effective_taint,
+      metrics: {
+        allowed: summary.world_b.allowed_count,
+        requires_approval: summary.world_b.ask_count,
+        denied: summary.world_b.deny_count,
+        simulated: summary.world_b.simulate_count,
+        read_only_actions: summary.world_b.read_only_count,
+        external_side_effect_actions: summary.world_b.external_side_effect_count,
+        deny_ask_rules: summary.world_b.deny_rule_count + summary.world_b.ask_rule_count
+      }
+    },
+    diverges: result.diverges,
+    divergence_points: result.divergence_points,
+    observations: summary.observations
+  };
+  return JSON.stringify(payload, null, 2);
 }

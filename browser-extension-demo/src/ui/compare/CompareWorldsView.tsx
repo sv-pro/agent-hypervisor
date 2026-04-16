@@ -6,7 +6,7 @@ import { PRESET_YAMLS, PRESET_LABELS } from '../../world/presets';
 import { compareWorlds } from '../../compare/comparison_engine';
 import type { ComparisonResult, ScenarioInput } from '../../compare/comparison_engine';
 import { computeActionSurfaces } from '../../compare/action_surface';
-import { buildComparisonSummary, formatComparisonMarkdown } from '../../compare/comparison_summary';
+import { buildComparisonSummary, formatComparisonMarkdown, formatComparisonJson } from '../../compare/comparison_summary';
 import { CURATED_SCENARIOS, WORLD_MATCHUPS } from '../../compare/scenarios';
 import type { IntentType } from '../../core/intent';
 import { SideBySideDecisionPanel } from './SideBySideDecisionPanel';
@@ -62,6 +62,7 @@ export function CompareWorldsView({ versions, activeVersionId }: Props) {
 
   const [activeTab, setActiveTab] = useState<TabId>('scenario');
   const [exportCopied, setExportCopied] = useState(false);
+  const [jsonCopied, setJsonCopied] = useState(false);
 
   // Resolve worlds from presets
   const worldAData = useMemo(() => getCompiledFromPreset(worldAPreset), [worldAPreset]);
@@ -133,6 +134,15 @@ export function CompareWorldsView({ versions, activeVersionId }: Props) {
     navigator.clipboard.writeText(md).then(() => {
       setExportCopied(true);
       setTimeout(() => setExportCopied(false), 2000);
+    });
+  }
+
+  function handleCopyJson() {
+    if (!summaryData || !comparisonResult) return;
+    const json = formatComparisonJson(summaryData, comparisonResult, scenarioLabel);
+    navigator.clipboard.writeText(json).then(() => {
+      setJsonCopied(true);
+      setTimeout(() => setJsonCopied(false), 2000);
     });
   }
 
@@ -242,6 +252,12 @@ export function CompareWorldsView({ versions, activeVersionId }: Props) {
               style={{ ...tabBtn(false), marginLeft: 'auto' }}
             >
               {exportCopied ? '✓ Copied!' : 'Export MD'}
+            </button>
+            <button
+              onClick={handleCopyJson}
+              style={tabBtn(false)}
+            >
+              {jsonCopied ? '✓ Copied!' : 'Copy JSON'}
             </button>
           </div>
 
