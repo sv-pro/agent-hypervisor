@@ -1,0 +1,9 @@
+world_id: world_strict
+version: "1.0"
+description: >
+  Strict world: only basic measurement workflows are permitted.  No text
+  transformations, no ranked outputs.  Programs that rely on normalization
+  or frequency analysis are incompatible.
+allowed_actions:
+  - count_lines
+  - count_words

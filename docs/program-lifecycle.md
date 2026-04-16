@@ -215,6 +215,34 @@ trace = engine.replay(prog, context={"input": "hello world"})
 
 ---
 
+## CLI
+
+The same lifecycle is available as `awc program` subcommands (store defaults to `./programs/`):
+
+```bash
+# Propose from a JSON step list — prints the new program id
+awc program propose --steps-json steps.json --trace-id t-001 --world-version 1.0
+
+# Apply minimization and print the diff
+awc program minimize --id prog-<hex>
+
+# Advance lifecycle
+awc program review  --id prog-<hex> --notes "LGTM"
+awc program accept  --id prog-<hex>           # runs world validation first
+awc program reject  --id prog-<hex> --reason "not needed"
+
+# Replay the minimized program through the same enforcement pipeline
+awc program replay --id prog-<hex>
+
+# Inspect the store
+awc program list
+awc program show --id prog-<hex>
+```
+
+Exit codes: `0` success, `1` bad input / not found, `2` invalid lifecycle transition, `3` world validation failed on accept, `4` replay produced a failed trace.
+
+---
+
 ## Limitations
 
 1. **No data-flow analysis.** Minimization does not track which step's output feeds into the next step's input. A step that appears redundant structurally may carry output consumed by a later step — the minimizer only removes consecutive duplicates, not dead code.

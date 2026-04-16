@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 
 import click
@@ -491,3 +493,436 @@ def cmd_run(scenario: str, rendered: bool, manifest_path: str | None, compare: b
     click.echo()
     click.echo(_col("=" * 62, _BOLD))
     click.echo()
+
+
+# ── program lifecycle (PL-3) ─────────────────────────────────────────────────
+#
+# Thin CLI wrapper over program_layer.review_lifecycle and ReplayEngine.
+# No enforcement logic lives here — every command delegates to the Python API.
+
+
+_DEFAULT_PROGRAM_STORE = "./programs"
+
+
+def _program_store(directory: str):
+    from agent_hypervisor.program_layer import ProgramStore
+    return ProgramStore(directory)
+
+
+def _fail(msg: str, code: int = 1) -> None:
+    click.echo(_col(msg, _RED), err=True)
+    raise SystemExit(code)
+
+
+@cli.group("program")
+def cmd_program():
+    """Manage reviewed programs (PL-3: propose, minimize, review, accept, replay)."""
+
+
+@cmd_program.command("propose")
+@click.option("--steps-json", "steps_json", required=True, type=click.Path(exists=True),
+              help="JSON file: a list of {tool, params, provenance?, capabilities_used?} entries.")
+@click.option("--trace-id", "trace_id", default=None, help="Trace id this program was extracted from.")
+@click.option("--world-version", "world_version", required=True, help="World manifest version at creation time.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True,
+              help="Directory holding program JSON files.")
+def cmd_program_propose(steps_json: str, trace_id: str | None, world_version: str, store_dir: str):
+    """Create a PROPOSED ReviewedProgram from a JSON step list."""
+    from agent_hypervisor.program_layer import CandidateStep, propose_program
+
+    raw = json.loads(Path(steps_json).read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not raw:
+        _fail("--steps-json must contain a non-empty JSON array of step objects.")
+    try:
+        steps = [CandidateStep.from_dict(s) for s in raw]
+    except (KeyError, TypeError, ValueError) as exc:
+        _fail(f"Invalid step in --steps-json: {exc}")
+
+    prog = propose_program(
+        steps=steps,
+        trace_id=trace_id,
+        world_version=world_version,
+        store=_program_store(store_dir),
+    )
+    click.echo(prog.id)
+
+
+@cmd_program.command("minimize")
+@click.option("--id", "program_id", required=True, help="Program id to minimize.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_minimize(program_id: str, store_dir: str):
+    """Apply deterministic minimization and print the resulting diff."""
+    from agent_hypervisor.program_layer import minimize_program
+
+    try:
+        prog = minimize_program(program_id, _program_store(store_dir))
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    _print_program_diff(prog.diff)
+
+
+@cmd_program.command("review")
+@click.option("--id", "program_id", required=True)
+@click.option("--notes", default=None, help="Optional reviewer notes.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_review(program_id: str, notes: str | None, store_dir: str):
+    """Transition PROPOSED → REVIEWED."""
+    from agent_hypervisor.program_layer import InvalidTransitionError, review_program
+
+    try:
+        prog = review_program(program_id, _program_store(store_dir), notes=notes)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    except InvalidTransitionError as exc:
+        _fail(str(exc), code=2)
+    click.echo(f"{prog.id}: {prog.status.value}")
+
+
+@cmd_program.command("accept")
+@click.option("--id", "program_id", required=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_accept(program_id: str, store_dir: str):
+    """Transition REVIEWED → ACCEPTED (runs world validation first)."""
+    from agent_hypervisor.program_layer import (
+        InvalidTransitionError,
+        WorldValidationError,
+        accept_program,
+    )
+
+    try:
+        prog = accept_program(program_id, _program_store(store_dir))
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    except InvalidTransitionError as exc:
+        _fail(str(exc), code=2)
+    except WorldValidationError as exc:
+        _fail(str(exc), code=3)
+    click.echo(f"{prog.id}: {prog.status.value}")
+
+
+@cmd_program.command("reject")
+@click.option("--id", "program_id", required=True)
+@click.option("--reason", default=None, help="Optional rejection reason, appended to reviewer_notes.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_reject(program_id: str, reason: str | None, store_dir: str):
+    """Transition REVIEWED → REJECTED."""
+    from agent_hypervisor.program_layer import InvalidTransitionError, reject_program
+
+    try:
+        prog = reject_program(program_id, _program_store(store_dir), reason=reason)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    except InvalidTransitionError as exc:
+        _fail(str(exc), code=2)
+    click.echo(f"{prog.id}: {prog.status.value}")
+
+
+@cmd_program.command("replay")
+@click.option("--id", "program_id", required=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_replay(program_id: str, store_dir: str):
+    """Replay the minimized program through the same enforcement pipeline as live execution."""
+    from agent_hypervisor.program_layer import ReplayEngine
+
+    try:
+        prog = _program_store(store_dir).load(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    trace = ReplayEngine().replay(prog)
+    json.dump(trace.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+    if not trace.ok:
+        raise SystemExit(4)
+
+
+@cmd_program.command("list")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_list(store_dir: str):
+    """List stored programs (id, status, step counts, created_at)."""
+    summaries = _program_store(store_dir).list_all()
+    if not summaries:
+        click.echo(_col("(no programs)", _DIM))
+        return
+    click.echo(f"{'id':<22} {'status':<10} {'orig':>5} {'min':>5}  created_at")
+    click.echo(_col("─" * 72, _DIM))
+    for s in summaries:
+        click.echo(
+            f"{s['id']:<22} {s['status']:<10} "
+            f"{s['step_count_original']:>5} {s['step_count_minimized']:>5}  "
+            f"{s['created_at']}"
+        )
+
+
+@cmd_program.command("show")
+@click.option("--id", "program_id", required=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_show(program_id: str, store_dir: str):
+    """Print a stored program as JSON."""
+    try:
+        prog = _program_store(store_dir).load(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    json.dump(prog.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+def _print_program_diff(diff) -> None:
+    if diff.is_empty:
+        click.echo(_col("(no changes — program was already minimal)", _DIM))
+        return
+    for r in diff.removed_steps:
+        click.echo(f"  {_col('REMOVED', _RED)}  step[{r.index}] {r.tool!r}  — {r.reason}")
+    for c in diff.param_changes:
+        click.echo(
+            f"  {_col('PARAM  ', _YELLOW)}  step[{c.step_index}] {c.field!r}: "
+            f"{c.before!r}  →  {c.after!r}  — {c.reason}"
+        )
+    for c in diff.capability_reduction:
+        click.echo(
+            f"  {_col('CAP    ', _YELLOW)}  step[{c.step_index}] "
+            f"{c.before!r}  →  {c.after!r}  — {c.reason}"
+        )
+
+
+# ── world registry (SYS-2 light) ─────────────────────────────────────────────
+#
+# Thin CLI wrapper over program_layer.world_registry.  Worlds live in a
+# directory of YAML manifests; --worlds-dir selects the directory.  The
+# registry owns a small .active.json pointer; set_active/clear commands
+# manage it.  No enforcement logic lives here.
+
+
+def _default_worlds_dir() -> str:
+    from pathlib import Path as _P
+    return str(_P(__file__).parent.parent / "program_layer" / "worlds")
+
+
+def _world_registry(worlds_dir: str):
+    from agent_hypervisor.program_layer import WorldRegistry
+    return WorldRegistry(worlds_dir)
+
+
+@cli.group("world")
+def cmd_world():
+    """Manage world registry (SYS-2 light: list / activate / show)."""
+
+
+@cmd_world.command("list")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir,
+              show_default=True, help="Directory of world YAML manifests.")
+def cmd_world_list(worlds_dir: str):
+    """List all worlds under --worlds-dir with their allowed_actions counts."""
+    registry = _world_registry(worlds_dir)
+    worlds = registry.list_worlds()
+    active = registry.get_active()
+    active_key = active.key if active else None
+    if not worlds:
+        click.echo(_col("(no worlds)", _DIM))
+        return
+    click.echo(f"{'world_id':<18} {'version':<8} {'actions':>7}  description")
+    click.echo(_col("─" * 72, _DIM))
+    for w in worlds:
+        marker = _col("●", _GREEN) if w.key == active_key else " "
+        click.echo(
+            f"{marker} {w.world_id:<16} {w.version:<8} "
+            f"{len(w.allowed_actions):>7}  {w.description.strip().splitlines()[0] if w.description.strip() else ''}"
+        )
+
+
+@cmd_world.command("show")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_world_show(worlds_dir: str):
+    """Show the currently active world (id, version, allowed_actions)."""
+    registry = _world_registry(worlds_dir)
+    active = registry.get_active()
+    if active is None:
+        click.echo(_col("(no active world)", _DIM))
+        raise SystemExit(1)
+    click.echo(json.dumps(active.to_dict(), indent=2))
+
+
+@cmd_world.command("activate")
+@click.option("--id", "world_id", required=True, help="World id to activate.")
+@click.option("--version", default=None, help="World version. Defaults to latest.")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_world_activate(world_id: str, version: str | None, worlds_dir: str):
+    """Mark a world as active.  Validates the target before writing."""
+    from agent_hypervisor.program_layer import WorldNotFoundError
+
+    registry = _world_registry(worlds_dir)
+    # If version is None, resolve the latest first so the echoed version is concrete.
+    try:
+        resolved = registry.get(world_id, version)
+        active = registry.set_active(resolved.world_id, resolved.version)
+    except WorldNotFoundError as exc:
+        _fail(str(exc))
+    click.echo(f"active: {active.world_id} {active.version}")
+
+
+@cmd_world.command("deactivate")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_world_deactivate(worlds_dir: str):
+    """Clear the active-world pointer."""
+    _world_registry(worlds_dir).clear_active()
+    click.echo("active: (none)")
+
+
+# ── program × world (SYS-2 light) ────────────────────────────────────────────
+
+
+def _resolve_world(registry, world_id: str | None, version: str | None,
+                   required: bool = False):
+    """
+    Resolve a WorldDescriptor from --world/--world-version, falling back to
+    the registry's active pointer.  Returns (world, source) where source is
+    'explicit', 'active', or 'default' (when world is None).
+    """
+    from agent_hypervisor.program_layer import WorldNotFoundError
+
+    if world_id:
+        try:
+            return registry.get(world_id, version), "explicit"
+        except WorldNotFoundError as exc:
+            _fail(str(exc))
+    active = registry.get_active()
+    if active is not None:
+        return active, "active"
+    if required:
+        _fail("No world specified and no active world set. "
+              "Pass --world <id> or run `awc world activate --id <id>`.")
+    return None, "default"
+
+
+@cmd_program.command("preview")
+@click.option("--id", "program_id", required=True, help="Program id to preview.")
+@click.option("--world", "world_id", required=True, help="World id to preview against.")
+@click.option("--version", default=None, help="World version (defaults to latest).")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_program_preview(program_id: str, world_id: str, version: str | None,
+                        store_dir: str, worlds_dir: str):
+    """Preview a program's compatibility under a world (no execution)."""
+    from agent_hypervisor.program_layer import preview_program_under_world
+
+    try:
+        verdict = preview_program_under_world(
+            program_id=program_id,
+            world_id=world_id,
+            version=version,
+            store=_program_store(store_dir),
+            registry=_world_registry(worlds_dir),
+        )
+    except KeyError as exc:
+        _fail(f"Not found: {exc}")
+    _print_compatibility(verdict)
+    if not verdict.compatible:
+        raise SystemExit(3)
+
+
+@cmd_program.command("compare")
+@click.option("--id", "program_id", required=True)
+@click.option("--world-a", "world_a_id", required=True, help="First world id.")
+@click.option("--world-a-version", "world_a_version", default=None)
+@click.option("--world-b", "world_b_id", required=True, help="Second world id.")
+@click.option("--world-b-version", "world_b_version", default=None)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_program_compare(program_id: str, world_a_id: str, world_a_version: str | None,
+                        world_b_id: str, world_b_version: str | None,
+                        store_dir: str, worlds_dir: str):
+    """Compare a program's compatibility across two worlds."""
+    from agent_hypervisor.program_layer import compare_program_across_worlds
+
+    try:
+        diff = compare_program_across_worlds(
+            program_id=program_id,
+            world_a_id=world_a_id,
+            world_a_version=world_a_version,
+            world_b_id=world_b_id,
+            world_b_version=world_b_version,
+            store=_program_store(store_dir),
+            registry=_world_registry(worlds_dir),
+        )
+    except KeyError as exc:
+        _fail(f"Not found: {exc}")
+    _print_program_world_diff(diff)
+
+
+@cmd_program.command("replay-under-world")
+@click.option("--id", "program_id", required=True)
+@click.option("--world", "world_id", default=None, help="World id. Defaults to active.")
+@click.option("--version", default=None, help="World version. Defaults to latest.")
+@click.option("--no-preview", is_flag=True, default=False,
+              help="Skip the compatibility preview pass before replay.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_program_replay_under_world(program_id: str, world_id: str | None,
+                                   version: str | None, no_preview: bool,
+                                   store_dir: str, worlds_dir: str):
+    """Replay a program under a specific world, recording world context in the trace."""
+    from agent_hypervisor.program_layer import (
+        ReplayEngine,
+        check_compatibility,
+    )
+
+    store = _program_store(store_dir)
+    registry = _world_registry(worlds_dir)
+
+    try:
+        prog = store.load(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+
+    world, source = _resolve_world(registry, world_id, version, required=False)
+
+    preview = None
+    if world is not None and not no_preview:
+        preview = check_compatibility(prog, world).compatible
+
+    trace = ReplayEngine().replay_under_world(
+        program=prog,
+        world=world,
+        world_source=source,
+        preview_compatible=preview,
+    )
+
+    json.dump(trace.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+    if trace.final_verdict == "deny":
+        raise SystemExit(4)
+    if trace.final_verdict == "partial_failure":
+        raise SystemExit(5)
+
+
+def _print_compatibility(verdict) -> None:
+    tag = _col("COMPATIBLE", _GREEN) if verdict.compatible else _col("INCOMPATIBLE", _RED)
+    click.echo(f"{tag}  program={verdict.program_id}  "
+               f"world={verdict.world_id} {verdict.world_version}")
+    click.echo(_col("─" * 62, _DIM))
+    for sr in verdict.step_results:
+        mark = _col("✓", _GREEN) if sr.allowed else _col("✗", _RED)
+        click.echo(f"  {mark} step[{sr.step_index}] {sr.action:<18}  {sr.reason}")
+    s = verdict.summary
+    click.echo(_col("─" * 62, _DIM))
+    click.echo(f"Summary: {s.allowed_steps} allowed, {s.denied_steps} denied"
+               + (f"; restricted: {', '.join(s.restricted_actions)}"
+                  if s.restricted_actions else ""))
+
+
+def _print_program_world_diff(diff) -> None:
+    wa = f"{diff.world_a['id']} {diff.world_a['version']}"
+    wb = f"{diff.world_b['id']} {diff.world_b['version']}"
+    click.echo(f"program={diff.program_id}  A={wa}  B={wb}")
+    click.echo(_col("─" * 62, _DIM))
+    if not diff.divergence_points:
+        both = _col("COMPATIBLE IN BOTH", _GREEN) if diff.both_compatible \
+               else _col("INCOMPATIBLE IN BOTH", _RED)
+        click.echo(f"no divergence.  {both}")
+        return
+    for d in diff.divergence_points:
+        click.echo(
+            f"  step[{d.step_index}] {d.action:<18}  "
+            f"A={_col(d.world_a, _GREEN if d.world_a == 'allowed' else _RED)}  "
+            f"B={_col(d.world_b, _GREEN if d.world_b == 'allowed' else _RED)}"
+        )
+        click.echo(f"      reason: {d.reason}")
