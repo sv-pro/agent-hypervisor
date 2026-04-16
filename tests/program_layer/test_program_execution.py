@@ -570,3 +570,394 @@ class TestIntegration:
         )
         assert MAX_STEPS == 10
         assert isinstance(ENABLE_PROGRAM_LAYER, bool)
+
+
+# ---------------------------------------------------------------------------
+# 11. Step.description field
+# ---------------------------------------------------------------------------
+
+class TestStepDescription:
+    def test_step_description_defaults_to_none(self):
+        s = Step(action="count_words")
+        assert s.description is None
+
+    def test_step_description_can_be_set(self):
+        s = Step(action="count_words", description="Count words in the input text")
+        assert s.description == "Count words in the input text"
+
+    def test_step_description_excluded_from_equality(self):
+        s1 = Step(action="count_words", description="version A")
+        s2 = Step(action="count_words", description="version B")
+        assert s1 == s2
+
+    def test_step_description_excluded_from_hash(self):
+        s1 = Step(action="count_words", description="one")
+        s2 = Step(action="count_words", description="two")
+        assert hash(s1) == hash(s2)
+
+    def test_step_description_in_to_dict_via_trace(self):
+        """Description doesn't affect trace dict (not a trace field), but
+        step construction with description must not break ProgramRunner."""
+        runner = ProgramRunner()
+        program = Program(
+            program_id="desc-test",
+            steps=(
+                Step(
+                    action="count_words",
+                    params={"input": "hello world"},
+                    description="Count words in hello world",
+                ),
+            ),
+        )
+        trace = runner.run(program)
+        assert trace.ok is True
+        assert trace.step_traces[0].result["word_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 12. SimpleTaskCompiler — keyword matching
+# ---------------------------------------------------------------------------
+
+class TestSimpleTaskCompiler:
+    def setup_method(self):
+        from agent_hypervisor.program_layer.simple_task_compiler import SimpleTaskCompiler
+        self.compiler = SimpleTaskCompiler()
+
+    def test_string_intent_count_words(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("count the words in this document")
+        assert isinstance(plan, ProgramExecutionPlan)
+        assert plan.metadata.get("workflow") == "count_words"
+
+    def test_string_intent_count_lines(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("count lines in the file")
+        assert isinstance(plan, ProgramExecutionPlan)
+        assert plan.metadata.get("workflow") == "count_lines"
+
+    def test_string_intent_normalize_text(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("normalize the text content")
+        assert isinstance(plan, ProgramExecutionPlan)
+        assert plan.metadata.get("workflow") == "normalize_text"
+
+    def test_string_intent_word_frequency(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("show word frequency distribution")
+        assert isinstance(plan, ProgramExecutionPlan)
+        assert plan.metadata.get("workflow") == "word_frequency"
+
+    def test_unknown_string_falls_back_to_direct(self):
+        from agent_hypervisor.program_layer.execution_plan import DirectExecutionPlan
+        plan = self.compiler.compile("send an email to alice@example.com")
+        assert isinstance(plan, DirectExecutionPlan)
+
+    def test_dict_intent_delegated(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile({"workflow": "count_words"})
+        assert isinstance(plan, ProgramExecutionPlan)
+
+    def test_dict_unknown_workflow_falls_back(self):
+        from agent_hypervisor.program_layer.execution_plan import DirectExecutionPlan
+        plan = self.compiler.compile({"workflow": "send_email"})
+        assert isinstance(plan, DirectExecutionPlan)
+
+    def test_non_string_non_dict_falls_back(self):
+        from agent_hypervisor.program_layer.execution_plan import DirectExecutionPlan
+        plan = self.compiler.compile(42)
+        assert isinstance(plan, DirectExecutionPlan)
+
+    def test_none_intent_falls_back(self):
+        from agent_hypervisor.program_layer.execution_plan import DirectExecutionPlan
+        plan = self.compiler.compile(None)
+        assert isinstance(plan, DirectExecutionPlan)
+
+    def test_world_as_frozenset_filters_workflows(self):
+        from agent_hypervisor.program_layer.execution_plan import DirectExecutionPlan
+        # count_words not in world → fallback
+        plan = self.compiler.compile(
+            "count words", world=frozenset({"count_lines", "normalize_text"})
+        )
+        assert isinstance(plan, DirectExecutionPlan)
+
+    def test_world_as_frozenset_allows_workflow(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile(
+            "count words", world=frozenset({"count_words"})
+        )
+        assert isinstance(plan, ProgramExecutionPlan)
+
+    def test_world_none_imposes_no_filter(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("count words", world=None)
+        assert isinstance(plan, ProgramExecutionPlan)
+
+    def test_case_insensitive_matching(self):
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("COUNT WORDS in THIS TEXT")
+        assert isinstance(plan, ProgramExecutionPlan)
+
+    def test_extra_patterns_prepended(self):
+        from agent_hypervisor.program_layer.simple_task_compiler import SimpleTaskCompiler
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        compiler = SimpleTaskCompiler(
+            extra_patterns=(("count_lines", "audit log"),)
+        )
+        plan = compiler.compile("process the audit log")
+        assert isinstance(plan, ProgramExecutionPlan)
+        assert plan.metadata.get("workflow") == "count_lines"
+
+    def test_compiler_exported_from_package(self):
+        from agent_hypervisor.program_layer import SimpleTaskCompiler  # noqa: F401
+        assert SimpleTaskCompiler.SUPPORTED_WORKFLOWS == frozenset({
+            "count_lines", "count_words", "normalize_text", "word_frequency"
+        })
+
+    def test_count_lines_wins_over_count_words_for_line_input(self):
+        """'count lines' keyword must not accidentally match 'count_words'."""
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("how many lines are there?")
+        assert isinstance(plan, ProgramExecutionPlan)
+        assert plan.metadata.get("workflow") == "count_lines"
+
+    def test_end_to_end_string_intent(self):
+        """SimpleTaskCompiler plan is executable by ProgramExecutor."""
+        from agent_hypervisor.program_layer.program_executor import ProgramExecutor
+        from agent_hypervisor.program_layer.execution_plan import ProgramExecutionPlan
+        plan = self.compiler.compile("count the words in this text")
+        assert isinstance(plan, ProgramExecutionPlan)
+        executor = ProgramExecutor()
+        result = executor.execute(plan, context={"input": "hello world foo"})
+        assert result["ok"] is True
+        assert result["result"]["word_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# 13. World validation (validate_program / validate_step)
+# ---------------------------------------------------------------------------
+
+class TestWorldValidator:
+    def test_valid_program_returns_ok(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        from agent_hypervisor.program_layer.task_compiler import DeterministicTaskCompiler
+        program = make_program(
+            Step(action="count_words", params={"input": "hello"}),
+            Step(action="normalize_text", params={"input": "HELLO"}),
+        )
+        result = validate_program(program, DeterministicTaskCompiler.SUPPORTED_WORKFLOWS)
+        assert result.ok is True
+        assert len(result.violations) == 0
+
+    def test_invalid_action_produces_violation(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        program = make_program(Step(action="send_email"))
+        result = validate_program(program, frozenset({"count_words"}))
+        assert result.ok is False
+        assert len(result.violations) == 1
+        assert result.violations[0].action == "send_email"
+        assert result.violations[0].step_index == 0
+
+    def test_multiple_violations_collected(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        program = make_program(
+            Step(action="bad_action_1"),
+            Step(action="count_words", params={"input": "ok"}),  # allowed
+            Step(action="bad_action_2"),
+        )
+        result = validate_program(program, frozenset({"count_words"}))
+        assert result.ok is False
+        assert len(result.violations) == 2
+        assert result.violations[0].step_index == 0
+        assert result.violations[1].step_index == 2
+
+    def test_empty_allowed_set_denies_everything(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        program = make_program(Step(action="count_words"))
+        result = validate_program(program, frozenset())
+        assert result.ok is False
+        assert len(result.violations) == 1
+
+    def test_validate_program_requires_program(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        with pytest.raises(TypeError, match="Program"):
+            validate_program("not-a-program", frozenset())  # type: ignore[arg-type]
+
+    def test_violation_str_representation(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        program = make_program(Step(action="unknown_op"))
+        result = validate_program(program, frozenset())
+        v = result.violations[0]
+        assert "unknown_op" in str(v)
+        assert "step[0]" in str(v)
+
+    def test_to_dict_shape(self):
+        from agent_hypervisor.program_layer.world_validator import validate_program
+        program = make_program(Step(action="bad_action"))
+        result = validate_program(program, frozenset({"count_words"}))
+        d = result.to_dict()
+        assert d["ok"] is False
+        assert len(d["violations"]) == 1
+        assert d["violations"][0]["step_index"] == 0
+        assert d["violations"][0]["action"] == "bad_action"
+
+    def test_validate_step_valid(self):
+        from agent_hypervisor.program_layer.world_validator import validate_step
+        s = Step(action="count_words")
+        result = validate_step(s, frozenset({"count_words"}))
+        assert result is None
+
+    def test_validate_step_invalid(self):
+        from agent_hypervisor.program_layer.world_validator import validate_step
+        s = Step(action="delete_all")
+        result = validate_step(s, frozenset({"count_words"}), step_index=3)
+        assert result is not None
+        assert result.action == "delete_all"
+        assert result.step_index == 3
+
+    def test_symbols_exported_from_package(self):
+        from agent_hypervisor.program_layer import (  # noqa: F401
+            StepViolation,
+            ValidationResult,
+            validate_program,
+            validate_step,
+        )
+
+
+# ---------------------------------------------------------------------------
+# 14. ProgramTraceStore — JSONL persistence
+# ---------------------------------------------------------------------------
+
+class TestProgramTraceStore:
+    def _make_trace(self, program_id: str = "store-test", ok: bool = True) -> ProgramTrace:
+        t = ProgramTrace(program_id=program_id)
+        t.step_traces.append(
+            StepTrace(
+                step_index=0,
+                action="count_words",
+                verdict="allow" if ok else "deny",
+                result={"word_count": 3} if ok else None,
+                error=None if ok else "denied",
+            )
+        )
+        t.ok = ok
+        t.total_duration_seconds = 0.001
+        return t
+
+    def test_append_creates_file(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        assert not (tmp_path / "traces.jsonl").exists()
+        trace = self._make_trace()
+        store.append(trace)
+        assert (tmp_path / "traces.jsonl").exists()
+
+    def test_append_writes_valid_jsonl(self, tmp_path):
+        import json
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        store.append(self._make_trace("prog-1"))
+        store.append(self._make_trace("prog-2"))
+        lines = (tmp_path / "traces.jsonl").read_text().strip().splitlines()
+        assert len(lines) == 2
+        for line in lines:
+            entry = json.loads(line)  # must not raise
+            assert "program_id" in entry
+            assert "_stored_at" in entry
+
+    def test_list_recent_order(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        store.append(self._make_trace("first"))
+        store.append(self._make_trace("second"))
+        store.append(self._make_trace("third"))
+        recent = store.list_recent(limit=10)
+        # Newest first
+        assert recent[0]["program_id"] == "third"
+        assert recent[2]["program_id"] == "first"
+
+    def test_list_recent_limit(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        for i in range(5):
+            store.append(self._make_trace(f"prog-{i}"))
+        recent = store.list_recent(limit=3)
+        assert len(recent) == 3
+
+    def test_list_recent_filter_ok(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        store.append(self._make_trace("ok-1", ok=True))
+        store.append(self._make_trace("fail-1", ok=False))
+        store.append(self._make_trace("ok-2", ok=True))
+        ok_traces = store.list_recent(ok=True)
+        assert all(t["ok"] is True for t in ok_traces)
+        assert len(ok_traces) == 2
+
+    def test_list_recent_filter_program_id(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        store.append(self._make_trace("alpha"))
+        store.append(self._make_trace("beta"))
+        store.append(self._make_trace("alpha"))
+        results = store.list_recent(program_id="alpha")
+        assert all(t["program_id"] == "alpha" for t in results)
+        assert len(results) == 2
+
+    def test_count(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        assert store.count() == 0
+        store.append(self._make_trace())
+        store.append(self._make_trace())
+        assert store.count() == 2
+
+    def test_nonexistent_file_returns_empty_list(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "no_such_file.jsonl")
+        assert store.list_recent() == []
+        assert store.count() == 0
+
+    def test_append_requires_program_trace(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        with pytest.raises(TypeError, match="ProgramTrace"):
+            store.append({"not": "a trace"})  # type: ignore[arg-type]
+
+    def test_creates_parent_directories(self, tmp_path):
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "deep" / "nested" / "traces.jsonl")
+        store.append(self._make_trace())
+        assert (tmp_path / "deep" / "nested" / "traces.jsonl").exists()
+
+    def test_stored_at_is_iso8601(self, tmp_path):
+        import json
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "traces.jsonl")
+        store.append(self._make_trace())
+        line = (tmp_path / "traces.jsonl").read_text().strip()
+        entry = json.loads(line)
+        # _stored_at must be a non-empty ISO-8601 string
+        assert isinstance(entry["_stored_at"], str)
+        assert "T" in entry["_stored_at"]
+
+    def test_store_exported_from_package(self):
+        from agent_hypervisor.program_layer import ProgramTraceStore  # noqa: F401
+
+    def test_integration_run_and_store(self, tmp_path):
+        """End-to-end: run a program and persist its trace."""
+        from agent_hypervisor.program_layer.trace_storage import ProgramTraceStore
+        store = ProgramTraceStore(tmp_path / "run_traces.jsonl")
+
+        runner = ProgramRunner()
+        program = Program(
+            program_id="store-integration",
+            steps=(Step(action="count_words", params={"input": "hello world foo"}),),
+        )
+        trace = runner.run(program)
+        store.append(trace)
+
+        recent = store.list_recent()
+        assert len(recent) == 1
+        assert recent[0]["program_id"] == "store-integration"
+        assert recent[0]["ok"] is True
+        assert recent[0]["step_traces"][0]["result"]["word_count"] == 3
