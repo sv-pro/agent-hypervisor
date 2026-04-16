@@ -52,6 +52,16 @@ export function TraceDetail({ trace }: Props) {
           {trace.approval_id && (
             <Row label="Approval ID" value={<code style={{ fontSize: 10 }}>{trace.approval_id.slice(0, 16)}…</code>} />
           )}
+          {trace.active_world_id && (
+            <Row label="World" value={
+              <code style={{ fontSize: 10 }}>{trace.active_world_id} v{trace.rule_version}</code>
+            } />
+          )}
+          {trace.active_world_version && (
+            <Row label="World Ver." value={
+              <code style={{ fontSize: 10 }}>{trace.active_world_version.slice(0, 16)}…</code>
+            } />
+          )}
         </tbody>
       </table>
     </div>
