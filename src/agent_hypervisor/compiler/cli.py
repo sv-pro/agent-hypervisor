@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 
 import click
@@ -491,3 +493,192 @@ def cmd_run(scenario: str, rendered: bool, manifest_path: str | None, compare: b
     click.echo()
     click.echo(_col("=" * 62, _BOLD))
     click.echo()
+
+
+# ── program lifecycle (PL-3) ─────────────────────────────────────────────────
+#
+# Thin CLI wrapper over program_layer.review_lifecycle and ReplayEngine.
+# No enforcement logic lives here — every command delegates to the Python API.
+
+
+_DEFAULT_PROGRAM_STORE = "./programs"
+
+
+def _program_store(directory: str):
+    from agent_hypervisor.program_layer import ProgramStore
+    return ProgramStore(directory)
+
+
+def _fail(msg: str, code: int = 1) -> None:
+    click.echo(_col(msg, _RED), err=True)
+    raise SystemExit(code)
+
+
+@cli.group("program")
+def cmd_program():
+    """Manage reviewed programs (PL-3: propose, minimize, review, accept, replay)."""
+
+
+@cmd_program.command("propose")
+@click.option("--steps-json", "steps_json", required=True, type=click.Path(exists=True),
+              help="JSON file: a list of {tool, params, provenance?, capabilities_used?} entries.")
+@click.option("--trace-id", "trace_id", default=None, help="Trace id this program was extracted from.")
+@click.option("--world-version", "world_version", required=True, help="World manifest version at creation time.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True,
+              help="Directory holding program JSON files.")
+def cmd_program_propose(steps_json: str, trace_id: str | None, world_version: str, store_dir: str):
+    """Create a PROPOSED ReviewedProgram from a JSON step list."""
+    from agent_hypervisor.program_layer import CandidateStep, propose_program
+
+    raw = json.loads(Path(steps_json).read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not raw:
+        _fail("--steps-json must contain a non-empty JSON array of step objects.")
+    try:
+        steps = [CandidateStep.from_dict(s) for s in raw]
+    except (KeyError, TypeError, ValueError) as exc:
+        _fail(f"Invalid step in --steps-json: {exc}")
+
+    prog = propose_program(
+        steps=steps,
+        trace_id=trace_id,
+        world_version=world_version,
+        store=_program_store(store_dir),
+    )
+    click.echo(prog.id)
+
+
+@cmd_program.command("minimize")
+@click.option("--id", "program_id", required=True, help="Program id to minimize.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_minimize(program_id: str, store_dir: str):
+    """Apply deterministic minimization and print the resulting diff."""
+    from agent_hypervisor.program_layer import minimize_program
+
+    try:
+        prog = minimize_program(program_id, _program_store(store_dir))
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    _print_program_diff(prog.diff)
+
+
+@cmd_program.command("review")
+@click.option("--id", "program_id", required=True)
+@click.option("--notes", default=None, help="Optional reviewer notes.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_review(program_id: str, notes: str | None, store_dir: str):
+    """Transition PROPOSED → REVIEWED."""
+    from agent_hypervisor.program_layer import InvalidTransitionError, review_program
+
+    try:
+        prog = review_program(program_id, _program_store(store_dir), notes=notes)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    except InvalidTransitionError as exc:
+        _fail(str(exc), code=2)
+    click.echo(f"{prog.id}: {prog.status.value}")
+
+
+@cmd_program.command("accept")
+@click.option("--id", "program_id", required=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_accept(program_id: str, store_dir: str):
+    """Transition REVIEWED → ACCEPTED (runs world validation first)."""
+    from agent_hypervisor.program_layer import (
+        InvalidTransitionError,
+        WorldValidationError,
+        accept_program,
+    )
+
+    try:
+        prog = accept_program(program_id, _program_store(store_dir))
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    except InvalidTransitionError as exc:
+        _fail(str(exc), code=2)
+    except WorldValidationError as exc:
+        _fail(str(exc), code=3)
+    click.echo(f"{prog.id}: {prog.status.value}")
+
+
+@cmd_program.command("reject")
+@click.option("--id", "program_id", required=True)
+@click.option("--reason", default=None, help="Optional rejection reason, appended to reviewer_notes.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_reject(program_id: str, reason: str | None, store_dir: str):
+    """Transition REVIEWED → REJECTED."""
+    from agent_hypervisor.program_layer import InvalidTransitionError, reject_program
+
+    try:
+        prog = reject_program(program_id, _program_store(store_dir), reason=reason)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    except InvalidTransitionError as exc:
+        _fail(str(exc), code=2)
+    click.echo(f"{prog.id}: {prog.status.value}")
+
+
+@cmd_program.command("replay")
+@click.option("--id", "program_id", required=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_replay(program_id: str, store_dir: str):
+    """Replay the minimized program through the same enforcement pipeline as live execution."""
+    from agent_hypervisor.program_layer import ReplayEngine
+
+    try:
+        prog = _program_store(store_dir).load(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    trace = ReplayEngine().replay(prog)
+    json.dump(trace.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+    if not trace.ok:
+        raise SystemExit(4)
+
+
+@cmd_program.command("list")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_list(store_dir: str):
+    """List stored programs (id, status, step counts, created_at)."""
+    summaries = _program_store(store_dir).list_all()
+    if not summaries:
+        click.echo(_col("(no programs)", _DIM))
+        return
+    click.echo(f"{'id':<22} {'status':<10} {'orig':>5} {'min':>5}  created_at")
+    click.echo(_col("─" * 72, _DIM))
+    for s in summaries:
+        click.echo(
+            f"{s['id']:<22} {s['status']:<10} "
+            f"{s['step_count_original']:>5} {s['step_count_minimized']:>5}  "
+            f"{s['created_at']}"
+        )
+
+
+@cmd_program.command("show")
+@click.option("--id", "program_id", required=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_program_show(program_id: str, store_dir: str):
+    """Print a stored program as JSON."""
+    try:
+        prog = _program_store(store_dir).load(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    json.dump(prog.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+def _print_program_diff(diff) -> None:
+    if diff.is_empty:
+        click.echo(_col("(no changes — program was already minimal)", _DIM))
+        return
+    for r in diff.removed_steps:
+        click.echo(f"  {_col('REMOVED', _RED)}  step[{r.index}] {r.tool!r}  — {r.reason}")
+    for c in diff.param_changes:
+        click.echo(
+            f"  {_col('PARAM  ', _YELLOW)}  step[{c.step_index}] {c.field!r}: "
+            f"{c.before!r}  →  {c.after!r}  — {c.reason}"
+        )
+    for c in diff.capability_reduction:
+        click.echo(
+            f"  {_col('CAP    ', _YELLOW)}  step[{c.step_index}] "
+            f"{c.before!r}  →  {c.after!r}  — {c.reason}"
+        )
