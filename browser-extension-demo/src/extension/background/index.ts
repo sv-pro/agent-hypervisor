@@ -128,7 +128,8 @@ async function applyNewWorld(
   const newState: AppState = {
     ...state,
     active_world: buildActiveWorld(record, compiled),
-    version_history: updatedHistory
+    version_history: updatedHistory,
+    world_state: buildWorldStateSnapshot(compiled)
   };
 
   return { state: newState, record };
@@ -178,7 +179,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message.type === 'GET_WORLD_STATE') {
-      sendResponse({ ok: true, world_state: buildWorldStateSnapshot() });
+      sendResponse({ ok: true, world_state: buildWorldStateSnapshot(state.active_world?.compiled_world) });
       return;
     }
 

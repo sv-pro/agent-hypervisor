@@ -79,6 +79,21 @@ export const CURATED_SCENARIOS: CuratedScenario[] = [
       action: 'save_memory',
       label: 'Trusted memory save'
     }
+  },
+  {
+    id: 'external-action-pivot',
+    label: 'External action pivot (no hidden content)',
+    description:
+      'An untrusted web page attempts to trigger an external side-effect action (export_summary) ' +
+      'with no hidden content signals and no explicit taint. Reveals how worlds differ in their ' +
+      'external side-effect surface for plain untrusted sources.',
+    input: {
+      source_type: 'web_page',
+      hidden_content_detected: false,
+      taint: false,
+      action: 'export_summary',
+      label: 'External pivot attempt'
+    }
   }
 ];
 
