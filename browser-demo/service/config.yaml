@@ -1,0 +1,15 @@
+# Agent Hypervisor Browser Demo — Service Configuration
+# All values can be overridden via environment variables (prefix AH_)
+
+host: 127.0.0.1
+port: 17841
+
+# Session token for basic request authentication.
+# Change this before any non-local demo.
+session_token: demo-local-token
+
+bootstrap_enabled: true
+
+# Paths are relative to where the service is started.
+trace_store_path: ./data/traces.jsonl
+memory_store_path: ./data/memory.json

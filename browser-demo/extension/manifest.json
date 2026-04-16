@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Hypervisor Demo",
+  "version": "0.1.0",
+  "description": "Local-first deterministic governance layer for browser agent actions. Connects to the local hypervisor service.",
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel"
+  ],
+
+  "host_permissions": [
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Agent Hypervisor"
+  },
+
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
