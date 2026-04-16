@@ -30,7 +30,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 # Hard upper bound on steps per program.
 # Caller receives ValueError at construction time if exceeded.
@@ -43,12 +43,15 @@ class Step:
     A single step in a linear program.
 
     Fields:
-        action  — the action name to invoke; matched against the world's
-                  allowed action set by ProgramRunner (unknown → deny).
-        params  — key-value parameters for the action.  Passed to the
-                  executor as execution context.  Must be JSON-serialisable.
-                  Excluded from hash and equality comparisons (structural
-                  identity is determined by action only).
+        action      — the action name to invoke; matched against the world's
+                      allowed action set by ProgramRunner (unknown → deny).
+        params      — key-value parameters for the action.  Passed to the
+                      executor as execution context.  Must be JSON-serialisable.
+                      Excluded from hash and equality comparisons (structural
+                      identity is determined by action only).
+        description — optional human-readable note explaining what this step
+                      does.  Used for logging and trace display only; it has
+                      no effect on execution.  Excluded from hash and equality.
 
     Raises:
         ValueError: action is empty or whitespace-only.
@@ -56,6 +59,7 @@ class Step:
 
     action: str
     params: dict[str, Any] = field(default_factory=dict, hash=False, compare=False)
+    description: Optional[str] = field(default=None, hash=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.action, str) or not self.action.strip():

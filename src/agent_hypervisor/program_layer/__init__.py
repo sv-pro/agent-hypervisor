@@ -1,37 +1,44 @@
 """
-program_layer — Optional execution abstraction layer (Phase 1).
+program_layer — Executable program abstraction layer (Phase 1).
 
-This package introduces the Program Layer: an optional, pluggable extension
-above the World Kernel that allows execution to be driven by structured
-programs rather than direct tool adapter calls.
+This package is an optional, pluggable extension above the World Kernel that
+allows execution to be driven by structured, linear programs rather than
+direct tool adapter calls.
 
 The World Kernel (runtime/, hypervisor/) is not modified.
 All policy enforcement runs before any program layer code is reached.
+Programs orchestrate; the World Kernel decides what is possible.
 
-Phase 1 additions (this release):
-    Program / Step        — minimal linear program model (no branches/loops)
-    ProgramTrace          — per-step execution trace (allow/deny/skip verdicts)
-    ProgramRunner         — step-by-step executor: validates → compiles → runs
-    ENABLE_PROGRAM_LAYER  — feature flag (env: AGENT_HYPERVISOR_ENABLE_PROGRAM_LAYER)
+Phase 1 — Minimal Task Compiler + Safe Program Execution:
 
-Phase 1 (sandbox foundations, from prior release):
-    SandboxRuntime        — restricted exec() environment (AST-validated)
-    DeterministicTaskCompiler — converts named workflows to ProgramExecutionPlan
-    ProgramExecutor       — runs ProgramExecutionPlan in the sandbox
+    Program / Step            — linear program model (no branches/loops).
+                                Step gains an optional ``description`` field.
+    ProgramTrace / StepTrace  — per-step execution trace (allow/deny/skip).
+    ProgramRunner             — validates → compiles → executes step-by-step.
+    SimpleTaskCompiler        — maps string/dict intents to ExecutionPlan via
+                                keyword matching; falls back to DirectExecutionPlan.
+    validate_program()        — static pre-execution world constraint check.
+    ProgramTraceStore         — JSONL-backed persistent trace storage.
+    ENABLE_PROGRAM_LAYER      — master feature flag.
 
-Existing (scaffolding from prior phase):
-    ExecutionPlan         — base plan type
-    DirectExecutionPlan   — wraps existing direct execution (default, unchanged)
-    ProgramExecutionPlan  — code-based execution (now functional in Phase 1)
-    TaskCompiler          — protocol: intent + world → ExecutionPlan
-    Executor              — protocol: plan + context → result
-    ProgramRegistry       — stub: store/load reviewed programs (future)
+Prior phase (sandbox foundations):
+    SandboxRuntime            — restricted exec() (AST-validated, timeout).
+    DeterministicTaskCompiler — converts named workflows to ProgramExecutionPlan.
+    ProgramExecutor           — runs ProgramExecutionPlan in the sandbox.
+
+Plan types:
+    ExecutionPlan             — abstract base.
+    DirectExecutionPlan       — existing direct execution (unchanged behavior).
+    ProgramExecutionPlan      — sandbox execution (functional in Phase 1).
+
+Protocols:
+    TaskCompiler              — compile(intent, world) → ExecutionPlan.
+    Executor                  — execute(plan, context) → result.
+    ProgramRegistry           — stub for future reviewed-program store.
 
 Public surface:
     All names in __all__ are stable across Phase 1.
-    SandboxError hierarchy (SandboxSecurityError, SandboxTimeoutError,
-    SandboxRuntimeError) is exported for callers that need to handle
-    specific failure modes.
+    SandboxError hierarchy is exported for callers handling specific failures.
 """
 
 from .config import ENABLE_PROGRAM_LAYER
@@ -48,19 +55,27 @@ from .sandbox_runtime import (
     SandboxSecurityError,
     SandboxTimeoutError,
 )
+from .simple_task_compiler import SimpleTaskCompiler
 from .task_compiler import DeterministicTaskCompiler
+from .trace_storage import ProgramTraceStore
+from .world_validator import (
+    StepViolation,
+    ValidationResult,
+    validate_program,
+    validate_step,
+)
 
 __all__ = [
     # Feature flag
     "ENABLE_PROGRAM_LAYER",
-    # Program model (Phase 1)
+    # Program model
     "Step",
     "Program",
     "MAX_STEPS",
-    # Execution trace (Phase 1)
+    # Execution trace
     "StepTrace",
     "ProgramTrace",
-    # Runner (Phase 1)
+    # Runner
     "ProgramRunner",
     # Plan types
     "ExecutionPlan",
@@ -70,13 +85,22 @@ __all__ = [
     "TaskCompiler",
     "Executor",
     "ProgramRegistry",
-    # Implementations
-    "ProgramExecutor",
-    "SandboxRuntime",
+    # Compilers
     "DeterministicTaskCompiler",
-    # Sandbox error hierarchy
+    "SimpleTaskCompiler",
+    # Executor
+    "ProgramExecutor",
+    # Sandbox
+    "SandboxRuntime",
     "SandboxError",
     "SandboxSecurityError",
     "SandboxTimeoutError",
     "SandboxRuntimeError",
+    # World validation
+    "validate_program",
+    "validate_step",
+    "ValidationResult",
+    "StepViolation",
+    # Trace storage
+    "ProgramTraceStore",
 ]
