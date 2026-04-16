@@ -682,3 +682,247 @@ def _print_program_diff(diff) -> None:
             f"  {_col('CAP    ', _YELLOW)}  step[{c.step_index}] "
             f"{c.before!r}  →  {c.after!r}  — {c.reason}"
         )
+
+
+# ── world registry (SYS-2 light) ─────────────────────────────────────────────
+#
+# Thin CLI wrapper over program_layer.world_registry.  Worlds live in a
+# directory of YAML manifests; --worlds-dir selects the directory.  The
+# registry owns a small .active.json pointer; set_active/clear commands
+# manage it.  No enforcement logic lives here.
+
+
+def _default_worlds_dir() -> str:
+    from pathlib import Path as _P
+    return str(_P(__file__).parent.parent / "program_layer" / "worlds")
+
+
+def _world_registry(worlds_dir: str):
+    from agent_hypervisor.program_layer import WorldRegistry
+    return WorldRegistry(worlds_dir)
+
+
+@cli.group("world")
+def cmd_world():
+    """Manage world registry (SYS-2 light: list / activate / show)."""
+
+
+@cmd_world.command("list")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir,
+              show_default=True, help="Directory of world YAML manifests.")
+def cmd_world_list(worlds_dir: str):
+    """List all worlds under --worlds-dir with their allowed_actions counts."""
+    registry = _world_registry(worlds_dir)
+    worlds = registry.list_worlds()
+    active = registry.get_active()
+    active_key = active.key if active else None
+    if not worlds:
+        click.echo(_col("(no worlds)", _DIM))
+        return
+    click.echo(f"{'world_id':<18} {'version':<8} {'actions':>7}  description")
+    click.echo(_col("─" * 72, _DIM))
+    for w in worlds:
+        marker = _col("●", _GREEN) if w.key == active_key else " "
+        click.echo(
+            f"{marker} {w.world_id:<16} {w.version:<8} "
+            f"{len(w.allowed_actions):>7}  {w.description.strip().splitlines()[0] if w.description.strip() else ''}"
+        )
+
+
+@cmd_world.command("show")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_world_show(worlds_dir: str):
+    """Show the currently active world (id, version, allowed_actions)."""
+    registry = _world_registry(worlds_dir)
+    active = registry.get_active()
+    if active is None:
+        click.echo(_col("(no active world)", _DIM))
+        raise SystemExit(1)
+    click.echo(json.dumps(active.to_dict(), indent=2))
+
+
+@cmd_world.command("activate")
+@click.option("--id", "world_id", required=True, help="World id to activate.")
+@click.option("--version", default=None, help="World version. Defaults to latest.")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_world_activate(world_id: str, version: str | None, worlds_dir: str):
+    """Mark a world as active.  Validates the target before writing."""
+    from agent_hypervisor.program_layer import WorldNotFoundError
+
+    registry = _world_registry(worlds_dir)
+    # If version is None, resolve the latest first so the echoed version is concrete.
+    try:
+        resolved = registry.get(world_id, version)
+        active = registry.set_active(resolved.world_id, resolved.version)
+    except WorldNotFoundError as exc:
+        _fail(str(exc))
+    click.echo(f"active: {active.world_id} {active.version}")
+
+
+@cmd_world.command("deactivate")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_world_deactivate(worlds_dir: str):
+    """Clear the active-world pointer."""
+    _world_registry(worlds_dir).clear_active()
+    click.echo("active: (none)")
+
+
+# ── program × world (SYS-2 light) ────────────────────────────────────────────
+
+
+def _resolve_world(registry, world_id: str | None, version: str | None,
+                   required: bool = False):
+    """
+    Resolve a WorldDescriptor from --world/--world-version, falling back to
+    the registry's active pointer.  Returns (world, source) where source is
+    'explicit', 'active', or 'default' (when world is None).
+    """
+    from agent_hypervisor.program_layer import WorldNotFoundError
+
+    if world_id:
+        try:
+            return registry.get(world_id, version), "explicit"
+        except WorldNotFoundError as exc:
+            _fail(str(exc))
+    active = registry.get_active()
+    if active is not None:
+        return active, "active"
+    if required:
+        _fail("No world specified and no active world set. "
+              "Pass --world <id> or run `awc world activate --id <id>`.")
+    return None, "default"
+
+
+@cmd_program.command("preview")
+@click.option("--id", "program_id", required=True, help="Program id to preview.")
+@click.option("--world", "world_id", required=True, help="World id to preview against.")
+@click.option("--version", default=None, help="World version (defaults to latest).")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_program_preview(program_id: str, world_id: str, version: str | None,
+                        store_dir: str, worlds_dir: str):
+    """Preview a program's compatibility under a world (no execution)."""
+    from agent_hypervisor.program_layer import preview_program_under_world
+
+    try:
+        verdict = preview_program_under_world(
+            program_id=program_id,
+            world_id=world_id,
+            version=version,
+            store=_program_store(store_dir),
+            registry=_world_registry(worlds_dir),
+        )
+    except KeyError as exc:
+        _fail(f"Not found: {exc}")
+    _print_compatibility(verdict)
+    if not verdict.compatible:
+        raise SystemExit(3)
+
+
+@cmd_program.command("compare")
+@click.option("--id", "program_id", required=True)
+@click.option("--world-a", "world_a_id", required=True, help="First world id.")
+@click.option("--world-a-version", "world_a_version", default=None)
+@click.option("--world-b", "world_b_id", required=True, help="Second world id.")
+@click.option("--world-b-version", "world_b_version", default=None)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_program_compare(program_id: str, world_a_id: str, world_a_version: str | None,
+                        world_b_id: str, world_b_version: str | None,
+                        store_dir: str, worlds_dir: str):
+    """Compare a program's compatibility across two worlds."""
+    from agent_hypervisor.program_layer import compare_program_across_worlds
+
+    try:
+        diff = compare_program_across_worlds(
+            program_id=program_id,
+            world_a_id=world_a_id,
+            world_a_version=world_a_version,
+            world_b_id=world_b_id,
+            world_b_version=world_b_version,
+            store=_program_store(store_dir),
+            registry=_world_registry(worlds_dir),
+        )
+    except KeyError as exc:
+        _fail(f"Not found: {exc}")
+    _print_program_world_diff(diff)
+
+
+@cmd_program.command("replay-under-world")
+@click.option("--id", "program_id", required=True)
+@click.option("--world", "world_id", default=None, help="World id. Defaults to active.")
+@click.option("--version", default=None, help="World version. Defaults to latest.")
+@click.option("--no-preview", is_flag=True, default=False,
+              help="Skip the compatibility preview pass before replay.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_program_replay_under_world(program_id: str, world_id: str | None,
+                                   version: str | None, no_preview: bool,
+                                   store_dir: str, worlds_dir: str):
+    """Replay a program under a specific world, recording world context in the trace."""
+    from agent_hypervisor.program_layer import (
+        ReplayEngine,
+        check_compatibility,
+    )
+
+    store = _program_store(store_dir)
+    registry = _world_registry(worlds_dir)
+
+    try:
+        prog = store.load(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+
+    world, source = _resolve_world(registry, world_id, version, required=False)
+
+    preview = None
+    if world is not None and not no_preview:
+        preview = check_compatibility(prog, world).compatible
+
+    trace = ReplayEngine().replay_under_world(
+        program=prog,
+        world=world,
+        world_source=source,
+        preview_compatible=preview,
+    )
+
+    json.dump(trace.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+    if trace.final_verdict == "deny":
+        raise SystemExit(4)
+    if trace.final_verdict == "partial_failure":
+        raise SystemExit(5)
+
+
+def _print_compatibility(verdict) -> None:
+    tag = _col("COMPATIBLE", _GREEN) if verdict.compatible else _col("INCOMPATIBLE", _RED)
+    click.echo(f"{tag}  program={verdict.program_id}  "
+               f"world={verdict.world_id} {verdict.world_version}")
+    click.echo(_col("─" * 62, _DIM))
+    for sr in verdict.step_results:
+        mark = _col("✓", _GREEN) if sr.allowed else _col("✗", _RED)
+        click.echo(f"  {mark} step[{sr.step_index}] {sr.action:<18}  {sr.reason}")
+    s = verdict.summary
+    click.echo(_col("─" * 62, _DIM))
+    click.echo(f"Summary: {s.allowed_steps} allowed, {s.denied_steps} denied"
+               + (f"; restricted: {', '.join(s.restricted_actions)}"
+                  if s.restricted_actions else ""))
+
+
+def _print_program_world_diff(diff) -> None:
+    wa = f"{diff.world_a['id']} {diff.world_a['version']}"
+    wb = f"{diff.world_b['id']} {diff.world_b['version']}"
+    click.echo(f"program={diff.program_id}  A={wa}  B={wb}")
+    click.echo(_col("─" * 62, _DIM))
+    if not diff.divergence_points:
+        both = _col("COMPATIBLE IN BOTH", _GREEN) if diff.both_compatible \
+               else _col("INCOMPATIBLE IN BOTH", _RED)
+        click.echo(f"no divergence.  {both}")
+        return
+    for d in diff.divergence_points:
+        click.echo(
+            f"  step[{d.step_index}] {d.action:<18}  "
+            f"A={_col(d.world_a, _GREEN if d.world_a == 'allowed' else _RED)}  "
+            f"B={_col(d.world_b, _GREEN if d.world_b == 'allowed' else _RED)}"
+        )
+        click.echo(f"      reason: {d.reason}")

@@ -63,6 +63,16 @@ Public surface:
     SandboxError hierarchy is exported for callers handling specific failures.
 """
 
+from .compatibility import (
+    CompatibilitySummary,
+    DivergencePoint,
+    ProgramWorldCompatibility,
+    ProgramWorldDiff,
+    StepCompatibility,
+    check_compatibility,
+    compare_program_across_worlds,
+    preview_program_under_world,
+)
 from .config import ENABLE_PROGRAM_LAYER
 from .execution_plan import DirectExecutionPlan, ExecutionPlan, ProgramExecutionPlan
 from .interfaces import Executor, ProgramRegistry, TaskCompiler
@@ -72,7 +82,15 @@ from .program_model import MAX_STEPS, Program, Step
 from .program_runner import ProgramRunner
 from .program_store import ProgramStore
 from .program_trace import ProgramTrace, StepTrace
-from .replay_engine import ReplayEngine
+from .replay_engine import ReplayEngine, ReplayTrace
+from .world_registry import (
+    WorldDescriptor,
+    WorldLoadError,
+    WorldNotFoundError,
+    WorldRegistry,
+    default_registry,
+    load_world_from_yaml,
+)
 from .review_lifecycle import (
     InvalidTransitionError,
     WorldValidationError,
@@ -173,4 +191,22 @@ __all__ = [
     # PL-3: Errors
     "InvalidTransitionError",
     "WorldValidationError",
+    # SYS-2 light: World registry
+    "WorldDescriptor",
+    "WorldRegistry",
+    "WorldLoadError",
+    "WorldNotFoundError",
+    "load_world_from_yaml",
+    "default_registry",
+    # SYS-2 light: Compatibility
+    "StepCompatibility",
+    "CompatibilitySummary",
+    "ProgramWorldCompatibility",
+    "DivergencePoint",
+    "ProgramWorldDiff",
+    "check_compatibility",
+    "preview_program_under_world",
+    "compare_program_across_worlds",
+    # SYS-2 light: Replay-under-world
+    "ReplayTrace",
 ]

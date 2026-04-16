@@ -1,0 +1,10 @@
+world_id: world_balanced
+version: "1.0"
+description: >
+  Balanced world: every deterministic text workflow is permitted.  Programs
+  accepted under this world exercise the full supported workflow set.
+allowed_actions:
+  - count_lines
+  - count_words
+  - normalize_text
+  - word_frequency
