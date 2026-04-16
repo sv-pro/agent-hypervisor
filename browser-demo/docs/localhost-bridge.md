@@ -2,8 +2,9 @@
 
 ## Why a local service?
 
-The Chrome extension could run the policy engine inside the browser. The existing
-`browser-extension-demo` does exactly that. But this demo makes a different point:
+The Chrome extension could run the policy engine inside the browser. The standalone
+extension at `browser-demo/extension-standalone/` does exactly that. But this demo
+makes a different point:
 
 **Policy decisions must not run in the same trust boundary as the content being evaluated.**
 
