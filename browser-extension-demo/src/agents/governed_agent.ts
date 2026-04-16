@@ -7,6 +7,7 @@ import { createMemoryEntry, type MemoryEntry } from '../core/memory';
 import { makeTrace, type DecisionTrace } from '../core/trace';
 import { createApprovalRequest, type ApprovalRequest } from '../core/approval';
 import { applySimulationGuard } from '../core/simulation';
+import type { CompiledWorld, ActiveWorldState } from '../world/manifest_schema';
 
 export interface GovernedResult<T> {
   data?: T;
@@ -36,10 +37,19 @@ export class GovernedAgent {
     intentType: IntentType,
     execute: () => Promise<unknown> | unknown,
     simulationMode = false,
-    approvalId?: string
+    approvalId?: string,
+    compiledWorld?: CompiledWorld,
+    activeWorldState?: Pick<ActiveWorldState, 'version_id' | 'world_id' | 'version'>
   ): Promise<GovernedOutcome<unknown>> {
     const intent = createIntent(event, intentType, {}, 'user_requested');
-    const policy = evaluatePolicy(event, intent);
+    const policy = evaluatePolicy(event, intent, compiledWorld);
+    const worldProvenance = activeWorldState
+      ? {
+          active_world_version: activeWorldState.version_id,
+          active_world_id: activeWorldState.world_id,
+          rule_version: activeWorldState.version
+        }
+      : {};
 
     // When decision is 'ask', surface to approval queue rather than silently skipping
     if (policy.decision === 'ask') {
@@ -54,7 +64,8 @@ export class GovernedAgent {
         rule_description: policy.rule_description,
         explanation: policy.explanation,
         decision: 'ask',
-        simulated: false
+        simulated: false,
+        ...worldProvenance
       });
       return { pending: true, approvalRequest, policy, trace };
     }
@@ -74,7 +85,8 @@ export class GovernedAgent {
       explanation: policy.explanation,
       decision: effectiveDecision,
       simulated,
-      ...(approvalId ? { approval_id: approvalId } : {})
+      ...(approvalId ? { approval_id: approvalId } : {}),
+      ...worldProvenance
     });
 
     // Only execute if the effective decision is 'allow'

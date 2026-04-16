@@ -10,14 +10,32 @@ const DECISION_COLORS: Record<string, string> = {
 
 interface Props {
   worldState: WorldStateSnapshot;
+  activeWorld?: { world_id: string; version: number } | null;
+  onEditWorld?: () => void;
 }
 
-export function WorldStateSection({ worldState }: Props) {
+export function WorldStateSection({ worldState, activeWorld, onEditWorld }: Props) {
   return (
     <section style={{ marginBottom: 12 }}>
-      <h3 style={sectionTitle}>World State</h3>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <h3 style={{ ...sectionTitle, margin: 0 }}>World State</h3>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {activeWorld && (
+            <span style={worldVersionBadge}>
+              {activeWorld.world_id} v{activeWorld.version}
+            </span>
+          )}
+          {onEditWorld && (
+            <button onClick={onEditWorld} style={editWorldBtn}>
+              Edit World →
+            </button>
+          )}
+        </div>
+      </div>
       <p style={{ fontSize: 11, color: '#888', margin: '0 0 8px', fontStyle: 'italic' }}>
-        Read-only — derived from compiled policy. Not editable at runtime.
+        {activeWorld
+          ? `Active: ${activeWorld.world_id} v${activeWorld.version}`
+          : 'Read-only — derived from compiled policy.'}
       </p>
 
       <div style={{ marginBottom: 8 }}>
@@ -81,6 +99,28 @@ function CapRow({ label, ok }: { label: string; ok: boolean }) {
     </tr>
   );
 }
+
+const worldVersionBadge: React.CSSProperties = {
+  display: 'inline-block',
+  background: '#e8f5e9',
+  color: '#2d6a2d',
+  borderRadius: 10,
+  padding: '2px 7px',
+  fontSize: 10,
+  fontWeight: 700,
+  border: '1px solid #c3e6cb'
+};
+
+const editWorldBtn: React.CSSProperties = {
+  fontSize: 10,
+  padding: '2px 7px',
+  borderRadius: 3,
+  border: '1px solid #c3e6cb',
+  cursor: 'pointer',
+  background: '#f0faf0',
+  color: '#2d6a2d',
+  fontWeight: 600
+};
 
 function trustBadge(color: string): React.CSSProperties {
   return {
