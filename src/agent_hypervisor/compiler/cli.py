@@ -1111,3 +1111,468 @@ def _print_scenario_result(scenario, result) -> None:
             verdict = _verdict_col(d.verdicts_by_world[world_key])
             reason = d.reasons_by_world.get(world_key, "")
             click.echo(f"    {world_key:<22} {verdict}  {_col(reason, _DIM)}")
+
+
+# ── operator surface (SYS-4A) ─────────────────────────────────────────────────
+#
+# Lifecycle management shell: Worlds, Programs, Scenarios.
+# Sits above the sealed runtime; does not redesign the kernel.
+
+_DEFAULT_HISTORY_FILE = "./data/world_activation_history.jsonl"
+_DEFAULT_EVENTS_FILE = "./data/operator_events.jsonl"
+
+
+def _operator_event_log(events_file: str):
+    from agent_hypervisor.program_layer import OperatorEventLog
+    return OperatorEventLog(events_file)
+
+
+def _world_operator_service(worlds_dir: str, history_file: str, events_file: str):
+    from agent_hypervisor.program_layer import WorldOperatorService
+    return WorldOperatorService(
+        registry=_world_registry(worlds_dir),
+        history_file=history_file,
+        event_log=_operator_event_log(events_file),
+    )
+
+
+@cli.group("operator")
+def cmd_operator():
+    """SYS-4A: Lifecycle management for Worlds, Programs, and Scenarios."""
+
+
+# ── operator worlds ────────────────────────────────────────────────────────────
+
+
+@cmd_operator.group("worlds")
+def cmd_operator_worlds():
+    """Inspect and manage World lifecycle."""
+
+
+@cmd_operator_worlds.command("list")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_list(worlds_dir: str):
+    """List all worlds with active marker."""
+    registry = _world_registry(worlds_dir)
+    worlds = registry.list_worlds()
+    active = registry.get_active()
+    active_key = active.key if active else None
+    if not worlds:
+        click.echo(_col("(no worlds)", _DIM))
+        return
+    click.echo(f"{'world_id':<18} {'version':<8} {'actions':>7}  description")
+    click.echo(_col("─" * 72, _DIM))
+    for w in worlds:
+        marker = _col("●", _GREEN) if w.key == active_key else " "
+        desc = w.description.strip().splitlines()[0] if w.description.strip() else ""
+        click.echo(
+            f"{marker} {w.world_id:<16} {w.version:<8} "
+            f"{len(w.allowed_actions):>7}  {desc}"
+        )
+
+
+@cmd_operator_worlds.command("active")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_active(worlds_dir: str):
+    """Show the currently active world."""
+    active = _world_registry(worlds_dir).get_active()
+    if active is None:
+        click.echo(_col("(no active world)", _DIM))
+        raise SystemExit(1)
+    click.echo(json.dumps(active.to_dict(), indent=2))
+
+
+@cmd_operator_worlds.command("activate")
+@click.argument("world_id")
+@click.option("--version", default=None, help="World version (defaults to latest).")
+@click.option("--reason", default=None, help="Optional reason for activation.")
+@click.option("--by", "activated_by", default="cli", show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--history-file", "history_file", default=_DEFAULT_HISTORY_FILE, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_worlds_activate(world_id: str, version: str | None, reason: str | None,
+                           activated_by: str, worlds_dir: str,
+                           history_file: str, events_file: str):
+    """Activate WORLD_ID, recording the transition in history."""
+    from agent_hypervisor.program_layer import RollbackError, WorldNotFoundError
+    svc = _world_operator_service(worlds_dir, history_file, events_file)
+    try:
+        record = svc.activate_world(world_id, version, reason=reason, activated_by=activated_by)
+    except WorldNotFoundError as exc:
+        _fail(str(exc))
+    click.echo(f"activated: {record.world_id} {record.version}")
+    if record.previous_world_id:
+        click.echo(f"previous:  {record.previous_world_id} {record.previous_version}")
+    click.echo(f"id:        {record.activation_id}")
+
+
+@cmd_operator_worlds.command("rollback")
+@click.option("--reason", default=None, help="Optional reason for rollback.")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--history-file", "history_file", default=_DEFAULT_HISTORY_FILE, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_worlds_rollback(reason: str | None, worlds_dir: str,
+                           history_file: str, events_file: str):
+    """Roll back to the world that was active before the current one."""
+    from agent_hypervisor.program_layer import RollbackError
+    svc = _world_operator_service(worlds_dir, history_file, events_file)
+    try:
+        record = svc.rollback_world(reason=reason)
+    except RollbackError as exc:
+        _fail(str(exc))
+    click.echo(f"rolled back to: {record.world_id} {record.version}")
+    click.echo(f"id:             {record.activation_id}")
+
+
+@cmd_operator_worlds.command("history")
+@click.option("--history-file", "history_file", default=_DEFAULT_HISTORY_FILE, show_default=True)
+@click.option("--limit", "limit", default=20, show_default=True, help="Max records to show.")
+def cmd_op_worlds_history(history_file: str, limit: int):
+    """Show world activation history (most recent last)."""
+    from agent_hypervisor.program_layer import WorldOperatorService, OperatorEventLog, WorldRegistry
+    # history-only view: no worlds_dir needed for read
+    from pathlib import Path as _P
+
+    history_path = _P(history_file)
+    if not history_path.exists():
+        click.echo(_col("(no history)", _DIM))
+        return
+
+    import json as _json
+    lines = history_path.read_text(encoding="utf-8").splitlines()
+    records = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(_json.loads(line))
+        except _json.JSONDecodeError:
+            continue
+
+    records = records[-limit:]
+    if not records:
+        click.echo(_col("(no records)", _DIM))
+        return
+
+    click.echo(f"{'#':<4} {'world_id':<18} {'version':<8} {'rollback':<10} {'activated_at':<28} reason")
+    click.echo(_col("─" * 90, _DIM))
+    for i, r in enumerate(records, 1):
+        rb = _col("yes", _YELLOW) if r.get("is_rollback") else "   "
+        reason = r.get("reason") or ""
+        click.echo(
+            f"{i:<4} {r.get('world_id',''):<18} {r.get('version',''):<8} "
+            f"{rb:<10} {r.get('activated_at',''):<28} {reason}"
+        )
+
+
+@cmd_operator_worlds.command("impact")
+@click.argument("world_id")
+@click.option("--version", default=None, help="World version (defaults to latest).")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--history-file", "history_file", default=_DEFAULT_HISTORY_FILE, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+@click.option("--json", "json_out", is_flag=True, default=False)
+def cmd_op_worlds_impact(world_id: str, version: str | None, worlds_dir: str,
+                         store_dir: str, scenarios_dir: str,
+                         history_file: str, events_file: str, json_out: bool):
+    """Preview the impact of activating WORLD_ID without changing anything."""
+    from agent_hypervisor.program_layer import WorldNotFoundError
+    svc = _world_operator_service(worlds_dir, history_file, events_file)
+    store = _program_store(store_dir)
+    scen_reg = _scenario_registry(scenarios_dir)
+    try:
+        report = svc.preview_activation_impact(world_id, version, store, scen_reg)
+    except WorldNotFoundError as exc:
+        _fail(str(exc))
+
+    if json_out:
+        json.dump(report.to_dict(), sys.stdout, indent=2, default=str)
+        click.echo()
+        return
+
+    _print_impact_report(report)
+
+
+def _print_impact_report(report) -> None:
+    tw = report.target_world
+    cw = report.current_world
+    click.echo()
+    click.echo(_col("Activation Impact Report", _BOLD))
+    click.echo(f"  target:  {tw['world_id']} {tw['version']}")
+    click.echo(f"  current: {cw['world_id']} {cw['version']}" if cw else "  current: (none)")
+    click.echo()
+
+    t = report.totals
+    click.echo(_col("Totals:", _BOLD))
+    click.echo(f"  reviewed programs checked:        {t['reviewed_programs_checked']}")
+    click.echo(f"  scenarios checked:                {t['scenarios_checked']}")
+    click.echo(f"  programs becoming incompatible:   "
+               + _col(str(t['programs_becoming_incompatible']),
+                      _RED if t['programs_becoming_incompatible'] else _GREEN))
+
+    if report.affected_programs:
+        click.echo()
+        click.echo(_col("Programs:", _BOLD))
+        click.echo(f"  {'program_id':<28} {'current':>10} {'target':>10}  summary")
+        click.echo(_col("  " + "─" * 70, _DIM))
+        for p in report.affected_programs:
+            cur = "–" if p.current_compatible is None else ("✓" if p.current_compatible else "✗")
+            tgt = _col("✓", _GREEN) if p.target_compatible else _col("✗", _RED)
+            click.echo(f"  {p.program_id:<28} {cur:>10} {tgt:>10}  {p.summary}")
+
+    if report.affected_scenarios:
+        click.echo()
+        click.echo(_col("Scenarios:", _BOLD))
+        for s in report.affected_scenarios:
+            div = _col("divergence expected", _YELLOW) if s.divergence_expected \
+                else _col("no divergence expected", _DIM)
+            click.echo(f"  {s.scenario_id:<28} {div}")
+            click.echo(f"  {'':<28} {_col(s.summary, _DIM)}")
+
+
+# ── operator programs ─────────────────────────────────────────────────────────
+
+
+@cmd_operator.group("programs")
+def cmd_operator_programs():
+    """Inspect reviewed programs and their world compatibility."""
+
+
+@cmd_operator_programs.command("list")
+@click.option("--status", "status_filter", default=None,
+              help="Filter by status: proposed|reviewed|accepted|rejected.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_programs_list(status_filter: str | None, store_dir: str,
+                         worlds_dir: str, events_file: str):
+    """List all programs with compatibility status against the active world."""
+    from agent_hypervisor.program_layer import ProgramOperatorService
+    svc = ProgramOperatorService(
+        store=_program_store(store_dir),
+        registry=_world_registry(worlds_dir),
+        event_log=_operator_event_log(events_file),
+    )
+    summaries = svc.list_programs(status=status_filter)
+    if not summaries:
+        click.echo(_col("(no programs)", _DIM))
+        return
+    click.echo(f"{'program_id':<28} {'status':<12} {'compat':>8}  world_at_creation")
+    click.echo(_col("─" * 72, _DIM))
+    for s in summaries:
+        compat = (
+            _col("✓", _GREEN) if s.compatible_with_active_world is True
+            else (_col("✗", _RED) if s.compatible_with_active_world is False else "–")
+        )
+        click.echo(
+            f"{s.program_id:<28} {s.status:<12} {compat:>8}  {s.world_version_at_creation}"
+        )
+
+
+@cmd_operator_programs.command("show")
+@click.argument("program_id")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_programs_show(program_id: str, store_dir: str, events_file: str):
+    """Show full program details as JSON."""
+    from agent_hypervisor.program_layer import ProgramOperatorService, WorldRegistry
+    svc = ProgramOperatorService(
+        store=_program_store(store_dir),
+        registry=_world_registry(_default_worlds_dir()),
+        event_log=_operator_event_log(events_file),
+    )
+    try:
+        prog = svc.get_program(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    # ReviewedProgram has a to_dict() method
+    json.dump(prog.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+@cmd_operator_programs.command("diff")
+@click.argument("program_id")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_programs_diff(program_id: str, store_dir: str, events_file: str):
+    """Show the minimization diff for a program."""
+    from agent_hypervisor.program_layer import ProgramOperatorService
+    svc = ProgramOperatorService(
+        store=_program_store(store_dir),
+        registry=_world_registry(_default_worlds_dir()),
+        event_log=_operator_event_log(events_file),
+    )
+    try:
+        diff = svc.get_program_diff(program_id)
+    except KeyError as exc:
+        _fail(f"Program not found: {exc}")
+    json.dump(diff.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+@cmd_operator_programs.command("compatibility")
+@click.argument("program_id")
+@click.option("--world", "world_id", default=None, help="World id (defaults to active).")
+@click.option("--version", default=None)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_programs_compatibility(program_id: str, world_id: str | None,
+                                  version: str | None, store_dir: str,
+                                  worlds_dir: str, events_file: str):
+    """Check compatibility of a program against a world (defaults to active)."""
+    from agent_hypervisor.program_layer import ProgramOperatorService
+    svc = ProgramOperatorService(
+        store=_program_store(store_dir),
+        registry=_world_registry(worlds_dir),
+        event_log=_operator_event_log(events_file),
+    )
+    try:
+        result = svc.get_program_compatibility(program_id, world_id, version)
+    except (KeyError, ValueError) as exc:
+        _fail(str(exc))
+    _print_compatibility(result)
+    if not result.compatible:
+        raise SystemExit(3)
+
+
+# ── operator scenarios ────────────────────────────────────────────────────────
+
+
+@cmd_operator.group("scenarios")
+def cmd_operator_scenarios():
+    """Inspect scenarios and their last run results."""
+
+
+@cmd_operator_scenarios.command("list")
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--trace-file", "trace_file", default=None, type=click.Path(),
+              help="ScenarioTraceStore JSONL file for last-run info.")
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_scenarios_list(scenarios_dir: str, trace_file: str | None, events_file: str):
+    """List all scenarios with last-run divergence status."""
+    from agent_hypervisor.program_layer import ScenarioOperatorService, ScenarioTraceStore
+    trace_store = ScenarioTraceStore(trace_file) if trace_file else None
+    svc = ScenarioOperatorService(
+        scenario_registry=_scenario_registry(scenarios_dir),
+        trace_store=trace_store,
+        event_log=_operator_event_log(events_file),
+    )
+    summaries = svc.list_scenarios()
+    if not summaries:
+        click.echo(_col("(no scenarios)", _DIM))
+        return
+    click.echo(f"{'scenario_id':<28} {'worlds':>6}  {'diverged':>9}  last_run_at")
+    click.echo(_col("─" * 72, _DIM))
+    for s in summaries:
+        div = (
+            _col("yes", _YELLOW) if s.last_diverged is True
+            else (_col("no", _GREEN) if s.last_diverged is False else "–")
+        )
+        ran = s.last_run_at or "–"
+        click.echo(f"{s.scenario_id:<28} {len(s.worlds):>6}  {div:>9}  {ran}")
+
+
+@cmd_operator_scenarios.command("show")
+@click.argument("scenario_id")
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_scenarios_show(scenario_id: str, scenarios_dir: str, events_file: str):
+    """Show a scenario's full definition as JSON."""
+    from agent_hypervisor.program_layer import ScenarioNotFoundError, ScenarioOperatorService
+    svc = ScenarioOperatorService(
+        scenario_registry=_scenario_registry(scenarios_dir),
+        trace_store=None,
+        event_log=_operator_event_log(events_file),
+    )
+    try:
+        scenario = svc.get_scenario(scenario_id)
+    except ScenarioNotFoundError as exc:
+        _fail(str(exc))
+    json.dump(scenario.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+@cmd_operator_scenarios.command("last-result")
+@click.argument("scenario_id")
+@click.option("--trace-file", "trace_file", required=True, type=click.Path(),
+              help="ScenarioTraceStore JSONL file.")
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_scenarios_last_result(scenario_id: str, trace_file: str, events_file: str):
+    """Print the most recent ScenarioResult for SCENARIO_ID."""
+    from agent_hypervisor.program_layer import ScenarioOperatorService, ScenarioTraceStore
+    svc = ScenarioOperatorService(
+        scenario_registry=_scenario_registry(_default_scenarios_dir()),
+        trace_store=ScenarioTraceStore(trace_file),
+        event_log=_operator_event_log(events_file),
+    )
+    result = svc.get_scenario_last_result(scenario_id)
+    if result is None:
+        click.echo(_col("(no result found)", _DIM))
+        raise SystemExit(1)
+    json.dump(result, sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+# ── operator status ────────────────────────────────────────────────────────────
+
+
+@cmd_operator.command("status")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--history-file", "history_file", default=_DEFAULT_HISTORY_FILE, show_default=True)
+@click.option("--events-file", "events_file", default=_DEFAULT_EVENTS_FILE, show_default=True)
+def cmd_op_status(worlds_dir: str, store_dir: str, scenarios_dir: str,
+                  history_file: str, events_file: str):
+    """Print operator status summary: active world, program and scenario counts."""
+    from agent_hypervisor.program_layer import (
+        ProgramOperatorService,
+        ScenarioOperatorService,
+        WorldOperatorService,
+        OperatorEventLog,
+        ScenarioTraceStore,
+    )
+    from pathlib import Path as _P
+
+    svc = _world_operator_service(worlds_dir, history_file, events_file)
+    active = svc.get_active_world()
+    history = svc.get_activation_history()
+
+    prog_svc = ProgramOperatorService(
+        store=_program_store(store_dir),
+        registry=_world_registry(worlds_dir),
+        event_log=_operator_event_log(events_file),
+    )
+    scen_svc = ScenarioOperatorService(
+        scenario_registry=_scenario_registry(scenarios_dir),
+        trace_store=None,
+        event_log=_operator_event_log(events_file),
+    )
+
+    summaries = prog_svc.list_programs()
+    compat_count = sum(1 for s in summaries if s.compatible_with_active_world is True)
+    incompat_count = sum(1 for s in summaries if s.compatible_with_active_world is False)
+    scenario_summaries = scen_svc.list_scenarios()
+
+    click.echo()
+    click.echo(_col("Operator Status", _BOLD))
+    click.echo(_col("─" * 50, _DIM))
+    if active:
+        click.echo(f"  active world:   {active.world_id} {active.version}")
+        last_act = history[-1].activated_at if history else "–"
+        click.echo(f"  last activated: {last_act}")
+    else:
+        click.echo(f"  active world:   {_col('(none)', _DIM)}")
+    click.echo(f"  activations:    {len(history)}")
+    click.echo()
+    click.echo(f"  programs total: {len(summaries)}")
+    if active:
+        click.echo(f"  compatible:     {_col(str(compat_count), _GREEN)}")
+        click.echo(f"  incompatible:   {_col(str(incompat_count), _RED) if incompat_count else '0'}")
+    click.echo()
+    click.echo(f"  scenarios:      {len(scenario_summaries)}")
+    click.echo()
