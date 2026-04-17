@@ -1,0 +1,20 @@
+scenario_id: external_call_test
+name: "Internal-only vs external-allowed"
+description: >
+  A program that reads a local measurement and then produces a ranked
+  frequency report — the stand-in for an external side-effect surface.
+  World_strict (internal only) denies the ranked-output step at preview;
+  world_balanced permits it and the program runs to completion.
+program_steps:
+  - tool: count_lines
+    params:
+      input: "line one\nline two\nline three\nline four"
+  - tool: word_frequency
+    params:
+      input: "alpha beta alpha gamma beta alpha"
+      top_n: 3
+worlds:
+  - world_id: world_strict
+    version: "1.0"
+  - world_id: world_balanced
+    version: "1.0"

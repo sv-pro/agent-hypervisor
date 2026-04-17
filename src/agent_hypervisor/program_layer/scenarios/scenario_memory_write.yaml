@@ -1,0 +1,21 @@
+scenario_id: memory_write_test
+name: "Safe vs strict memory write"
+description: >
+  A program that extracts a measurement and then writes a derived, normalized
+  value to memory.  The narrative action names map onto existing deterministic
+  workflows: ``count_words`` stands in for the read/extract step, and
+  ``normalize_text`` stands in for the memory-write step.  World_strict denies
+  the write surface; world_balanced permits it.  Same program, different
+  world, different outcome.
+program_steps:
+  - tool: count_words
+    params:
+      input: "the quick brown fox jumps over the lazy dog"
+  - tool: normalize_text
+    params:
+      input: "The QUICK Brown Fox Jumps Over the Lazy Dog"
+worlds:
+  - world_id: world_strict
+    version: "1.0"
+  - world_id: world_balanced
+    version: "1.0"
