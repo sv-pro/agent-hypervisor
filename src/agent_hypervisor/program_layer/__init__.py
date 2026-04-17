@@ -133,6 +133,18 @@ from .scenario_runner import (
     run_scenario,
 )
 from .scenario_trace_store import ScenarioTraceStore
+from .operator_models import (
+    ActivationImpactReport,
+    ProgramImpact,
+    ProgramSummary,
+    ScenarioImpact,
+    ScenarioSummary,
+    WorldActivationRecord,
+)
+from .operator_event_log import OperatorEventLog
+from .world_operator_service import RollbackError, WorldOperatorService
+from .program_operator_service import ProgramOperatorService
+from .scenario_operator_service import ScenarioOperatorService
 from .sandbox_runtime import (
     SandboxError,
     SandboxRuntime,
@@ -250,4 +262,18 @@ __all__ = [
     "load_scenario_from_yaml",
     "default_scenario_registry",
     "ScenarioTraceStore",
+    # SYS-4A: Operator Surface — models
+    "WorldActivationRecord",
+    "ProgramSummary",
+    "ScenarioSummary",
+    "ProgramImpact",
+    "ScenarioImpact",
+    "ActivationImpactReport",
+    # SYS-4A: Operator Surface — event log
+    "OperatorEventLog",
+    # SYS-4A: Operator Surface — services
+    "RollbackError",
+    "WorldOperatorService",
+    "ProgramOperatorService",
+    "ScenarioOperatorService",
 ]
