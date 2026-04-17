@@ -926,3 +926,188 @@ def _print_program_world_diff(diff) -> None:
             f"B={_col(d.world_b, _GREEN if d.world_b == 'allowed' else _RED)}"
         )
         click.echo(f"      reason: {d.reason}")
+
+
+# ── scenario (SYS-3 Comparative Playground) ──────────────────────────────────
+#
+# Thin CLI wrapper over program_layer.scenario_runner.  A scenario pins ONE
+# program to N worlds; `awc scenario run` orchestrates preview + replay for
+# each world and prints a side-by-side divergence view.
+
+
+def _default_scenarios_dir() -> str:
+    from pathlib import Path as _P
+    return str(_P(__file__).parent.parent / "program_layer" / "scenarios")
+
+
+def _scenario_registry(scenarios_dir: str):
+    from agent_hypervisor.program_layer import ScenarioRegistry
+    return ScenarioRegistry(scenarios_dir)
+
+
+@cli.group("scenario")
+def cmd_scenario():
+    """Run comparative scenarios (SYS-3: one program, many worlds)."""
+
+
+@cmd_scenario.command("list")
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir,
+              show_default=True, help="Directory of scenario YAML manifests.")
+def cmd_scenario_list(scenarios_dir: str):
+    """List all scenarios under --scenarios-dir."""
+    scenarios = _scenario_registry(scenarios_dir).list_scenarios()
+    if not scenarios:
+        click.echo(_col("(no scenarios)", _DIM))
+        return
+    click.echo(f"{'scenario_id':<28} {'worlds':>6}  name")
+    click.echo(_col("─" * 72, _DIM))
+    for s in scenarios:
+        click.echo(f"{s.scenario_id:<28} {len(s.worlds):>6}  {s.name}")
+
+
+@cmd_scenario.command("show")
+@click.argument("scenario_id")
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir,
+              show_default=True)
+def cmd_scenario_show(scenario_id: str, scenarios_dir: str):
+    """Print a scenario's YAML contents as JSON."""
+    from agent_hypervisor.program_layer import ScenarioNotFoundError
+    try:
+        s = _scenario_registry(scenarios_dir).get(scenario_id)
+    except ScenarioNotFoundError as exc:
+        _fail(str(exc))
+    json.dump(s.to_dict(), sys.stdout, indent=2, default=str)
+    click.echo()
+
+
+@cmd_scenario.command("run")
+@click.argument("scenario_id")
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir,
+              show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True,
+              help="ProgramStore directory (only used when the scenario references "
+                   "an existing program by id).")
+@click.option("--trace-file", "trace_file", default=None, type=click.Path(),
+              help="Append the ScenarioResult to this JSONL file.")
+@click.option("--json", "json_out", is_flag=True, default=False,
+              help="Emit ScenarioResult as JSON instead of the human view.")
+def cmd_scenario_run(scenario_id: str, scenarios_dir: str, worlds_dir: str,
+                     store_dir: str, trace_file: str | None, json_out: bool):
+    """Run SCENARIO_ID across its worlds and print the comparative output."""
+    from agent_hypervisor.program_layer import (
+        ScenarioNotFoundError,
+        ScenarioTraceStore,
+        WorldNotFoundError,
+        run_scenario,
+    )
+
+    scen_reg = _scenario_registry(scenarios_dir)
+    worlds = _world_registry(worlds_dir)
+    program_store = _program_store(store_dir)
+
+    try:
+        scenario = scen_reg.get(scenario_id)
+    except ScenarioNotFoundError as exc:
+        _fail(str(exc))
+
+    try:
+        result = run_scenario(
+            scenario,
+            registry=worlds,
+            store=program_store if scenario.program_id else None,
+        )
+    except (KeyError, ValueError, WorldNotFoundError) as exc:
+        _fail(str(exc))
+
+    if trace_file:
+        ScenarioTraceStore(trace_file).append(result)
+
+    if json_out:
+        json.dump(result.to_dict(), sys.stdout, indent=2, default=str)
+        click.echo()
+    else:
+        _print_scenario_result(scenario, result)
+
+    if not result.divergence.all_agree:
+        # Exit code 6 signals "worlds disagreed" — distinct from the other
+        # program_layer CLI codes (3 preview-incompat, 4 replay-deny,
+        # 5 partial-failure).
+        raise SystemExit(6)
+
+
+@cmd_scenario.command("compare")
+@click.argument("scenario_id")
+@click.option("--scenarios-dir", "scenarios_dir", default=_default_scenarios_dir,
+              show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.pass_context
+def cmd_scenario_compare(ctx, scenario_id: str, scenarios_dir: str,
+                         worlds_dir: str, store_dir: str):
+    """Alias for ``scenario run`` that emphasises the divergence view."""
+    ctx.invoke(
+        cmd_scenario_run,
+        scenario_id=scenario_id,
+        scenarios_dir=scenarios_dir,
+        worlds_dir=worlds_dir,
+        store_dir=store_dir,
+        trace_file=None,
+        json_out=False,
+    )
+
+
+def _verdict_col(verdict: str) -> str:
+    if verdict == "allow":
+        return _col("ALLOW", _GREEN)
+    if verdict == "deny":
+        return _col("DENY ", _RED)
+    return _col("SKIP ", _YELLOW)
+
+
+def _replay_col(replay_verdict: str) -> str:
+    if replay_verdict == "allow":
+        return _col(replay_verdict, _GREEN)
+    if replay_verdict in ("deny", "denied_at_preview"):
+        return _col(replay_verdict, _RED)
+    return _col(replay_verdict, _YELLOW)
+
+
+def _print_scenario_result(scenario, result) -> None:
+    click.echo()
+    click.echo(_col(f"Scenario: {scenario.scenario_id}", _BOLD))
+    click.echo(f"  Name:     {scenario.name}")
+    click.echo(f"  Program:  {result.program_id}")
+    click.echo(f"  Worlds:   {len(result.world_results)}")
+    if scenario.description.strip():
+        click.echo(_col(f"  {scenario.description.strip()}", _DIM))
+    click.echo()
+
+    for wr in result.world_results:
+        preview_tag = (
+            _col("compatible", _GREEN) if wr.preview_compatible
+            else _col("incompatible", _RED)
+        )
+        click.echo(_col(f"World: {wr.key}", _BOLD))
+        click.echo(f"  preview: {preview_tag}")
+        for o in wr.step_outcomes:
+            verdict = _verdict_col(o.verdict)
+            action = f"{o.action:<18}"
+            click.echo(
+                f"  step[{o.step_index}] {action} {verdict}  "
+                f"{_col(f'({o.rule_kind}: {o.reason})', _DIM)}"
+            )
+        click.echo(f"  replay:  {_replay_col(wr.replay_verdict)}")
+        click.echo()
+
+    click.echo(_col("Divergence:", _BOLD))
+    if result.divergence.all_agree:
+        click.echo(_col("  (worlds agreed on every step)", _DIM))
+        return
+
+    for d in result.divergence.divergence_points:
+        click.echo(f"  step[{d.step_index}] {d.action}")
+        for world_key in d.verdicts_by_world:
+            verdict = _verdict_col(d.verdicts_by_world[world_key])
+            reason = d.reasons_by_world.get(world_key, "")
+            click.echo(f"    {world_key:<22} {verdict}  {_col(reason, _DIM)}")

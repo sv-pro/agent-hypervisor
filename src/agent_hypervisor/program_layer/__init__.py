@@ -111,6 +111,28 @@ from .review_models import (
     ReviewedProgram,
     make_program_id,
 )
+from .scenario_model import (
+    DivergenceReport,
+    Scenario,
+    ScenarioDivergencePoint,
+    ScenarioResult,
+    StepOutcome,
+    WorldRef,
+    WorldResult,
+    make_scenario_run_id,
+)
+from .scenario_registry import (
+    ScenarioLoadError,
+    ScenarioNotFoundError,
+    ScenarioRegistry,
+    default_scenario_registry,
+    load_scenario_from_yaml,
+)
+from .scenario_runner import (
+    detect_divergence,
+    run_scenario,
+)
+from .scenario_trace_store import ScenarioTraceStore
 from .sandbox_runtime import (
     SandboxError,
     SandboxRuntime,
@@ -209,4 +231,23 @@ __all__ = [
     "compare_program_across_worlds",
     # SYS-2 light: Replay-under-world
     "ReplayTrace",
+    # SYS-3: Comparative Playground — scenario model
+    "Scenario",
+    "WorldRef",
+    "StepOutcome",
+    "WorldResult",
+    "ScenarioDivergencePoint",
+    "DivergenceReport",
+    "ScenarioResult",
+    "make_scenario_run_id",
+    # SYS-3: Comparative Playground — orchestration
+    "run_scenario",
+    "detect_divergence",
+    # SYS-3: Comparative Playground — registry and trace store
+    "ScenarioRegistry",
+    "ScenarioNotFoundError",
+    "ScenarioLoadError",
+    "load_scenario_from_yaml",
+    "default_scenario_registry",
+    "ScenarioTraceStore",
 ]
