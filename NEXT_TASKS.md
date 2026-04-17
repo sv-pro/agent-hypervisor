@@ -20,7 +20,7 @@
   - Convert current `x-ah-constraints` metadata into validated schema assertions where possible.
   - Add/extend tests for accepted + rejected payloads.
 
-- [-] **T3 — Harden approval/ASK runtime pathway**
+- [ ] **T3 — Harden approval/ASK runtime pathway**
   - Resolve remaining gaps keeping approval gate in “experimental”.
   - Ensure deterministic state transitions and persistence/recovery behavior are covered by tests.
   - 2026-04-12 audit note: approval persistence/recovery primitives are present (`ApprovalStore`, gateway recovery path); remaining work is to close any edge-case/runtime parity gaps before promoting maturity.
@@ -33,3 +33,10 @@
 - [ ] **T5 — Implement CostProfileStore percentile aggregation**
   - Implement `percentile()` across collected observations.
   - Add tests for percentile edge cases (empty, interpolation, bounds).
+
+- [x] **T6 — Implement Operator Surface Foundation (SYS-4A)**
+  - Add operator-facing models and services in `agent_hypervisor.operator`.
+  - Implement world activation and rollback with audit history.
+  - Implement deterministic impact preview (incompatible, changed_behavior, unchanged).
+  - Integrate `awc operator` CLI.
+  - Add tests and bundled demo.

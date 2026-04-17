@@ -320,7 +320,25 @@ class WorldRegistry:
         except WorldNotFoundError:
             return None
 
-    def set_active(self, world_id: str, version: str) -> WorldDescriptor:
+    def get_active_pointer_data(self) -> dict[str, Any]:
+        """
+        Return the raw data stored in the active pointer file, 
+        which may include previous_world_id and previous_version.
+        """
+        if not self._active_file.exists():
+            return {}
+        try:
+            return json.loads(self._active_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def set_active(
+        self,
+        world_id: str,
+        version: str,
+        previous_world_id: Optional[str] = None,
+        previous_version: Optional[str] = None,
+    ) -> WorldDescriptor:
         """
         Mark ``(world_id, version)`` as the active world.
 
@@ -338,6 +356,9 @@ class WorldRegistry:
             "version": target.version,
             "activated_at": datetime.now(tz=timezone.utc).isoformat(),
         }
+        if previous_world_id and previous_version:
+            payload["previous_world_id"] = previous_world_id
+            payload["previous_version"] = previous_version
 
         self._worlds_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(

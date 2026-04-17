@@ -16,6 +16,13 @@ from .profile import build_manifest
 from .render import render_manifest, render_summary
 from .schema import CapabilityConstraint, WorldManifest, manifest_to_dict
 
+from agent_hypervisor.operator import (
+    WorldOperatorService,
+    ProgramOperatorService,
+    ScenarioOperatorService,
+)
+from agent_hypervisor.program_layer import ScenarioTraceStore
+
 # ── formatting helpers ──────────────────────────────────────────────────────
 
 _SCENARIOS_DIR = Path(__file__).parent.parent / "scenarios"
@@ -1108,6 +1115,295 @@ def _print_scenario_result(scenario, result) -> None:
     for d in result.divergence.divergence_points:
         click.echo(f"  step[{d.step_index}] {d.action}")
         for world_key in d.verdicts_by_world:
-            verdict = _verdict_col(d.verdicts_by_world[world_key])
             reason = d.reasons_by_world.get(world_key, "")
             click.echo(f"    {world_key:<22} {verdict}  {_col(reason, _DIM)}")
+
+
+# ── operator group (SYS-4A) ──────────────────────────────────────────────────
+
+_DATA_DIR = Path("./data")
+_WORLD_ACTIVATION_LOG = _DATA_DIR / "world_activation_history.jsonl"
+_OPERATOR_EVENTS_LOG = _DATA_DIR / "operator_events.jsonl"
+_SCENARIO_TRACES_LOG = _DATA_DIR / "scenario_traces.jsonl"
+
+
+def _world_op_service(worlds_dir: str):
+    return WorldOperatorService(
+        world_registry=_world_registry(worlds_dir),
+        activation_history_file=_WORLD_ACTIVATION_LOG,
+        operator_events_file=_OPERATOR_EVENTS_LOG,
+    )
+
+
+def _program_op_service(store_dir: str, worlds_dir: str):
+    return ProgramOperatorService(
+        program_store=_program_store(store_dir),
+        world_registry=_world_registry(worlds_dir),
+        operator_events_file=_OPERATOR_EVENTS_LOG,
+    )
+
+
+def _scenario_op_service(scenarios_dir: str, worlds_dir: str):
+    return ScenarioOperatorService(
+        scenario_registry=_scenario_registry(scenarios_dir),
+        trace_store=ScenarioTraceStore(_SCENARIO_TRACES_LOG),
+        world_registry=_world_registry(worlds_dir),
+        operator_events_file=_OPERATOR_EVENTS_LOG,
+    )
+
+
+@cli.group("operator")
+def cmd_operator():
+    """Management and visibility surface for worlds, programs, and scenarios."""
+
+
+# -- operator worlds --
+
+@cmd_operator.group("worlds")
+def cmd_operator_worlds():
+    """Manage world activation, rollback, and impact preview."""
+
+
+@cmd_operator_worlds.command("list")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_list(worlds_dir: str):
+    """List all worlds."""
+    worlds = _world_op_service(worlds_dir).list_worlds()
+    active = _world_op_service(worlds_dir).get_active_world()
+    active_key = (active["world_id"], active["version"]) if active else None
+
+    if not worlds:
+        click.echo(_col("(no worlds)", _DIM))
+        return
+
+    click.echo(f"{'world_id':<18} {'version':<8} {'actions':>7}  description")
+    click.echo(_col("─" * 72, _DIM))
+    for w in worlds:
+        marker = _col("●", _GREEN) if (w["world_id"], w["version"]) == active_key else " "
+        click.echo(
+            f"{marker} {w['world_id']:<16} {w['version']:<8} "
+            f"{len(w['allowed_actions']):>7}  {w['description'].strip().splitlines()[0] if w['description'].strip() else ''}"
+        )
+
+
+@cmd_operator_worlds.command("active")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_active(worlds_dir: str):
+    """Show the currently active world."""
+    active = _world_op_service(worlds_dir).get_active_world()
+    if not active:
+        click.echo(_col("(no active world)", _DIM))
+    else:
+        click.echo(json.dumps(active, indent=2))
+
+
+@cmd_operator_worlds.command("activate")
+@click.argument("world_id")
+@click.argument("version")
+@click.option("--reason", help="Reason for activation.")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_activate(world_id: str, version: str, reason: str | None, worlds_dir: str):
+    """Activate a world by id and version."""
+    from agent_hypervisor.program_layer import WorldNotFoundError
+    try:
+        record = _world_op_service(worlds_dir).activate_world(world_id, version, reason=reason)
+        click.echo(f"Activated: {record.world_id}@{record.version} (id={record.activation_id})")
+    except WorldNotFoundError as exc:
+        _fail(str(exc))
+
+
+@cmd_operator_worlds.command("rollback")
+@click.option("--reason", default="Rollback", help="Reason for rollback.")
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_rollback(reason: str, worlds_dir: str):
+    """Roll back to the previous world."""
+    try:
+        record = _world_op_service(worlds_dir).rollback_world(reason=reason)
+        click.echo(f"Rolled back to: {record.world_id}@{record.version} (id={record.activation_id})")
+    except ValueError as exc:
+        _fail(str(exc))
+
+
+@cmd_operator_worlds.command("impact")
+@click.argument("world_id")
+@click.argument("version")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--scenarios-dir", "scen_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_worlds_impact(world_id: str, version: str, store_dir: str, scen_dir: str, worlds_dir: str):
+    """Preview activation impact on programs and scenarios."""
+    from agent_hypervisor.program_layer import WorldNotFoundError
+    try:
+        report = _world_op_service(worlds_dir).preview_activation_impact(
+            world_id, version, _program_store(store_dir), _scenario_registry(scen_dir)
+        )
+        _print_impact_report(report)
+    except WorldNotFoundError as exc:
+        _fail(str(exc))
+
+
+def _print_impact_report(report):
+    click.echo(f"Impact Preview: {_col(report.target_world['world_id'] + '@' + report.target_world['version'], _BOLD)}")
+    if report.current_world:
+        click.echo(f"Current World: {report.current_world['world_id']}@{report.current_world['version']}")
+    click.echo()
+
+    click.echo(_col("Affected Programs:", _BOLD))
+    if not report.affected_programs:
+        click.echo("  (no programs affected)")
+    for p in report.affected_programs:
+        impact_col = _RED if p['impact'] == 'incompatible' else _YELLOW
+        click.echo(f"  {p['program_id']:<24} {_col(p['impact'].upper(), impact_col):<16} {p['summary']}")
+
+    click.echo()
+    click.echo(_col("Affected Scenarios:", _BOLD))
+    if not report.affected_scenarios:
+        click.echo("  (no scenarios affected)")
+    for s in report.affected_scenarios:
+        div_tag = _col("[DIVERGENCE EXPECTED]", _YELLOW) if s['divergence_expected'] else ""
+        click.echo(f"  {s['scenario_id']:<24} {s['summary']} {div_tag}")
+
+    click.echo()
+    click.echo(_col("Totals:", _BOLD))
+    for k, v in report.totals.items():
+        click.echo(f"  {k:<32}: {v}")
+
+
+# -- operator programs --
+
+@cmd_operator.group("programs")
+def cmd_operator_programs():
+    """Inspect reviewed programs and their compatibility."""
+
+
+@cmd_operator_programs.command("list")
+@click.option("--status", help="Filter by status.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_programs_list(status: str | None, store_dir: str, worlds_dir: str):
+    """List all programs with compatibility status."""
+    summaries = _program_op_service(store_dir, worlds_dir).list_programs(status=status)
+    if not summaries:
+        click.echo(_col("(no programs)", _DIM))
+        return
+
+    click.echo(f"{'program_id':<24} {'status':<12} {'compat':<8} world_context")
+    click.echo(_col("─" * 72, _DIM))
+    for s in summaries:
+        compat_tag = _col("YES", _GREEN) if s.compatible_with_active_world else _col("NO", _RED)
+        world_ctx = f"{s.compatibility_checked_against['world_id']}@{s.compatibility_checked_against['version']}" if s.compatibility_checked_against else "(no active world)"
+        click.echo(f"{s.program_id:<24} {s.status:<12} {compat_tag:<8} {world_ctx}")
+
+
+@cmd_operator_programs.command("show")
+@click.argument("program_id")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_op_programs_show(program_id: str, store_dir: str):
+    """Show program details."""
+    try:
+        prog = _program_store(store_dir).load(program_id)
+        click.echo(json.dumps(prog.to_dict(), indent=2, default=str))
+    except KeyError:
+        _fail(f"Program not found: {program_id}")
+
+
+@cmd_operator_programs.command("diff")
+@click.argument("program_id")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+def cmd_op_programs_diff(program_id: str, store_dir: str):
+    """Show program minimization diff."""
+    try:
+        prog = _program_store(store_dir).load(program_id)
+        _print_program_diff(prog.diff)
+    except KeyError:
+        _fail(f"Program not found: {program_id}")
+
+
+@cmd_operator_programs.command("compatibility")
+@click.argument("program_id")
+@click.option("--world", "world_id", help="World id to check against.")
+@click.option("--version", help="World version.")
+@click.option("--store", "store_dir", default=_DEFAULT_PROGRAM_STORE, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_programs_compatibility(program_id: str, world_id: str | None, version: str | None, store_dir: str, worlds_dir: str):
+    """Check program compatibility against a world."""
+    try:
+        verdict = _program_op_service(store_dir, worlds_dir).get_program_compatibility(program_id, world_id, version)
+        # We need to wrap it back into the object for the printer if the printer expects an object
+        # Actually our _print_compatibility takes an object. Let's see.
+        from agent_hypervisor.program_layer import ProgramWorldCompatibility, CompatibilitySummary, StepCompatibility
+        # Re-materialize to use the helper printer
+        v = ProgramWorldCompatibility(
+            program_id=verdict["program_id"],
+            world_id=verdict["world_id"],
+            world_version=verdict["world_version"],
+            compatible=verdict["compatible"],
+            step_results=tuple(StepCompatibility(**sr) for sr in verdict["step_results"]),
+            summary=CompatibilitySummary(**verdict["summary"]),
+        )
+        _print_compatibility(v)
+    except (KeyError, ValueError) as exc:
+        _fail(str(exc))
+
+
+# -- operator scenarios --
+
+@cmd_operator.group("scenarios")
+def cmd_operator_scenarios():
+    """Inspect scenarios and their execution history."""
+
+
+@cmd_operator_scenarios.command("list")
+@click.option("--scenarios-dir", "scen_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_scenarios_list(scen_dir: str, worlds_dir: str):
+    """List all scenarios and last run results."""
+    summaries = _scenario_op_service(scen_dir, worlds_dir).list_scenarios()
+    if not summaries:
+        click.echo(_col("(no scenarios)", _DIM))
+        return
+
+    click.echo(f"{'scenario_id':<26} {'last_run':<20} {'diverged':<10}")
+    click.echo(_col("─" * 72, _DIM))
+    for s in summaries:
+        last_run = s.last_run_at[:19] if s.last_run_at else "(never)"
+        div_tag = "-"
+        if s.last_diverged is True:
+            div_tag = _col("YES", _YELLOW)
+        elif s.last_diverged is False:
+            div_tag = _col("NO", _GREEN)
+        
+        click.echo(f"{s.scenario_id:<26} {last_run:<20} {div_tag:<10}")
+
+
+@cmd_operator_scenarios.command("show")
+@click.argument("scenario_id")
+@click.option("--scenarios-dir", "scen_dir", default=_default_scenarios_dir, show_default=True)
+def cmd_op_scenarios_show(scenario_id: str, scen_dir: str):
+    """Show scenario details."""
+    try:
+        scen = _scenario_registry(scen_dir).get(scenario_id)
+        click.echo(json.dumps(scen.to_dict(), indent=2, default=str))
+    except Exception as exc:
+        _fail(str(exc))
+
+
+@cmd_operator_scenarios.command("last-result")
+@click.argument("scenario_id")
+@click.option("--scenarios-dir", "scen_dir", default=_default_scenarios_dir, show_default=True)
+@click.option("--worlds-dir", "worlds_dir", default=_default_worlds_dir, show_default=True)
+def cmd_op_scenarios_last_result(scenario_id: str, scen_dir: str, worlds_dir: str):
+    """Show last execution result for a scenario."""
+    res = _scenario_op_service(scen_dir, worlds_dir).get_scenario_last_result(scenario_id)
+    if not res:
+        click.echo(_col("(no result found)", _DIM))
+    else:
+        click.echo(json.dumps(res, indent=2, default=str))
+
+
+def main():
+    cli()
+
+
+if __name__ == "__main__":
+    cli()
