@@ -20,13 +20,13 @@
   - Convert current `x-ah-constraints` metadata into validated schema assertions where possible.
   - Add/extend tests for accepted + rejected payloads.
 
-- [-] **T3 — Harden approval/ASK runtime pathway**
+- [x] **T3 — Harden approval/ASK runtime pathway** *(PR: fix/harden-approval-gateway)*
   - Resolve remaining gaps keeping approval gate in “experimental”.
   - Ensure deterministic state transitions and persistence/recovery behavior are covered by tests.
   - 2026-04-12 audit note: approval persistence/recovery primitives are present (`ApprovalStore`, gateway recovery path); remaining work is to close any edge-case/runtime parity gaps before promoting maturity.
   - 2026-04-15 note: paused for user-directed browser extension MVP demo implementation (see `browser-extension-demo/`).
 
-- [ ] **T4 — Implement ProgramRegistry persistence interface**
+- [-] **T4 — Implement ProgramRegistry persistence interface**
   - Implement `store()` and `load()` with a concrete backend.
   - Add tests for round-trip and error handling.
 
