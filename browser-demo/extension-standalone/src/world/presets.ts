@@ -53,7 +53,14 @@ rules:
     then:
       decision: deny
 
-  - id: RULE-03
+  - id: RULE-SM-HIDDEN
+    if:
+      hidden_content_detected: true
+      action: save_memory
+    then:
+      decision: deny
+
+  - id: RULE-SM-UNTRUSTED
     if:
       trust: untrusted
       action: save_memory

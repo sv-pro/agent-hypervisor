@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Agent Hypervisor Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem;
+      background-color: #f9fafb;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    .header h1 {
+      font-size: 2.5rem;
+      color: #111827;
+      margin-bottom: 1rem;
+    }
+    .header p {
+      font-size: 1.1rem;
+      color: #4b5563;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 3rem;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      transition: transform 0.2s, box-shadow 0.2s;
+      border-top: 4px solid #d1d5db;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    }
+    .card.benign { border-top-color: #10b981; }
+    .card.suspicious { border-top-color: #f59e0b; }
+    .card.malicious { border-top-color: #ef4444; }
+    
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card h2 span {
+      font-size: 0.8rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      font-weight: 500;
+    }
+    .benign h2 span { background: #d1fae5; color: #065f46; }
+    .suspicious h2 span { background: #fef3c7; color: #92400e; }
+    .malicious h2 span { background: #fee2e2; color: #991b1b; }
+    
+    .card p {
+      color: #6b7280;
+      font-size: 0.95rem;
+      margin-bottom: 1.5rem;
+      min-height: 80px;
+    }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      text-align: center;
+      padding: 0.75rem 1rem;
+      background-color: #2563eb;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 500;
+      transition: background-color 0.15s;
+      box-sizing: border-box;
+    }
+    .btn:hover { background-color: #1d4ed8; }
+    
+    .instruction-box {
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      border-left: 4px solid #2563eb;
+    }
+    .instruction-box h3 { margin-top: 0; color: #1e40af; }
+    code {
+      background: #f1f5f9;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: #0f172a;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Browser Agent Hypervisor Demo</h1>
+    <p>Explore deterministic governance in action. Open a scenario below and use the Chrome Extension side panel to see how the agent handles untrusted or hostile web content.</p>
+  </div>
+
+  <div class="card-grid">
+    <!-- Benign Scenario -->
+    <div class="card benign">
+      <h2>Benign Page <span>Scenario 1</span></h2>
+      <p>A completely normal engineering roadmap. Watch how the deterministic policy still enforces an <code>ASK</code> boundary simply because the origin is an untrusted web page.</p>
+      <a href="/demo/benign.html" class="btn" target="_blank">Launch Benign Scenario</a>
+    </div>
+
+    <!-- Suspicious Scenario -->
+    <div class="card suspicious">
+      <h2>Suspicious Page <span>Scenario 2</span></h2>
+      <p>This team status update hides tracking metadata and zero-width characters in the whitespace. The extension detects this and upgrades the risk to a hard <code>DENY</code>.</p>
+      <a href="/demo/suspicious.html" class="btn" target="_blank">Launch Suspicious Scenario</a>
+    </div>
+
+    <!-- Malicious Scenario -->
+    <div class="card malicious">
+      <h2>Malicious Page <span>Scenario 3</span></h2>
+      <p>A hostile incident retrospective containing hidden instructions aiming to alter agent trust levels. Watch the system completely ignore the prompt injection attempts.</p>
+      <a href="/demo/malicious.html" class="btn" target="_blank">Launch Malicious Scenario</a>
+    </div>
+  </div>
+
+  <div class="instruction-box">
+    <h3>How to use this demo</h3>
+    <ol>
+      <li>Click any of the scenarios above (they will open in a new tab).</li>
+      <li>Open your <strong>Chrome Side Panel</strong> and navigate to the <i>Browser Agent Hypervisor Demo</i>.</li>
+      <li>Ensure you are in the <strong>Governed</strong> tab.</li>
+      <li>Experiment with the buttons: <code>Summarize</code> (read-only actions are allowed), and <code>Save note</code> (which will ask or deny based on the Deterministic Rules).</li>
+      <li>Check the <strong>Trace</strong> tab in the side panel to see exactly which rule <code>(e.g., RULE-SM-HIDDEN)</code> fired for each decision!</li>
+    </ol>
+  </div>
+
+</body>
+</html>

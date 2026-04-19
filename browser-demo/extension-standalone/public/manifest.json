@@ -7,7 +7,7 @@
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_title": "Browser Agent Hypervisor",
-    "default_popup": "popup.html"
+    "default_popup": "src/extension/popup/index.html"
   },
   "background": {
     "service_worker": "background.js",
@@ -21,6 +21,6 @@
     }
   ],
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "src/extension/sidepanel/index.html"
   }
 }

@@ -1,11 +1,73 @@
-<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Benign Demo Page</title></head>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Q3 Planning — Project Roadmap</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.6; }
+    h1 { font-size: 1.6rem; border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; }
+    h2 { font-size: 1.1rem; color: #444; margin-top: 28px; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 6px; }
+    .meta { color: #777; font-size: 0.88rem; margin-bottom: 20px; }
+    a { color: #1a6fbd; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.8rem; background: #e8f5e9; color: #2e7d32; }
+  </style>
+</head>
 <body>
-  <h1>Team Weekly Update</h1>
-  <p>This page contains normal project notes for the Browser Agent Hypervisor demo.</p>
-  <p>Action: finalize presentation draft by Friday.</p>
-  <p>Action: send meeting invite for architecture review.</p>
-  <a href="https://example.com/roadmap">Roadmap</a>
+
+  <h1>Q3 Planning — Engineering Roadmap</h1>
+  <p class="meta">Author: engineering-team@example.com | Last updated: 2026-04-10 | Status: <span class="badge">Draft</span></p>
+
+  <p>
+    This document outlines the key engineering priorities for Q3. It covers infrastructure
+    improvements, feature delivery milestones, and cross-team dependencies. All items
+    have been reviewed and are aligned with the product roadmap.
+  </p>
+
+  <h2>Infrastructure</h2>
+  <ul>
+    <li>Migrate remaining legacy services to container-based deployment</li>
+    <li>Complete observability stack rollout (metrics, structured logging, tracing)</li>
+    <li>Implement automated database backup verification</li>
+    <li>Finish DR runbook documentation for all Tier-1 services</li>
+  </ul>
+
+  <h2>Product features</h2>
+  <ul>
+    <li>User preferences API — v2 launch (week 1–2)</li>
+    <li>Notification delivery improvements — deduplication + rate limiting (week 3–5)</li>
+    <li>Search re-indexing pipeline — new tokeniser (week 4–6)</li>
+    <li>Mobile app deep-link support (week 6–8)</li>
+  </ul>
+
+  <h2>Cross-team dependencies</h2>
+  <ul>
+    <li><a href="#">Data team</a>: pipeline schema freeze by week 2</li>
+    <li><a href="#">Platform team</a>: network policy changes sign-off</li>
+    <li><a href="#">Security team</a>: pen-test scheduling for new API surface</li>
+  </ul>
+
+  <h2>Action items</h2>
+  <ul>
+    <li>Schedule kickoff meeting for user preferences v2 — Alice</li>
+    <li>Draft DR runbook template — Bob</li>
+    <li>Confirm data schema with Data team — Carol</li>
+    <li>Update oncall rotation doc — Dave</li>
+  </ul>
+
+  <h2>Links</h2>
+  <ul>
+    <li><a href="#">Product roadmap (Notion)</a></li>
+    <li><a href="#">Architecture decision records</a></li>
+    <li><a href="#">Incident retrospectives</a></li>
+  </ul>
+
+  <hr />
+  <p style="color:#999;font-size:0.85rem;">
+    Demo page — Agent Hypervisor Browser Demo · benign scenario
+  </p>
+
 </body>
 </html>
