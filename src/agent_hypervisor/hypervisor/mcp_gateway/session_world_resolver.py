@@ -4,16 +4,10 @@ session_world_resolver.py — Session to WorldManifest binding.
 Responsibility:
     Map a session/request context to the active WorldManifest.
 
-v1 implementation:
-    Single static manifest per gateway instance (the default), plus an
-    optional per-session registry. Sessions without an explicit binding
-    fall back to the default manifest.
-
-Extension path:
-    register_session(session_id, manifest_path) binds a specific session
-    to a different WorldManifest loaded from disk. This is the intended
-    evolution of the resolve(session_id, context) signature that was
-    designed to support this pattern from the start.
+Resolution priority (highest to lowest):
+    1. Explicit per-session registration (register_session).
+    2. LinkingPolicyEngine evaluation against the provided context dict.
+    3. Default manifest (gateway-level fallback).
 
 Invariants:
     - If the default manifest file cannot be loaded at startup, the resolver
@@ -25,15 +19,23 @@ Invariants:
     - The resolver never returns None — callers can always depend on a manifest.
     - Unregistering a session is safe to call even if the session is not
       registered (idempotent, returns False in that case).
+    - If the LinkingPolicyEngine returns a profile_id that is not in the
+      catalog (or the catalog is not configured), the engine result is silently
+      skipped and the default manifest is used. This preserves fail-safe
+      behaviour: a misconfigured linking rule never causes a crash.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from agent_hypervisor.compiler.manifest import load_manifest
 from agent_hypervisor.compiler.schema import WorldManifest
+
+if TYPE_CHECKING:
+    from agent_hypervisor.hypervisor.mcp_gateway.linking_policy import LinkingPolicyEngine
+    from agent_hypervisor.hypervisor.mcp_gateway.profiles_catalog import ProfilesCatalog
 
 
 class SessionWorldResolver:
@@ -55,6 +57,13 @@ class SessionWorldResolver:
         resolver.unregister_session("s1")
         manifest = resolver.resolve(session_id="s1")
         # → back to default manifest
+
+        # Dynamic: rule-based dispatch via context dict
+        engine = LinkingPolicyEngine(rules=[...])
+        catalog = ProfilesCatalog(Path("manifests/profiles-index.yaml"))
+        resolver.set_linking_policy(engine, catalog)
+        manifest = resolver.resolve(session_id="s2", context={"workflow_tag": "finance"})
+        # → manifest for whichever profile_id the rule selects
     """
 
     def __init__(self, manifest_path: Path) -> None:
@@ -62,7 +71,30 @@ class SessionWorldResolver:
         self._manifest: Optional[WorldManifest] = None
         # session_id → WorldManifest (per-session overrides)
         self._session_registry: dict[str, WorldManifest] = {}
+        self._engine: Optional["LinkingPolicyEngine"] = None
+        self._catalog: Optional["ProfilesCatalog"] = None
         self._load()  # Raises on failure — intentional (fail closed at startup)
+
+    def set_linking_policy(
+        self,
+        engine: "LinkingPolicyEngine",
+        catalog: "ProfilesCatalog",
+    ) -> None:
+        """
+        Configure the rule engine used for context-driven profile dispatch.
+
+        Args:
+            engine:  A LinkingPolicyEngine with the active rule set.
+            catalog: A ProfilesCatalog used to load the manifest for the
+                     matched profile_id.
+        """
+        self._engine = engine
+        self._catalog = catalog
+
+    def clear_linking_policy(self) -> None:
+        """Remove the rule engine; context-based dispatch falls back to default."""
+        self._engine = None
+        self._catalog = None
 
     def resolve(
         self,
@@ -72,28 +104,43 @@ class SessionWorldResolver:
         """
         Return the WorldManifest for this session.
 
-        If the session has a registered manifest (via register_session),
-        that manifest is returned. Otherwise the default manifest is used.
+        Resolution order:
+        1. Explicit per-session registration (register_session).
+        2. LinkingPolicyEngine result when context is provided.
+        3. Default gateway-level manifest.
 
         Args:
-            session_id: Optional session identifier. If registered, the
-                        session-specific manifest is returned.
-            context:    Optional context dict (reserved for future use).
+            session_id: Optional session identifier.
+            context:    Optional context dict for rule-based dispatch
+                        (e.g. {"workflow_tag": "finance", "trust_level": "low"}).
 
         Returns:
             The active WorldManifest for this session.
 
         Raises:
-            RuntimeError: If no manifest is loaded (should not happen after
-                          successful __init__, but included for safety).
+            RuntimeError: If no manifest is loaded.
         """
         if self._manifest is None:
             raise RuntimeError(
                 "SessionWorldResolver has no manifest loaded. "
                 "Check manifest_path and startup logs."
             )
+
+        # Priority 1: explicit per-session binding
         if session_id and session_id in self._session_registry:
             return self._session_registry[session_id]
+
+        # Priority 2: rule engine evaluation
+        if context and self._engine is not None and self._catalog is not None:
+            profile_id = self._engine.evaluate(context)
+            if profile_id:
+                try:
+                    return self._catalog.load_manifest(profile_id)
+                except Exception:
+                    # Misconfigured rule (unknown profile) — fall through to default
+                    pass
+
+        # Priority 3: default manifest
         return self._manifest
 
     def register_session(self, session_id: str, manifest_path: Path) -> WorldManifest:
@@ -162,6 +209,13 @@ class SessionWorldResolver:
         except Exception:
             # Retain existing manifest — do not fail open
             return False
+
+    @property
+    def linking_policy_rules(self) -> list[dict]:
+        """Return active linking-policy rules, or empty list if none configured."""
+        if self._engine is None:
+            return []
+        return self._engine.rules()
 
     @property
     def manifest_path(self) -> Path:

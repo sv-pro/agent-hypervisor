@@ -119,9 +119,11 @@ rendered tool surface update live, and save — without ever opening a YAML file
 
 ### Phase 3 — Dynamic Workflow→Profile Linking (Rule Engine)
 
-**Status:** `[-] IN PROGRESS`
+**Status:** `[x] DONE`
 
 **Branch name:** `feature/transparent-ui-ph3`
+
+**PR:** *(pending merge)*
 
 **Goal:** Wire the unused `context` dict in `SessionWorldResolver.resolve()` to
 a declarative rule evaluator so that profile selection can be driven by workflow
@@ -130,42 +132,28 @@ attributes, user role, trust level, or other runtime signals — not just manual
 
 **Deliverables:**
 
-- [ ] **Linking-policy schema** — a new YAML format (e.g. `manifests/linking-policy.yaml`):
-  ```yaml
-  rules:
-    - if:
-        workflow_tag: finance
-        trust_level: low
-      then:
-        profile_id: read-only
-    - if:
-        workflow_tag: email
-      then:
-        profile_id: email-assistant-v1
-    - default:
-        profile_id: email-assistant-v1
-  ```
-- [ ] **`LinkingPolicyEngine`** — evaluates rules against the `context` dict;
+- [x] **Linking-policy schema** — `manifests/linking-policy.yaml` with rule-based dispatch.
+- [x] **`LinkingPolicyEngine`** — evaluates rules against the `context` dict;
   returns the matched `profile_id`. Pure function, no I/O, testable in isolation.
-- [ ] **Wire into `SessionWorldResolver.resolve()`** — when `context` is provided
+  (`src/agent_hypervisor/hypervisor/mcp_gateway/linking_policy.py`)
+- [x] **Wire into `SessionWorldResolver.resolve()`** — when `context` is provided
   and a `LinkingPolicyEngine` is configured, use it to select the profile; fall
   back to explicit session registry, then default manifest.
-- [ ] `GET /ui/api/linking-policy` — return active rules.
-- [ ] `POST /ui/api/linking-policy` — replace active rules (validate + hot-reload).
-- [ ] **Linking-policy editor tab** in Web UI — table of rules with add/edit/delete,
+- [x] `GET /ui/api/linking-policy` — return active rules.
+- [x] `POST /ui/api/linking-policy` — replace active rules (validate + hot-reload).
+- [x] `POST /ui/api/linking-policy/test` — evaluate a context dict against active rules.
+- [x] **Linking-policy editor tab** in Web UI — table of rules with add/edit/delete/reorder,
   live "which profile would be used?" test input form.
-- [ ] Tests: rule evaluation correctness; fallback chain; context-free session still
-  uses registered manifest.
+- [x] Tests: 37 tests in `tests/hypervisor/test_linking_policy.py` — rule evaluation
+  correctness, fallback chain, context-free session, API endpoints, startup load. All passing. ✅
 
-**Done criteria:** A session started with `context={"workflow_tag": "finance", "trust_level": "low"}` automatically receives the `read-only` profile without any explicit `register_session()` call.
-
-**PR:** *(fill in after merge)*
+**Done criteria:** A session started with `context={"workflow_tag": "finance", "trust_level": "low"}` automatically receives the `read-only-v1` profile without any explicit `register_session()` call. ✅
 
 ---
 
 ### Phase 4 — Runtime Trigger-Based Profile Switching (Stretch)
 
-**Status:** `[ ] NOT STARTED`
+**Status:** `[-] IN PROGRESS`
 
 **Branch name:** `feature/transparent-ui-ph4`
 

@@ -1,0 +1,31 @@
+# linking-policy.yaml — Declarative workflow→profile dispatch rules.
+#
+# Rules are evaluated top-to-bottom; the first match wins.
+# Each rule has an `if` block (all conditions must hold) and a `then` block
+# (specifies the profile_id to activate).
+# The `default` entry has no `if` block and matches when no earlier rule fires.
+#
+# Context keys are set by the caller of SessionWorldResolver.resolve(context=...).
+# Common keys: workflow_tag, trust_level, user_role.
+#
+# Profile IDs must match entries in manifests/profiles-index.yaml.
+
+rules:
+  - if:
+      workflow_tag: finance
+      trust_level: low
+    then:
+      profile_id: read-only-v1
+
+  - if:
+      workflow_tag: finance
+    then:
+      profile_id: read-only-v1
+
+  - if:
+      workflow_tag: email
+    then:
+      profile_id: email-assistant-v1
+
+  - default:
+      profile_id: email-assistant-v1
