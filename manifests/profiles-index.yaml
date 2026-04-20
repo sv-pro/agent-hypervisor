@@ -1,0 +1,25 @@
+# profiles-index.yaml — Profile catalog for the Agent Hypervisor.
+#
+# Each entry names a profile (id), describes it, points to the manifest file,
+# and lists optional tags for filtering.
+#
+# Rules:
+#   - `id` must be unique across all entries.
+#   - `path` is relative to the repository root.
+#   - Tags are free-form strings; use them to group/filter profiles by workflow
+#     type, capability class, trust level, etc.
+#
+# Agents and the Web UI read this file to list available profiles.
+# Add new profiles by appending entries here and placing the manifest file
+# at the declared `path`.
+
+profiles:
+  - id: email-assistant-v1
+    description: "Safe email assistant — can read files and send emails. Cannot make HTTP requests."
+    path: manifests/example_world.yaml
+    tags: [email, read, send]
+
+  - id: read-only-v1
+    description: "Read-only world — file reads only, no side effects."
+    path: manifests/read_only_world.yaml
+    tags: [readonly]

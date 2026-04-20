@@ -33,3 +33,10 @@
 - [ ] **T5 — Implement CostProfileStore percentile aggregation**
   - Implement `percentile()` across collected observations.
   - Add tests for percentile edge cases (empty, interpolation, bounds).
+
+- [-] **T6 — Transparent Capabilities Profile / Dynamic MCP Registry**
+  - See [`TRANSPARENT_UI.md`](TRANSPARENT_UI.md) for the complete feature spec, phase
+    checklist, and "how to resume" instructions.
+  - **Phase 1 DONE** — Profile Catalog + Session Assignment API (37 tests passing).
+  - **Current phase:** Phase 2 — Manifest Editor UI (Visual Profile Authoring).
+  - Any agent can read `TRANSPARENT_UI.md` to know exactly what to build next.

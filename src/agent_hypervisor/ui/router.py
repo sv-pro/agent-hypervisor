@@ -13,15 +13,23 @@ Serves a dashboard at /ui with seven tabs:
 Mount via create_ui_router() and app.include_router() in create_mcp_app().
 
 Data API (all GET, JSON):
-  /ui/api/status              — gateway status + manifest summary
-  /ui/api/manifest/source     — raw YAML text of the loaded manifest file
-  /ui/api/manifest/validate   — validate YAML content against manifest schema (POST)
-  /ui/api/manifest/save       — write content to disk and hot-reload (POST)
-  /ui/api/decisions           — all approvals (pending + history)
-  /ui/api/traces              — sessions with their event logs
-  /ui/api/provenance          — provenance policy rule list
-  /ui/api/simulate            — dry-run a tool call against the manifest (POST)
-  /ui/api/benchmarks          — benchmark report files
+  /ui/api/status                           — gateway status + manifest summary
+  /ui/api/manifest/source                  — raw YAML text of the loaded manifest file
+  /ui/api/manifest/validate                — validate YAML content against manifest schema (POST)
+  /ui/api/manifest/save                    — write content to disk and hot-reload (POST)
+  /ui/api/decisions                        — all approvals (pending + history)
+  /ui/api/traces                           — sessions with their event logs
+  /ui/api/provenance                       — provenance policy rule list
+  /ui/api/simulate                         — dry-run a tool call against the manifest (POST)
+  /ui/api/benchmarks                       — benchmark report files
+
+Profile Catalog API (Phase 1 — Transparent UI):
+  GET  /ui/api/profiles                    — list all named profiles from the catalog
+  POST /ui/api/profiles                    — create a new named profile
+  GET  /ui/api/profiles/{profile_id}       — profile detail + rendered tool surface
+  POST /ui/api/sessions/{session_id}/profile       — assign a profile to a live session
+  DELETE /ui/api/sessions/{session_id}/profile     — revert session to default profile
+  GET  /ui/api/sessions                    — list active sessions + their bound profile
 """
 
 from __future__ import annotations
@@ -35,6 +43,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from agent_hypervisor.compiler.schema import manifest_from_dict
 from agent_hypervisor.compiler.enforcer import Step, evaluate
+from agent_hypervisor.hypervisor.mcp_gateway.profiles_catalog import (
+    ProfileEntry,
+    ProfilesCatalog,
+)
 
 _STATIC = Path(__file__).parent / "static"
 # Reports live in _research/ at the repo root.
@@ -45,15 +57,18 @@ def create_ui_router(
     gw_state: Any,
     cp_state: Optional[Any] = None,
     policy_path: Optional[Path] = None,
+    profiles_catalog: Optional["ProfilesCatalog"] = None,
 ) -> APIRouter:
     """
     Build and return the FastAPI router for the Web UI.
 
     Args:
-        gw_state:    MCPGatewayState — provides manifest and session info.
-        cp_state:    Optional ControlPlaneState — approvals and event log.
-        policy_path: Path to the provenance policy YAML. When provided the
-                     Provenance tab renders the full rule table.
+        gw_state:         MCPGatewayState — provides manifest and session info.
+        cp_state:         Optional ControlPlaneState — approvals and event log.
+        policy_path:      Path to the provenance policy YAML.
+        profiles_catalog: Optional ProfilesCatalog. When provided, the
+                          /ui/api/profiles* and /ui/api/sessions* endpoints
+                          are active. Without it those endpoints return 503.
 
     Returns:
         APIRouter with /ui/* routes (no prefix set; caller includes directly).
@@ -280,6 +295,225 @@ def create_ui_router(
                 "tainted": tainted,
                 "display_name": step.display_name,
             },
+        })
+
+    # ── Profile Catalog API ───────────────────────────────────────────────────
+
+    def _catalog_unavailable() -> JSONResponse:
+        return JSONResponse(
+            {"error": "Profile catalog not configured on this gateway."},
+            status_code=503,
+        )
+
+    def _profile_summary(entry: ProfileEntry) -> dict:
+        """Compact dict for the list endpoint (no full manifest source)."""
+        try:
+            manifest = profiles_catalog.load_manifest(entry.id)  # type: ignore[union-attr]
+            visible_tools = manifest.tool_names()
+            workflow_id = manifest.workflow_id
+            version = manifest.version
+        except Exception as exc:
+            visible_tools = []
+            workflow_id = None
+            version = None
+        return {
+            "id": entry.id,
+            "description": entry.description,
+            "path": str(entry.path),
+            "tags": entry.tags,
+            "workflow_id": workflow_id,
+            "version": version,
+            "tool_count": len(visible_tools),
+            "tools": visible_tools,
+        }
+
+    @router.get("/ui/api/profiles")
+    def api_profiles_list() -> JSONResponse:
+        """List all named profiles from the catalog."""
+        if profiles_catalog is None:
+            return _catalog_unavailable()
+        entries = profiles_catalog.list()
+        return JSONResponse({
+            "profiles": [_profile_summary(e) for e in entries],
+            "count": len(entries),
+        })
+
+    @router.post("/ui/api/profiles")
+    async def api_profiles_create(request: Request) -> JSONResponse:
+        """
+        Create a new named profile.
+
+        Body JSON::
+
+            {
+              "id": "my-profile",
+              "description": "...",
+              "filename": "my_profile.yaml",   # optional; defaults to <id>.yaml
+              "tags": ["tag1"],                  # optional
+              "manifest": { ... }                # WorldManifest dict
+            }
+        """
+        if profiles_catalog is None:
+            return _catalog_unavailable()
+        body = await request.json()
+        profile_id = body.get("id", "").strip()
+        if not profile_id:
+            return JSONResponse(
+                {"error": "'id' is required and must be non-empty."},
+                status_code=400,
+            )
+        manifest_data = body.get("manifest")
+        if not manifest_data or not isinstance(manifest_data, dict):
+            return JSONResponse(
+                {"error": "'manifest' must be a non-empty object."},
+                status_code=400,
+            )
+        try:
+            manifest = manifest_from_dict(manifest_data)
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"Invalid manifest: {exc}"},
+                status_code=400,
+            )
+        filename = body.get("filename") or f"{profile_id}.yaml"
+        manifest_path = profiles_catalog.index_path.parent / filename
+        entry = ProfileEntry(
+            id=profile_id,
+            description=body.get("description", ""),
+            path=manifest_path,
+            tags=body.get("tags", []),
+        )
+        try:
+            profiles_catalog.add(entry, manifest)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"Failed to create profile: {exc}"},
+                status_code=500,
+            )
+        return JSONResponse(
+            {"status": "created", "profile": _profile_summary(entry)},
+            status_code=201,
+        )
+
+    @router.get("/ui/api/profiles/{profile_id}")
+    def api_profiles_detail(profile_id: str) -> JSONResponse:
+        """Full profile detail: manifest source + rendered tool surface."""
+        if profiles_catalog is None:
+            return _catalog_unavailable()
+        entry = profiles_catalog.get(profile_id)
+        if entry is None:
+            return JSONResponse(
+                {"error": f"Profile not found: {profile_id!r}"},
+                status_code=404,
+            )
+        try:
+            manifest = profiles_catalog.load_manifest(profile_id)
+            manifest_source = entry.path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"Could not load manifest: {exc}"},
+                status_code=500,
+            )
+        caps = [
+            {"tool": cap.tool, "constraints": cap.constraints}
+            for cap in manifest.capabilities
+        ]
+        return JSONResponse({
+            "id": entry.id,
+            "description": entry.description,
+            "path": str(entry.path),
+            "tags": entry.tags,
+            "workflow_id": manifest.workflow_id,
+            "version": manifest.version,
+            "capabilities": caps,
+            "tools": manifest.tool_names(),
+            "manifest_source": manifest_source,
+        })
+
+    # ── Session Profile Assignment ─────────────────────────────────────────────
+
+    @router.post("/ui/api/sessions/{session_id}/profile")
+    async def api_session_assign_profile(
+        session_id: str, request: Request
+    ) -> JSONResponse:
+        """
+        Assign a named profile to a live session.
+
+        Body JSON::
+
+            {"profile_id": "read-only-v1"}
+
+        After assignment, tools/list and tools/call for this session will use
+        the profile's manifest instead of the gateway default.
+        """
+        if profiles_catalog is None:
+            return _catalog_unavailable()
+        body = await request.json()
+        profile_id = body.get("profile_id", "")
+        if not profile_id:
+            return JSONResponse(
+                {"error": "'profile_id' is required."},
+                status_code=400,
+            )
+        entry = profiles_catalog.get(profile_id)
+        if entry is None:
+            return JSONResponse(
+                {"error": f"Profile not found: {profile_id!r}"},
+                status_code=404,
+            )
+        try:
+            manifest = gw_state.resolver.register_session(session_id, entry.path)
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"Failed to bind profile to session: {exc}"},
+                status_code=500,
+            )
+        from agent_hypervisor.hypervisor.mcp_gateway.tool_surface_renderer import ToolSurfaceRenderer
+        renderer = gw_state.renderer_for(manifest)
+        visible = [t.name for t in renderer.render()]
+        return JSONResponse({
+            "status": "assigned",
+            "session_id": session_id,
+            "profile_id": profile_id,
+            "workflow_id": manifest.workflow_id,
+            "visible_tools": visible,
+        })
+
+    @router.delete("/ui/api/sessions/{session_id}/profile")
+    def api_session_remove_profile(session_id: str) -> JSONResponse:
+        """
+        Revert a session to the gateway's default profile.
+
+        Safe to call even if the session has no explicit binding.
+        """
+        removed = gw_state.resolver.unregister_session(session_id)
+        default_manifest = gw_state.resolver.manifest
+        return JSONResponse({
+            "status": "reverted" if removed else "not_bound",
+            "session_id": session_id,
+            "default_workflow_id": (
+                default_manifest.workflow_id if default_manifest else None
+            ),
+        })
+
+    @router.get("/ui/api/sessions")
+    def api_sessions_list() -> JSONResponse:
+        """
+        List active sessions and their bound profiles.
+
+        Returns a dict of session_id → workflow_id for all explicitly bound
+        sessions. Sessions not listed are using the gateway-level default.
+        """
+        registry = gw_state.resolver.session_registry()
+        default_manifest = gw_state.resolver.manifest
+        return JSONResponse({
+            "sessions": registry,
+            "default_workflow_id": (
+                default_manifest.workflow_id if default_manifest else None
+            ),
+            "session_count": len(registry),
         })
 
     return router
