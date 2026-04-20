@@ -21,9 +21,12 @@ Design principle:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from .execution_plan import ExecutionPlan
+from .program_store import ProgramStore
+from .review_models import ReviewedProgram
 
 # Result is intentionally untyped at this layer.
 # Execution results are heterogeneous — the caller knows the shape.
@@ -76,35 +79,56 @@ class Executor(Protocol):
 
 class ProgramRegistry:
     """
-    Stub: future store for reviewed and attested programs.
+    Filesystem-backed store for reviewed and attested programs.
 
     In the Program Ladder model, programs progress through states:
         disposable → observed → reviewed → attested
 
     The registry is the persistence layer for reviewed/attested programs.
-    It is not implemented in Phase 1 — all methods raise NotImplementedError.
+    Each program is stored as a single JSON file via ProgramStore.
 
-    This class exists to define the interface and reserve the namespace.
+    Args:
+        directory: path to the directory where program files are stored.
+                   Created automatically on first store() call.
     """
+
+    def __init__(self, directory: str | Path) -> None:
+        self._store = ProgramStore(directory)
 
     def store(self, program: Any) -> str:
         """
-        Persist a program and return its assigned program_id.
+        Persist a ReviewedProgram and return its program_id.
 
-        Not yet implemented.
+        Args:
+            program: a ReviewedProgram instance.
+
+        Returns:
+            The program's id string.
+
+        Raises:
+            TypeError: program is not a ReviewedProgram.
+            OSError:   the registry directory cannot be created or written.
         """
-        raise NotImplementedError(
-            "ProgramRegistry.store() is not yet implemented. "
-            "See docs/architecture/program_layer.md §4 for the planned interface."
-        )
+        if not isinstance(program, ReviewedProgram):
+            raise TypeError(
+                f"ProgramRegistry.store() requires a ReviewedProgram, "
+                f"got {type(program).__name__!r}"
+            )
+        self._store.save(program)
+        return program.id
 
     def load(self, program_id: str) -> Any:
         """
-        Load a previously stored program by id.
+        Load a previously stored ReviewedProgram by id.
 
-        Not yet implemented.
+        Args:
+            program_id: the program's unique id.
+
+        Returns:
+            The deserialized ReviewedProgram.
+
+        Raises:
+            KeyError:   no program with the given id exists.
+            ValueError: the stored file is corrupt or schema is mismatched.
         """
-        raise NotImplementedError(
-            "ProgramRegistry.load() is not yet implemented. "
-            "See docs/architecture/program_layer.md §4 for the planned interface."
-        )
+        return self._store.load(program_id)

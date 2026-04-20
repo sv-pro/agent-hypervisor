@@ -96,66 +96,456 @@ async function pollPendingCount() {
   }
 }
 
-// ── Manifests tab ─────────────────────────────────────────────────────────
+// ── Profiles / Manifest Editor tab ───────────────────────────────────────
+
+// Profile editor state (module-level, not reset on tab switches)
+let profileEditorState = {
+  allTools: [],          // ToolDefinition[] from /ui/api/tools
+  profiles: [],          // ProfileEntry[] from /ui/api/profiles
+  selectedProfileId: null,
+  checkedTools: {},      // toolName → bool
+  constraints: {},       // toolName → {paths: string, domains: string}
+  workflowId: '',
+  version: '1.0',
+  diffProfileId: null,
+};
 
 async function loadManifests() {
-  const data = await apiFetch('/ui/api/status');
   const panel = document.getElementById('tab-manifests');
-  const m = data.manifest;
+
+  // Fetch tools + profiles in parallel
+  let toolsData, profilesData;
+  try {
+    [toolsData, profilesData] = await Promise.all([
+      apiFetch('/ui/api/tools'),
+      apiFetch('/ui/api/profiles'),
+    ]);
+  } catch (e) {
+    panel.innerHTML = emptyState('Could not load profile editor', String(e));
+    return;
+  }
+
+  profileEditorState.allTools = toolsData.tools || [];
+  profileEditorState.profiles = profilesData.profiles || [];
+
+  // Seed checkedTools + constraints from existing state or from first profile
+  if (profileEditorState.allTools.length && !Object.keys(profileEditorState.checkedTools).length) {
+    for (const t of profileEditorState.allTools) {
+      profileEditorState.checkedTools[t.name] = false;
+      profileEditorState.constraints[t.name] = { paths: '', domains: '' };
+    }
+    // Pre-load first profile if available
+    if (profileEditorState.profiles.length && !profileEditorState.selectedProfileId) {
+      profileEditorState.selectedProfileId = profileEditorState.profiles[0].id;
+      await _profileEditorLoadProfile(profileEditorState.selectedProfileId);
+    }
+  }
+
+  _renderProfileEditor(panel);
+}
+
+async function _profileEditorLoadProfile(profileId) {
+  if (!profileId) return;
+  try {
+    const detail = await apiFetch(`/ui/api/profiles/${encodeURIComponent(profileId)}`);
+    profileEditorState.workflowId = detail.workflow_id || profileId;
+    profileEditorState.version = detail.version || '1.0';
+    // Reset all checkboxes
+    for (const t of profileEditorState.allTools) {
+      profileEditorState.checkedTools[t.name] = false;
+      profileEditorState.constraints[t.name] = { paths: '', domains: '' };
+    }
+    // Check tools declared in the profile
+    for (const cap of (detail.capabilities || [])) {
+      profileEditorState.checkedTools[cap.tool] = true;
+      const c = cap.constraints || {};
+      profileEditorState.constraints[cap.tool] = {
+        paths: (c.paths || []).join(', '),
+        domains: (c.domains || []).join(', '),
+      };
+    }
+  } catch (e) {
+    console.error('[ui] profile load failed', e);
+  }
+}
+
+function _renderProfileEditor(panel) {
+  const state = profileEditorState;
+  const profileOptions = state.profiles.map(p =>
+    `<option value="${esc(p.id)}" ${p.id === state.selectedProfileId ? 'selected' : ''}>${esc(p.id)} — ${esc(p.description || '')}</option>`
+  ).join('');
+
+  const toolRows = state.allTools.map(t => {
+    const checked = state.checkedTools[t.name];
+    const c = state.constraints[t.name] || {};
+    const constraintFields = checked ? `
+      <div class="profile-constraints" id="constraints-${esc(t.name)}">
+        <label>Paths <span class="muted small">(comma-separated globs)</span>
+          <input type="text" class="constraint-input" placeholder="e.g. /tmp/*, /home/**"
+            value="${esc(c.paths || '')}"
+            onchange="profileEditorUpdateConstraint('${esc(t.name)}', 'paths', this.value)">
+        </label>
+        <label>Domains <span class="muted small">(comma-separated)</span>
+          <input type="text" class="constraint-input" placeholder="e.g. example.com, api.acme.io"
+            value="${esc(c.domains || '')}"
+            onchange="profileEditorUpdateConstraint('${esc(t.name)}', 'domains', this.value)">
+        </label>
+      </div>` : '';
+    return `
+      <div class="tool-row ${checked ? 'tool-row-checked' : ''}">
+        <label class="tool-check-label">
+          <input type="checkbox" ${checked ? 'checked' : ''}
+            onchange="profileEditorToggleTool('${esc(t.name)}', this.checked)">
+          <span class="mono">${esc(t.name)}</span>
+          <span class="muted small" style="margin-left:8px">${esc(t.description || '')}</span>
+          <span class="tag ${t.side_effect_class === 'read_only' ? 'tag-muted' : 'tag-deny'}" style="margin-left:6px;font-size:10px">${esc(t.side_effect_class || '')}</span>
+        </label>
+        ${constraintFields}
+      </div>`;
+  }).join('');
+
   panel.innerHTML = `
-    <div class="info-grid">
-      <div class="info-card">
-        <div class="info-card-header">Gateway</div>
-        <div class="kv-list">
-          <div class="kv"><span class="k">status</span><span class="v"><span class="tag tag-allow">running</span></span></div>
-          <div class="kv"><span class="k">started</span><span class="v">${relTime(data.started_at)}</span></div>
-          <div class="kv"><span class="k">sessions</span><span class="v">${data.session_count}</span></div>
-          <div class="kv"><span class="k">control plane</span><span class="v">${data.control_plane
-            ? '<span class="tag tag-allow">wired</span>'
-            : '<span class="tag tag-muted">not wired</span>'}</span></div>
+    <div class="profile-editor-layout">
+      <div class="profile-editor-toolbar">
+        <div class="profile-selector-group">
+          <label class="toolbar-label">Profile</label>
+          <select id="profile-selector" class="profile-selector" onchange="profileEditorSelectProfile(this.value)">
+            <option value="">(new profile)</option>
+            ${profileOptions}
+          </select>
+        </div>
+        <div class="profile-editor-actions">
+          <button class="btn btn-sm" onclick="profileEditorValidate()">Validate</button>
+          <button class="btn btn-sm" onclick="profileEditorClone()">Clone</button>
+          <button class="btn btn-sm btn-allow" onclick="profileEditorSave()">Save Profile</button>
         </div>
       </div>
-      <div class="info-card">
-        <div class="info-card-header">Manifest</div>
-        <div class="kv-list">
-          <div class="kv"><span class="k">workflow_id</span><span class="v mono">${esc(m.workflow_id || '—')}</span></div>
-          <div class="kv"><span class="k">version</span><span class="v mono">${esc(String(m.version || '—'))}</span></div>
-          <div class="kv"><span class="k">path</span><span class="v mono small">${esc(m.path || '—')}</span></div>
-          <div class="kv"><span class="k">visible tools</span><span class="v">${m.visible_tools.length}</span></div>
-          <div class="kv"><span class="k">capabilities</span><span class="v">${m.capabilities.length}</span></div>
-        </div>
-        <button class="btn btn-sm" onclick="reloadManifest()">Reload manifest</button>
+
+      <div class="profile-editor-meta">
+        <label>Workflow ID
+          <input type="text" id="profile-workflow-id" class="meta-input mono"
+            value="${esc(state.workflowId)}"
+            placeholder="my-workflow"
+            onchange="profileEditorState.workflowId = this.value">
+        </label>
+        <label>Version
+          <input type="text" id="profile-version" class="meta-input mono"
+            value="${esc(state.version)}"
+            placeholder="1.0"
+            onchange="profileEditorState.version = this.value">
+        </label>
       </div>
+
+      <div class="profile-editor-body">
+        <div class="profile-editor-left">
+          <div class="section-title">Tool Checklist
+            <span class="muted small" style="font-weight:normal;margin-left:8px">
+              ${Object.values(state.checkedTools).filter(Boolean).length} of ${state.allTools.length} selected
+            </span>
+          </div>
+          <div id="tool-checklist" class="tool-checklist">
+            ${state.allTools.length === 0
+              ? `<div class="muted" style="padding:16px">No tools registered in gateway</div>`
+              : toolRows}
+          </div>
+        </div>
+
+        <div class="profile-editor-right">
+          <div class="section-title" style="display:flex;align-items:center;gap:8px">
+            Agent Sees
+            <button class="btn btn-sm" style="margin-left:auto" onclick="profileEditorRefreshPreview()">Refresh</button>
+          </div>
+          <div id="profile-preview" class="profile-preview">
+            ${state.selectedProfileId
+              ? `<div class="muted small" style="padding:12px">Click Refresh to preview rendered surface</div>`
+              : `<div class="muted small" style="padding:12px">Save a profile to preview it</div>`}
+          </div>
+
+          <div class="section-title" style="margin-top:20px;display:flex;align-items:center;gap:8px">
+            Diff
+            <select id="diff-profile-select" class="profile-selector" style="max-width:200px;margin-left:auto"
+              onchange="profileEditorState.diffProfileId = this.value || null">
+              <option value="">Compare with…</option>
+              ${state.profiles
+                .filter(p => p.id !== state.selectedProfileId)
+                .map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`)
+                .join('')}
+            </select>
+            <button class="btn btn-sm" onclick="profileEditorShowDiff()">Show diff</button>
+          </div>
+          <div id="profile-diff" class="profile-diff"></div>
+        </div>
+      </div>
+
+      <div id="profile-status" class="editor-status"></div>
     </div>
-
-    <div class="section-title">Capability surface</div>
-    <table class="data-table">
-      <thead><tr><th>Tool</th><th>Allow</th><th>Constraints</th></tr></thead>
-      <tbody>
-        ${m.capabilities.length === 0
-          ? `<tr><td colspan="3" class="muted" style="padding:16px;text-align:center">No capabilities declared</td></tr>`
-          : m.capabilities.map(cap => `
-            <tr>
-              <td class="mono">${esc(cap.tool)}</td>
-              <td>${cap.allow !== false
-                ? '<span class="tag tag-allow">allow</span>'
-                : '<span class="tag tag-deny">deny</span>'}</td>
-              <td class="mono small">${
-                cap.constraints && Object.keys(cap.constraints).length
-                  ? esc(JSON.stringify(cap.constraints))
-                  : '<span class="muted">—</span>'
-              }</td>
-            </tr>`).join('')
-        }
-      </tbody>
-    </table>
-
-    ${m.visible_tools.length ? `
-      <div class="section-title">Rendered tool surface</div>
-      <div class="pill-group">
-        ${m.visible_tools.map(t => `<span class="tool-pill">${esc(t)}</span>`).join('')}
-      </div>` : ''}
   `;
+}
+
+function profileEditorToggleTool(toolName, checked) {
+  profileEditorState.checkedTools[toolName] = checked;
+  // Re-render to show/hide constraint fields without full reload
+  const panel = document.getElementById('tab-manifests');
+  _renderProfileEditor(panel);
+}
+
+function profileEditorUpdateConstraint(toolName, field, value) {
+  if (!profileEditorState.constraints[toolName]) {
+    profileEditorState.constraints[toolName] = { paths: '', domains: '' };
+  }
+  profileEditorState.constraints[toolName][field] = value;
+}
+
+async function profileEditorSelectProfile(profileId) {
+  profileEditorState.selectedProfileId = profileId || null;
+  if (profileId) {
+    await _profileEditorLoadProfile(profileId);
+  } else {
+    // New profile — reset everything
+    for (const t of profileEditorState.allTools) {
+      profileEditorState.checkedTools[t.name] = false;
+      profileEditorState.constraints[t.name] = { paths: '', domains: '' };
+    }
+    profileEditorState.workflowId = '';
+    profileEditorState.version = '1.0';
+  }
+  const panel = document.getElementById('tab-manifests');
+  _renderProfileEditor(panel);
+}
+
+function _buildManifestFromEditor() {
+  const state = profileEditorState;
+  const capabilities = [];
+  for (const t of state.allTools) {
+    if (!state.checkedTools[t.name]) continue;
+    const c = state.constraints[t.name] || {};
+    const constraints = {};
+    const paths = c.paths ? c.paths.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const domains = c.domains ? c.domains.split(',').map(s => s.trim()).filter(Boolean) : [];
+    if (paths.length) constraints.paths = paths;
+    if (domains.length) constraints.domains = domains;
+    capabilities.push({ tool: t.name, ...(Object.keys(constraints).length ? { constraints } : {}) });
+  }
+  return {
+    workflow_id: state.workflowId || 'new-profile',
+    version: state.version || '1.0',
+    capabilities,
+  };
+}
+
+async function profileEditorValidate() {
+  const status = document.getElementById('profile-status');
+  if (status) status.innerHTML = '<span class="editor-status-msg muted">Validating…</span>';
+  const manifest = _buildManifestFromEditor();
+  const yaml = _manifestToYaml(manifest);
+  try {
+    const resp = await fetch('/ui/api/manifest/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: yaml }),
+    });
+    const data = await resp.json();
+    if (status) {
+      if (data.valid) {
+        status.innerHTML = '<span class="editor-status-msg ok">Valid — no errors</span>';
+      } else {
+        const errList = data.errors.map(e => `<div class="editor-error-item">${esc(e)}</div>`).join('');
+        status.innerHTML = `<div class="editor-status-msg error">Validation failed</div>${errList}`;
+      }
+    }
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="editor-status-msg error">Request failed: ${esc(String(e))}</span>`;
+  }
+}
+
+async function profileEditorSave() {
+  const status = document.getElementById('profile-status');
+  const state = profileEditorState;
+  if (!state.workflowId) {
+    if (status) status.innerHTML = '<span class="editor-status-msg error">Workflow ID is required before saving.</span>';
+    return;
+  }
+  if (status) status.innerHTML = '<span class="editor-status-msg muted">Saving…</span>';
+  const manifest = _buildManifestFromEditor();
+  const profileId = state.selectedProfileId || state.workflowId;
+  try {
+    const resp = await fetch('/ui/api/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: profileId,
+        description: `Profile for ${manifest.workflow_id}`,
+        manifest,
+      }),
+    });
+    const data = await resp.json();
+    if (resp.ok || resp.status === 409) {
+      if (resp.status === 409) {
+        // Profile exists — this is a save/update; for now inform user
+        if (status) status.innerHTML = `<span class="editor-status-msg error">Profile ${esc(profileId)} already exists. Use Clone to create a new one.</span>`;
+        return;
+      }
+      profileEditorState.selectedProfileId = profileId;
+      if (status) status.innerHTML = `<span class="editor-status-msg ok">Profile <span class="mono">${esc(profileId)}</span> saved.</span>`;
+      // Refresh profiles list
+      const profilesData = await apiFetch('/ui/api/profiles');
+      profileEditorState.profiles = profilesData.profiles || [];
+      const panel = document.getElementById('tab-manifests');
+      _renderProfileEditor(panel);
+    } else {
+      if (status) status.innerHTML = `<span class="editor-status-msg error">${esc(data.error || 'Save failed')}</span>`;
+    }
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="editor-status-msg error">Request failed: ${esc(String(e))}</span>`;
+  }
+}
+
+async function profileEditorClone() {
+  const state = profileEditorState;
+  const newId = prompt('New profile ID:', (state.selectedProfileId || state.workflowId || 'new-profile') + '-copy');
+  if (!newId || !newId.trim()) return;
+  const cloneId = newId.trim();
+  const manifest = _buildManifestFromEditor();
+  const status = document.getElementById('profile-status');
+  if (status) status.innerHTML = '<span class="editor-status-msg muted">Cloning…</span>';
+  try {
+    const resp = await fetch('/ui/api/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: cloneId,
+        description: `Clone of ${state.selectedProfileId || manifest.workflow_id}`,
+        manifest,
+      }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      profileEditorState.selectedProfileId = cloneId;
+      const profilesData = await apiFetch('/ui/api/profiles');
+      profileEditorState.profiles = profilesData.profiles || [];
+      const panel = document.getElementById('tab-manifests');
+      _renderProfileEditor(panel);
+      if (status) status.innerHTML = `<span class="editor-status-msg ok">Cloned as <span class="mono">${esc(cloneId)}</span>.</span>`;
+    } else {
+      if (status) status.innerHTML = `<span class="editor-status-msg error">${esc(data.error || 'Clone failed')}</span>`;
+    }
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="editor-status-msg error">Request failed: ${esc(String(e))}</span>`;
+  }
+}
+
+async function profileEditorRefreshPreview() {
+  const state = profileEditorState;
+  const previewEl = document.getElementById('profile-preview');
+  if (!previewEl) return;
+
+  if (!state.selectedProfileId) {
+    previewEl.innerHTML = '<div class="muted small" style="padding:12px">Save a profile first to preview it.</div>';
+    return;
+  }
+
+  previewEl.innerHTML = '<div class="muted small" style="padding:12px">Loading…</div>';
+  try {
+    const data = await apiFetch(`/ui/api/profiles/${encodeURIComponent(state.selectedProfileId)}/rendered-surface`);
+    if (!data.tools || data.tools.length === 0) {
+      previewEl.innerHTML = '<div class="muted small" style="padding:12px">No tools visible — check that tools are registered in the gateway.</div>';
+      return;
+    }
+    previewEl.innerHTML = data.tools.map(t => `
+      <div class="rendered-tool-card">
+        <div class="rendered-tool-name mono">${esc(t.name)}</div>
+        <div class="rendered-tool-desc muted small">${esc(t.description || '')}</div>
+        ${t.inputSchema && t.inputSchema['x-ah-constraints']
+          ? `<div class="rendered-tool-constraints mono small">${esc(JSON.stringify(t.inputSchema['x-ah-constraints']))}</div>`
+          : ''}
+      </div>`).join('');
+  } catch (e) {
+    previewEl.innerHTML = `<span class="editor-status-msg error">Preview failed: ${esc(String(e))}</span>`;
+  }
+}
+
+async function profileEditorShowDiff() {
+  const state = profileEditorState;
+  const diffEl = document.getElementById('profile-diff');
+  if (!diffEl) return;
+
+  if (!state.selectedProfileId || !state.diffProfileId) {
+    diffEl.innerHTML = '<div class="muted small" style="padding:8px">Select two profiles to compare.</div>';
+    return;
+  }
+  diffEl.innerHTML = '<div class="muted small" style="padding:8px">Loading…</div>';
+
+  try {
+    const [surfaceA, surfaceB] = await Promise.all([
+      apiFetch(`/ui/api/profiles/${encodeURIComponent(state.selectedProfileId)}/rendered-surface`),
+      apiFetch(`/ui/api/profiles/${encodeURIComponent(state.diffProfileId)}/rendered-surface`),
+    ]);
+    const toolsA = new Set((surfaceA.tools || []).map(t => t.name));
+    const toolsB = new Set((surfaceB.tools || []).map(t => t.name));
+    const all = new Set([...toolsA, ...toolsB]);
+
+    const rows = [...all].sort().map(name => {
+      const inA = toolsA.has(name);
+      const inB = toolsB.has(name);
+      let cls = '';
+      if (inA && !inB) cls = 'diff-removed';
+      else if (!inA && inB) cls = 'diff-added';
+      return `<tr class="${cls}">
+        <td class="mono">${esc(name)}</td>
+        <td>${inA ? '<span class="tag tag-allow">yes</span>' : '<span class="tag tag-muted">—</span>'}</td>
+        <td>${inB ? '<span class="tag tag-allow">yes</span>' : '<span class="tag tag-muted">—</span>'}</td>
+      </tr>`;
+    }).join('');
+
+    diffEl.innerHTML = `
+      <table class="data-table diff-table">
+        <thead>
+          <tr>
+            <th>Tool</th>
+            <th class="mono">${esc(state.selectedProfileId)}</th>
+            <th class="mono">${esc(state.diffProfileId)}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (e) {
+    diffEl.innerHTML = `<span class="editor-status-msg error">Diff failed: ${esc(String(e))}</span>`;
+  }
+}
+
+// Minimal YAML serializer for simple manifest dicts (no special chars, no anchors needed)
+function _manifestToYaml(obj, indent) {
+  indent = indent || 0;
+  const pad = '  '.repeat(indent);
+  if (obj === null || obj === undefined) return 'null';
+  if (typeof obj === 'boolean') return String(obj);
+  if (typeof obj === 'number') return String(obj);
+  if (typeof obj === 'string') {
+    // Quote strings that look like YAML special values or contain special chars
+    if (/[:{}\[\],&*#?|<>=!%@`]/.test(obj) || obj === '' || /^\s|\s$/.test(obj)) {
+      return `"${obj.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return '[]';
+    return obj.map(item => `${pad}- ${_manifestToYaml(item, indent + 1).trimStart()}`).join('\n');
+  }
+  if (typeof obj === 'object') {
+    const keys = Object.keys(obj);
+    if (keys.length === 0) return '{}';
+    return keys.map(k => {
+      const val = obj[k];
+      if (typeof val === 'object' && val !== null && !Array.isArray(val) && Object.keys(val).length > 0) {
+        return `${pad}${k}:\n${_manifestToYaml(val, indent + 1)}`;
+      }
+      if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+        return `${pad}${k}:\n${_manifestToYaml(val, indent + 1)}`;
+      }
+      return `${pad}${k}: ${_manifestToYaml(val, indent)}`;
+    }).join('\n');
+  }
+  return String(obj);
 }
 
 async function reloadManifest() {

@@ -24,12 +24,14 @@ Data API (all GET, JSON):
   /ui/api/benchmarks                       — benchmark report files
 
 Profile Catalog API (Phase 1 — Transparent UI):
-  GET  /ui/api/profiles                    — list all named profiles from the catalog
-  POST /ui/api/profiles                    — create a new named profile
-  GET  /ui/api/profiles/{profile_id}       — profile detail + rendered tool surface
-  POST /ui/api/sessions/{session_id}/profile       — assign a profile to a live session
-  DELETE /ui/api/sessions/{session_id}/profile     — revert session to default profile
-  GET  /ui/api/sessions                    — list active sessions + their bound profile
+  GET  /ui/api/tools                                   — all registered tools (for editor checklist)
+  GET  /ui/api/profiles                                — list all named profiles from the catalog
+  POST /ui/api/profiles                                — create a new named profile
+  GET  /ui/api/profiles/{profile_id}                   — profile detail + rendered tool surface
+  GET  /ui/api/profiles/{profile_id}/rendered-surface  — exact agent-visible tool list + schemas
+  POST /ui/api/sessions/{session_id}/profile           — assign a profile to a live session
+  DELETE /ui/api/sessions/{session_id}/profile         — revert session to default profile
+  GET  /ui/api/sessions                                — list active sessions + their bound profile
 """
 
 from __future__ import annotations
@@ -397,6 +399,28 @@ def create_ui_router(
             status_code=201,
         )
 
+    @router.get("/ui/api/tools")
+    def api_tools_list() -> JSONResponse:
+        """
+        List all tools registered in the gateway's ToolRegistry.
+
+        Returns every tool the gateway knows about, regardless of whether
+        any manifest currently declares it.  Used by the profile editor to
+        populate the tool checklist.
+        """
+        tools = gw_state.renderer._registry.list_tools()
+        return JSONResponse({
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "side_effect_class": t.side_effect_class,
+                }
+                for t in tools
+            ],
+            "count": len(tools),
+        })
+
     @router.get("/ui/api/profiles/{profile_id}")
     def api_profiles_detail(profile_id: str) -> JSONResponse:
         """Full profile detail: manifest source + rendered tool surface."""
@@ -430,6 +454,46 @@ def create_ui_router(
             "capabilities": caps,
             "tools": manifest.tool_names(),
             "manifest_source": manifest_source,
+        })
+
+    @router.get("/ui/api/profiles/{profile_id}/rendered-surface")
+    def api_profiles_rendered_surface(profile_id: str) -> JSONResponse:
+        """
+        Return the exact tool list and input schemas the agent would see for a profile.
+
+        This is what the MCP gateway returns in tools/list when the session is
+        bound to the given profile.  Use it to preview the rendered tool surface
+        before assigning the profile to a session.
+        """
+        if profiles_catalog is None:
+            return _catalog_unavailable()
+        entry = profiles_catalog.get(profile_id)
+        if entry is None:
+            return JSONResponse(
+                {"error": f"Profile not found: {profile_id!r}"},
+                status_code=404,
+            )
+        try:
+            manifest = profiles_catalog.load_manifest(profile_id)
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"Could not load manifest: {exc}"},
+                status_code=500,
+            )
+        from agent_hypervisor.hypervisor.mcp_gateway.tool_surface_renderer import ToolSurfaceRenderer
+        renderer = gw_state.renderer_for(manifest)
+        tools = renderer.render()
+        return JSONResponse({
+            "profile_id": profile_id,
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "inputSchema": t.inputSchema,
+                }
+                for t in tools
+            ],
+            "count": len(tools),
         })
 
     # ── Session Profile Assignment ─────────────────────────────────────────────

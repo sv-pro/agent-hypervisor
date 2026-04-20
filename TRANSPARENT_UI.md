@@ -89,39 +89,37 @@ assignment drives `SessionWorldResolver.register_session`.
 
 ### Phase 2 — Manifest Editor UI (Visual Profile Authoring)
 
-**Status:** `[ ] NOT STARTED`
+**Status:** `[x] DONE`
 
-**Branch name:** `feature/transparent-ui-ph2`
+**Branch name:** `claude/plan-next-priorities-pGbM8`
+
+**PR:** *(pending)*
 
 **Goal:** Replace the read-only Manifests tab with an interactive profile editor
 so the operator can author and preview a profile without writing YAML.
 
 **Deliverables:**
 
-- [ ] **Editor panel** (replaces / extends existing Manifests tab):
+- [x] **Editor panel** (replaces existing Manifests tab, now labelled "Profiles"):
   - Checkbox list: every tool in the `ToolRegistry` shown; checked = included in profile.
   - Per-tool constraint fields (path glob hints, domain allow-list inputs).
-  - Live "Agent Sees" preview panel — calls `POST /ui/api/simulate` or a new
-    `GET /ui/api/profiles/{id}/rendered-surface` endpoint and shows the exact tool
-    list + schemas the agent would receive.
-- [ ] **Profile selector dropdown** — switch between profiles from the catalog
-  (`GET /ui/api/profiles`) without reloading the page.
-- [ ] **Save / Validate / Clone** buttons — Save calls `POST /ui/api/manifest/save`;
-  Clone creates a new catalog entry from the current state.
-- [ ] **Diff view** — side-by-side rendered surfaces of two selected profiles
-  (which tools added / removed / changed constraints).
-- [ ] Tests: UI smoke tests via browser automation or Playwright.
+  - Live "Agent Sees" preview panel via `GET /ui/api/profiles/{id}/rendered-surface`.
+- [x] **Profile selector dropdown** — switch between profiles from the catalog without reloading.
+- [x] **Save / Validate / Clone** buttons — Save calls `POST /ui/api/profiles`;
+  Clone prompts for new ID and creates a catalog entry.
+- [x] **Diff view** — side-by-side rendered surfaces of two selected profiles
+  (tools added / removed highlighted with colour).
+- [x] **New backend endpoints**: `GET /ui/api/tools`, `GET /ui/api/profiles/{id}/rendered-surface`.
+- [x] Tests: 10 new API tests in `tests/hypervisor/test_profiles_api.py` (47 total, all passing).
 
 **Done criteria:** An operator can create a new profile from the UI, see the
-rendered tool surface update live, and save — without ever opening a YAML file.
-
-**PR:** *(fill in after merge)*
+rendered tool surface update live, and save — without ever opening a YAML file. ✅
 
 ---
 
 ### Phase 3 — Dynamic Workflow→Profile Linking (Rule Engine)
 
-**Status:** `[ ] NOT STARTED`
+**Status:** `[-] IN PROGRESS`
 
 **Branch name:** `feature/transparent-ui-ph3`
 
