@@ -102,18 +102,45 @@ class CostProfileStore:
         """
         Return the p-th percentile cost for (action_name, model_name).
 
-        Phase 1: raises NotImplementedError — not yet implemented.
-        Phase 3: returns the computed percentile from aggregated observations.
+        Uses linear interpolation (equivalent to numpy's default method).
 
         Args:
             action_name: The action to query.
             model_name:  The model to query.
             p:           Percentile in [0, 100] (e.g. 90 for p90).
+
+        Returns:
+            Interpolated cost at the requested percentile.
+
+        Raises:
+            ValueError: p is outside [0, 100].
+            KeyError:   No observations exist for (action_name, model_name).
         """
-        raise NotImplementedError(
-            "CostProfileStore.percentile() is a Phase 3 feature. "
-            "Collect observations via record() and aggregate offline."
+        if not (0.0 <= p <= 100.0):
+            raise ValueError(f"Percentile p must be in [0, 100], got {p!r}")
+
+        values = sorted(
+            obs.actual_cost
+            for obs in self._observations
+            if obs.action_name == action_name and obs.model_name == model_name
         )
+        if not values:
+            raise KeyError(
+                f"No observations for action={action_name!r} model={model_name!r}"
+            )
+
+        n = len(values)
+        if n == 1:
+            return values[0]
+
+        # Linear interpolation: index in [0, n-1]
+        idx = (p / 100.0) * (n - 1)
+        lo = int(idx)
+        hi = lo + 1
+        if hi >= n:
+            return values[-1]
+        frac = idx - lo
+        return values[lo] + frac * (values[hi] - values[lo])
 
     def export(self) -> dict[str, Any]:
         """

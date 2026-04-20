@@ -26,17 +26,18 @@
   - 2026-04-12 audit note: approval persistence/recovery primitives are present (`ApprovalStore`, gateway recovery path); remaining work is to close any edge-case/runtime parity gaps before promoting maturity.
   - 2026-04-15 note: paused for user-directed browser extension MVP demo implementation (see `browser-extension-demo/`).
 
-- [-] **T4 — Implement ProgramRegistry persistence interface**
-  - Implement `store()` and `load()` with a concrete backend.
-  - Add tests for round-trip and error handling.
+- [x] **T4 — Implement ProgramRegistry persistence interface** *(branch: claude/plan-next-priorities-pGbM8)*
+  - Implemented `store()` and `load()` backed by `ProgramStore` (filesystem JSON) in `interfaces.py`.
+  - 12 tests in `tests/program_layer/test_program_registry.py` (round-trip, durability, error handling, multi-entry).
 
-- [ ] **T5 — Implement CostProfileStore percentile aggregation**
-  - Implement `percentile()` across collected observations.
-  - Add tests for percentile edge cases (empty, interpolation, bounds).
+- [x] **T5 — Implement CostProfileStore percentile aggregation** *(branch: claude/plan-next-priorities-pGbM8)*
+  - Implemented linear-interpolation `percentile()` in `economic/cost_profile_store.py`.
+  - 26 tests in `tests/economic/test_cost_profile_store.py` (empty, single, bounds, interpolation, scoping, large dataset).
 
 - [-] **T6 — Transparent Capabilities Profile / Dynamic MCP Registry**
   - See [`TRANSPARENT_UI.md`](TRANSPARENT_UI.md) for the complete feature spec, phase
     checklist, and "how to resume" instructions.
   - **Phase 1 DONE** — Profile Catalog + Session Assignment API (37 tests passing).
-  - **Current phase:** Phase 2 — Manifest Editor UI (Visual Profile Authoring).
+  - **Phase 2 DONE** — Manifest Editor UI: `GET /ui/api/tools`, `GET /ui/api/profiles/{id}/rendered-surface`, full profile editor tab (tool checklist, constraints, live preview, diff, save/clone). 47 tests passing. *(branch: claude/plan-next-priorities-pGbM8)*
+  - **Current phase:** Phase 3 — Dynamic Workflow→Profile Linking (Rule Engine).
   - Any agent can read `TRANSPARENT_UI.md` to know exactly what to build next.

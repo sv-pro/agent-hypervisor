@@ -514,3 +514,144 @@ class TestProfilesCatalog:
         from agent_hypervisor.hypervisor.mcp_gateway.profiles_catalog import ProfilesCatalog
         with pytest.raises(FileNotFoundError):
             ProfilesCatalog(tmp_path / "nonexistent-index.yaml")
+
+
+# ---------------------------------------------------------------------------
+# GET /ui/api/tools — list all registered tools (Phase 2)
+# ---------------------------------------------------------------------------
+
+class TestToolsList:
+
+    def _make_app_with_tools(self, tool_defs):
+        from agent_hypervisor.hypervisor.gateway.tool_registry import ToolDefinition
+        app, gw_state = _make_app_with_catalog()
+        gw_state.renderer._registry.list_tools.return_value = tool_defs
+        return app, gw_state
+
+    def test_returns_200_with_tool_list(self):
+        from agent_hypervisor.hypervisor.gateway.tool_registry import ToolDefinition
+        tools = [
+            ToolDefinition(
+                name="send_email", description="Send an email",
+                side_effect_class="outbound_side_effect", adapter=lambda x: None,
+            ),
+            ToolDefinition(
+                name="read_file", description="Read a file",
+                side_effect_class="read_only", adapter=lambda x: None,
+            ),
+        ]
+        app, _ = self._make_app_with_tools(tools)
+        client = TestClient(app)
+        resp = client.get("/ui/api/tools")
+        assert resp.status_code == 200
+
+    def test_response_contains_tools_and_count(self):
+        from agent_hypervisor.hypervisor.gateway.tool_registry import ToolDefinition
+        tools = [
+            ToolDefinition(
+                name="send_email", description="Send an email",
+                side_effect_class="outbound_side_effect", adapter=lambda x: None,
+            ),
+        ]
+        app, _ = self._make_app_with_tools(tools)
+        client = TestClient(app)
+        data = client.get("/ui/api/tools").json()
+        assert "tools" in data
+        assert "count" in data
+        assert data["count"] == 1
+
+    def test_tool_entries_have_required_fields(self):
+        from agent_hypervisor.hypervisor.gateway.tool_registry import ToolDefinition
+        tools = [
+            ToolDefinition(
+                name="http_post", description="POST to URL",
+                side_effect_class="outbound_side_effect", adapter=lambda x: None,
+            ),
+        ]
+        app, _ = self._make_app_with_tools(tools)
+        client = TestClient(app)
+        entries = client.get("/ui/api/tools").json()["tools"]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["name"] == "http_post"
+        assert entry["description"] == "POST to URL"
+        assert entry["side_effect_class"] == "outbound_side_effect"
+
+    def test_empty_registry_returns_empty_list(self):
+        app, _ = self._make_app_with_tools([])
+        client = TestClient(app)
+        data = client.get("/ui/api/tools").json()
+        assert data["tools"] == []
+        assert data["count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# GET /ui/api/profiles/{id}/rendered-surface — Phase 2
+# ---------------------------------------------------------------------------
+
+class TestRenderedSurface:
+
+    def _make_app_with_surface(self, rendered_tools, catalog):
+        from agent_hypervisor.hypervisor.mcp_gateway.protocol import MCPTool
+        app, gw_state = _make_app_with_catalog(catalog=catalog)
+        mock_renderer_for = type('R', (), {'render': lambda self: rendered_tools})()
+        gw_state.renderer_for.return_value = mock_renderer_for
+        return app, gw_state
+
+    def test_returns_200_for_known_profile(self, catalog):
+        from agent_hypervisor.hypervisor.mcp_gateway.protocol import MCPTool
+        tools = [MCPTool(name="read_file", description="Read", inputSchema={"type": "object"})]
+        app, _ = self._make_app_with_surface(tools, catalog)
+        client = TestClient(app)
+        resp = client.get("/ui/api/profiles/email-assistant-v1/rendered-surface")
+        assert resp.status_code == 200
+
+    def test_returns_404_for_unknown_profile(self, catalog):
+        app, gw_state = _make_app_with_catalog(catalog=catalog)
+        client = TestClient(app)
+        resp = client.get("/ui/api/profiles/ghost-profile/rendered-surface")
+        assert resp.status_code == 404
+
+    def test_returns_503_when_no_catalog(self):
+        app, _ = _make_app_with_catalog(catalog=None)
+        client = TestClient(app)
+        resp = client.get("/ui/api/profiles/any-profile/rendered-surface")
+        assert resp.status_code == 503
+
+    def test_response_contains_profile_id_tools_count(self, catalog):
+        from agent_hypervisor.hypervisor.mcp_gateway.protocol import MCPTool
+        tools = [
+            MCPTool(name="read_file", description="Read", inputSchema={"type": "object"}),
+            MCPTool(name="send_email", description="Send", inputSchema={"type": "object"}),
+        ]
+        app, _ = self._make_app_with_surface(tools, catalog)
+        client = TestClient(app)
+        data = client.get("/ui/api/profiles/email-assistant-v1/rendered-surface").json()
+        assert data["profile_id"] == "email-assistant-v1"
+        assert data["count"] == 2
+        assert "tools" in data
+
+    def test_tool_entries_have_name_description_inputschema(self, catalog):
+        from agent_hypervisor.hypervisor.mcp_gateway.protocol import MCPTool
+        tools = [
+            MCPTool(
+                name="send_email",
+                description="Send an email to a recipient",
+                inputSchema={"type": "object", "properties": {"to": {"type": "string"}}},
+            ),
+        ]
+        app, _ = self._make_app_with_surface(tools, catalog)
+        client = TestClient(app)
+        entries = client.get("/ui/api/profiles/email-assistant-v1/rendered-surface").json()["tools"]
+        assert len(entries) == 1
+        t = entries[0]
+        assert t["name"] == "send_email"
+        assert t["description"] == "Send an email to a recipient"
+        assert t["inputSchema"]["type"] == "object"
+
+    def test_empty_rendered_surface_returns_empty_list(self, catalog):
+        app, _ = self._make_app_with_surface([], catalog)
+        client = TestClient(app)
+        data = client.get("/ui/api/profiles/email-assistant-v1/rendered-surface").json()
+        assert data["tools"] == []
+        assert data["count"] == 0
