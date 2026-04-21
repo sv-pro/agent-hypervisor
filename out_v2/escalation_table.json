@@ -1,0 +1,64 @@
+{
+  "conditions": [
+    {
+      "decision": "deny",
+      "description": "send_email with tainted context denied \u2014 injection containment",
+      "id": "ESC-WS-001",
+      "notify": [],
+      "trigger": {
+        "action_name": "send_email",
+        "taint": true
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "share_file with tainted context denied \u2014 injection containment",
+      "id": "ESC-WS-002",
+      "notify": [],
+      "trigger": {
+        "action_name": "share_file",
+        "taint": true
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "delete_file with tainted context denied \u2014 injection containment",
+      "id": "ESC-WS-004",
+      "notify": [],
+      "trigger": {
+        "action_name": "delete_file",
+        "taint": true
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "delete_email with tainted context denied \u2014 injection containment",
+      "id": "ESC-WS-005",
+      "notify": [],
+      "trigger": {
+        "action_name": "delete_email",
+        "taint": true
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "create_calendar_event_with_participants with tainted context denied",
+      "id": "ESC-WS-006",
+      "notify": [],
+      "trigger": {
+        "action_name": "create_calendar_event_with_participants",
+        "taint": true
+      }
+    },
+    {
+      "decision": "deny",
+      "description": "add_calendar_event_participants with tainted context denied",
+      "id": "ESC-WS-007",
+      "notify": [],
+      "trigger": {
+        "action_name": "add_calendar_event_participants",
+        "taint": true
+      }
+    }
+  ]
+}

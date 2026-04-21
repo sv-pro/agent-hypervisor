@@ -11,34 +11,21 @@
 
 ## Task checklist
 
-- [x] **T1 — M5 UI status reconciliation + acceptance checklist** *(PR: this branch / pending number)*
-  - Define explicit M5/UI done criteria in docs.
-  - Reconcile roadmap/status wording with current implemented UI surface.
-  - Add a short “remaining gaps” list.
+### v0.2 — High-Resolution World Manifest
 
-- [x] **T2 — Enforce manifest constraints as real JSON Schema in MCP tool surface** *(PR: this branch / pending number)*
-  - Convert current `x-ah-constraints` metadata into validated schema assertions where possible.
-  - Add/extend tests for accepted + rejected payloads.
+- [x] **Phase 1 — Draft `schema_v2.yaml`** *(completed in 6fd446c)*
+  - Create `manifests/schema_v2.yaml` based on the new extended reference schema.
+  - Include new types: `Entity`, `Actor`, `DataClass`, `TrustZone`, `SideEffectSurface`, `TransitionPolicy`, `ConfirmationClass`, `ObservabilitySpec`.
+  - Validate syntax and semantic structure.
 
-- [x] **T3 — Harden approval/ASK runtime pathway** *(PR: fix/harden-approval-gateway)*
-  - Resolve remaining gaps keeping approval gate in “experimental”.
-  - Ensure deterministic state transitions and persistence/recovery behavior are covered by tests.
-  - 2026-04-12 audit note: approval persistence/recovery primitives are present (`ApprovalStore`, gateway recovery path); remaining work is to close any edge-case/runtime parity gaps before promoting maturity.
-  - 2026-04-15 note: paused for user-directed browser extension MVP demo implementation (see `browser-extension-demo/`).
+- [x] **Phase 2 — Schema migration tool** *(completed in 6fd446c)*
+  - Implement `ahc migrate v1 -> v2`.
+  - Ensure all existing v1 manifests migrate cleanly with conservative defaults.
 
-- [x] **T4 — Implement ProgramRegistry persistence interface** *(branch: claude/plan-next-priorities-pGbM8)*
-  - Implemented `store()` and `load()` backed by `ProgramStore` (filesystem JSON) in `interfaces.py`.
-  - 12 tests in `tests/program_layer/test_program_registry.py` (round-trip, durability, error handling, multi-entry).
+- [x] **Phase 3 — Update `workspace_v2.yaml`** *(completed in 6fd446c)*
+  - Rewrite the AgentDojo workspace manifest using the v2 schema.
+  - Ensure it provides more precise taint containment decisions.
 
-- [x] **T5 — Implement CostProfileStore percentile aggregation** *(branch: claude/plan-next-priorities-pGbM8)*
-  - Implemented linear-interpolation `percentile()` in `economic/cost_profile_store.py`.
-  - 26 tests in `tests/economic/test_cost_profile_store.py` (empty, single, bounds, interpolation, scoping, large dataset).
-
-- [x] **T6 — Transparent Capabilities Profile / Dynamic MCP Registry**
-  - See [`TRANSPARENT_UI.md`](TRANSPARENT_UI.md) for the complete feature spec, phase
-    checklist, and "how to resume" instructions.
-  - **Phase 1 DONE** — Profile Catalog + Session Assignment API (37 tests passing).
-  - **Phase 2 DONE** — Manifest Editor UI: `GET /ui/api/tools`, `GET /ui/api/profiles/{id}/rendered-surface`, full profile editor tab (tool checklist, constraints, live preview, diff, save/clone). 47 tests passing. *(branch: claude/plan-next-priorities-pGbM8)*
-  - **Phase 3 DONE** — Dynamic Workflow→Profile Linking: `LinkingPolicyEngine`, `manifests/linking-policy.yaml`, engine wired into `SessionWorldResolver.resolve()`, `GET/POST /ui/api/linking-policy`, `POST /ui/api/linking-policy/test`, Linking tab in Web UI. 37 tests passing. *(branch: feature/transparent-ui-ph3)*
-  - **Phase 4 DONE** — Runtime Trigger-Based Profile Switching: `SessionTaintTracker`, comparison operators in `LinkingPolicyEngine`, `resolve_manifest_for_call()` on `MCPGatewayState`, `EVENT_TYPE_PROFILE_SWITCHED` + `make_profile_switched()`, REST API (`/ui/api/sessions/{id}/taint`, `/restore-profile`). 41 tests passing. *(branch: feature/transparent-ui-ph4)*
-  - **All phases complete.** Feature fully implemented.
+- [-] **Phase 4 — Compiler integration** *(PR: pending)*
+  - Wire v2 schema into the M2 compiler.
+  - Update `ahc build` to parse and output artifacts based on the new types (e.g., data-class taint propagation table).

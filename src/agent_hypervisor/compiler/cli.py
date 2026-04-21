@@ -320,6 +320,47 @@ def cmd_demo():
     )
 
 
+@cli.command("build")
+@click.argument("manifest_file", type=click.Path(exists=True))
+@click.option("--output", "-o", default=None, help="Output directory for compiled artifacts.")
+def cmd_build(manifest_file: str, output: str | None):
+    """Compile a World Manifest into runtime artifacts.
+    
+    Reads MANIFEST_FILE and generates JSON state machines for the runtime enforcer.
+    """
+    import yaml
+    from .loader_v2 import load_typed, ManifestV2ValidationError
+    from .emitter import emit
+    from .manifest import load_manifest
+    
+    path = Path(manifest_file)
+    out_dir = Path(output) if output else path.parent / f"{path.stem}_compiled"
+    
+    # Read version to branch
+    with path.open() as fh:
+        raw = yaml.safe_load(fh)
+        
+    try:
+        if raw.get("version") == "2.0":
+            manifest = load_typed(path)
+            # convert back to dict for emitter or update emitter
+            # Actually, emitter expects dict currently.
+            # We can pass raw to emitter if we update emitter.
+            # For now, let's just pass raw.
+            emit(raw, out_dir)
+        else:
+            manifest = load_manifest(path)
+            # manifest is an object for v1, but emitter expects a dict!
+            # Wait, emitter.py: def emit(manifest: dict, output_dir: Path)
+            from .schema import manifest_to_dict
+            emit(manifest_to_dict(manifest), out_dir)
+            
+        click.echo(_col(f"✓ Compiled artifacts written to {out_dir}", _GREEN))
+    except Exception as exc:
+        click.echo(_col(f"Build failed: {exc}", _RED), err=True)
+        raise SystemExit(1)
+
+
 @cli.command("migrate")
 @click.argument("manifest_file", type=click.Path(exists=True))
 @click.option("--output", "-o", default=None, help="Output path for the v2 manifest YAML.")
@@ -1576,3 +1617,12 @@ def cmd_op_status(worlds_dir: str, store_dir: str, scenarios_dir: str,
     click.echo()
     click.echo(f"  scenarios:      {len(scenario_summaries)}")
     click.echo()
+
+
+def main():
+    """Entry point for the awc / ahc CLI."""
+    cli()
+
+
+if __name__ == "__main__":
+    main()

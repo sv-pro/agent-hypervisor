@@ -1,0 +1,299 @@
+{
+  "actions": {
+    "add_calendar_event_participants": {
+      "input_schema": {
+        "event_id": {
+          "required": true,
+          "type": "str"
+        },
+        "participants": {
+          "required": true,
+          "type": "list"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    },
+    "append_to_file": {
+      "input_schema": {
+        "content": {
+          "required": true,
+          "type": "str"
+        },
+        "file_id": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "cancel_calendar_event": {
+      "input_schema": {
+        "event_id": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "create_calendar_event_personal": {
+      "input_schema": {
+        "end_time": {
+          "required": true,
+          "type": "str"
+        },
+        "start_time": {
+          "required": true,
+          "type": "str"
+        },
+        "title": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "create_calendar_event_with_participants": {
+      "input_schema": {
+        "end_time": {
+          "required": true,
+          "type": "str"
+        },
+        "participants": {
+          "required": true,
+          "type": "list"
+        },
+        "start_time": {
+          "required": true,
+          "type": "str"
+        },
+        "title": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    },
+    "create_file": {
+      "input_schema": {
+        "filename": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "delete_email": {
+      "input_schema": {
+        "email_id": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "delete_file": {
+      "input_schema": {
+        "file_id": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "get_current_day": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "get_day_calendar_events": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "get_file_by_id": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "list_files": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "read_emails_drafts": {
+      "input_schema": null,
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "read_emails_received": {
+      "input_schema": null,
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "read_emails_sent": {
+      "input_schema": null,
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "read_emails_unread": {
+      "input_schema": null,
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "reschedule_calendar_event": {
+      "input_schema": {
+        "event_id": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_write"
+      ]
+    },
+    "search_calendar_events": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "search_contacts_by_email": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "search_contacts_by_name": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "search_emails": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "search_files": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "search_files_by_filename": {
+      "input_schema": {},
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": true,
+      "side_effects": [
+        "internal_read"
+      ]
+    },
+    "send_email": {
+      "input_schema": {
+        "body": {
+          "required": true,
+          "type": "str"
+        },
+        "recipients": {
+          "required": true,
+          "type": "list"
+        },
+        "subject": {
+          "required": true,
+          "type": "str"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    },
+    "share_file": {
+      "input_schema": {
+        "file_id": {
+          "required": true,
+          "type": "str"
+        },
+        "recipients": {
+          "required": true,
+          "type": "list"
+        }
+      },
+      "output_trust": "SEMI_TRUSTED",
+      "reversible": false,
+      "side_effects": [
+        "external_write"
+      ]
+    }
+  }
+}

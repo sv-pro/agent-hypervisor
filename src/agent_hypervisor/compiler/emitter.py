@@ -23,7 +23,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from compiler.taint_compiler import compile_from_manifest
+from .taint_compiler import compile_from_manifest
 
 
 def emit(manifest: dict, output_dir: Path) -> dict[str, Path]:
@@ -68,20 +68,27 @@ def _build_policy_table(manifest: dict) -> dict:
     Contains: tool whitelist, forbidden patterns (from legacy field if present),
     per-tool budget limits, and global budget limits.
     """
-    actions = manifest.get("actions", [])
+    if manifest.get("version") == "2.0":
+        actions = list(manifest.get("actions", {}).keys())
+        irreversible_tools = [
+            name for name, meta in manifest.get("actions", {}).items()
+            if not meta.get("reversible", True)
+        ]
+    else:
+        actions = [a["name"] for a in manifest.get("actions", [])]
+        irreversible_tools = [
+            a["name"] for a in manifest.get("actions", []) if not a.get("reversible", True)
+        ]
+        
+    allowed_tools = sorted(actions)
+    irreversible_tools = sorted(irreversible_tools)
+    
     budgets = manifest.get("budgets", {})
-
-    allowed_tools = sorted(a["name"] for a in actions)
 
     # Per-tool call limits from budgets.custom
     tool_limits: dict[str, int] = {}
     for entry in budgets.get("custom", []):
         tool_limits[entry["tool"]] = entry["max_calls"]
-
-    # Irreversible tools — runtime uses this for quick reversibility check
-    irreversible_tools = sorted(
-        a["name"] for a in actions if not a.get("reversible", True)
-    )
 
     return {
         "allowed_tools": allowed_tools,
@@ -133,17 +140,26 @@ def _build_taint_rules(manifest: dict) -> dict:
     """
     rules = manifest.get("taint_rules", [])
     compiled = []
-    for rule in rules:
-        compiled.append({
-            "id": rule["id"],
-            "description": rule.get("description", ""),
-            "source_taint": rule["source_taint"],
-            "propagation": [
-                {"operation": p["operation"], "spreads_to": p["spreads_to"]}
-                for p in rule.get("propagation", [])
-            ],
-            "sanitization_gate": rule.get("sanitization_gate"),
-        })
+    
+    if manifest.get("version") == "2.0":
+        for rule in rules:
+            compiled.append({
+                "source_taint": rule["source_taint"],
+                "operation": rule["operation"],
+                "result": rule["result"],
+            })
+    else:
+        for rule in rules:
+            compiled.append({
+                "id": rule["id"],
+                "description": rule.get("description", ""),
+                "source_taint": rule["source_taint"],
+                "propagation": [
+                    {"operation": p["operation"], "spreads_to": p["spreads_to"]}
+                    for p in rule.get("propagation", [])
+                ],
+                "sanitization_gate": rule.get("sanitization_gate"),
+            })
     return {"rules": compiled}
 
 
@@ -154,16 +170,35 @@ def _build_escalation_table(manifest: dict) -> dict:
     Each entry maps a trigger pattern to a decision. The runtime evaluates
     these in order; the first matching trigger wins.
     """
-    conditions = manifest.get("escalation_conditions", [])
     compiled = []
-    for cond in conditions:
-        compiled.append({
-            "id": cond["id"],
-            "description": cond.get("description", ""),
-            "trigger": cond["trigger"],
-            "decision": cond["decision"],
-            "notify": cond.get("notify", []),
-        })
+    if manifest.get("version") == "2.0":
+        rules = manifest.get("escalation_rules", {})
+        for name, rule in rules.items():
+            # v2 format: { condition: "tainted", reason: "...", rule_id: "..." }
+            # Wait, trigger is expected to be a dict by policy_eval.py!
+            # If condition is "tainted", the trigger should be {"taint": True, "action_name": name}
+            # policy_eval.py uses: _matches_escalation(trigger, tool, taint, trust_level)
+            trigger: dict[str, Any] = {"action_name": name}
+            if rule.get("condition") == "tainted":
+                trigger["taint"] = True
+                
+            compiled.append({
+                "id": rule.get("rule_id", name),
+                "description": rule.get("reason", ""),
+                "trigger": trigger,
+                "decision": "deny", # default decision if not provided, or extract from rule if present. In v2 workspace it just blocks.
+                "notify": rule.get("notify", []),
+            })
+    else:
+        conditions = manifest.get("escalation_conditions", [])
+        for cond in conditions:
+            compiled.append({
+                "id": cond["id"],
+                "description": cond.get("description", ""),
+                "trigger": cond["trigger"],
+                "decision": cond["decision"],
+                "notify": cond.get("notify", []),
+            })
     return {"conditions": compiled}
 
 
@@ -185,16 +220,28 @@ def _build_action_schemas(manifest: dict) -> dict:
 
     Keyed by action name for O(1) runtime lookup.
     """
-    actions = manifest.get("actions", [])
     result: dict[str, Any] = {}
-    for action in actions:
-        name = action["name"]
-        result[name] = {
-            "reversible": action["reversible"],
-            "side_effects": sorted(action.get("side_effects", [])),
-            "output_trust": action.get("output_trust", "SEMI_TRUSTED"),
-            "input_schema": action.get("input_schema"),
-        }
+    
+    if manifest.get("version") == "2.0":
+        actions = manifest.get("actions", {})
+        schemas = manifest.get("schemas", {})
+        for name, meta in actions.items():
+            result[name] = {
+                "reversible": meta.get("reversible", True),
+                "side_effects": sorted(meta.get("side_effects", [])),
+                "output_trust": meta.get("output_trust", "SEMI_TRUSTED"),
+                "input_schema": schemas.get(name),
+            }
+    else:
+        actions_list = manifest.get("actions", [])
+        for action in actions_list:
+            name = action["name"]
+            result[name] = {
+                "reversible": action.get("reversible", True),
+                "side_effects": sorted(action.get("side_effects", [])),
+                "output_trust": action.get("output_trust", "SEMI_TRUSTED"),
+                "input_schema": action.get("input_schema"),
+            }
     return {"actions": result}
 
 
@@ -205,16 +252,28 @@ def _build_manifest_meta(manifest: dict) -> dict:
     Includes manifest name/version and a content hash of the full manifest
     so that any change to the source produces a different artifact set.
     """
-    meta = manifest.get("manifest", {})
+    if manifest.get("version") == "2.0":
+        meta_name = manifest.get("name", "")
+        meta_version = manifest.get("version", "2.0")
+        meta_desc = manifest.get("description", "")
+        meta_author = ""
+    else:
+        meta = manifest.get("manifest", {})
+        meta_name = meta.get("name", "")
+        meta_version = meta.get("version", "")
+        meta_desc = meta.get("description", "")
+        meta_author = meta.get("author", "")
+        
     # Deterministic hash of the manifest content
     content_hash = hashlib.sha256(
         json.dumps(manifest, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
     return {
-        "name": meta.get("name", ""),
-        "version": meta.get("version", ""),
-        "description": meta.get("description", ""),
-        "author": meta.get("author", ""),
+        "name": meta_name,
+        "version": meta_version,
+        "description": meta_desc,
+        "author": meta_author,
         "content_hash": content_hash,
     }
+

@@ -1,0 +1,47 @@
+{
+  "conflicts": [],
+  "containment_rules": {
+    "SEMI_TRUSTED": {
+      "execution_input": "human_approval",
+      "memory_entry": "schema_validation",
+      "output": "schema_validation"
+    },
+    "TRUSTED": {
+      "external_write": "require_human"
+    },
+    "UNTRUSTED": {
+      "execution_input": "BLOCK",
+      "internal_write": "soft_confirm",
+      "memory_entry": "BLOCK",
+      "output": "BLOCK"
+    }
+  },
+  "sanitization_index": {
+    "clean": {
+      "log_entry": true,
+      "requires": "auto"
+    },
+    "credentials": {
+      "log_entry": true,
+      "requires": "require_human"
+    },
+    "internal": {
+      "log_entry": true,
+      "requires": "soft_confirm"
+    },
+    "pii": {
+      "log_entry": true,
+      "requires": "hard_confirm"
+    },
+    "tainted": {
+      "log_entry": true,
+      "requires": "hard_confirm"
+    }
+  },
+  "taint_order": [
+    "UNTRUSTED",
+    "SEMI_TRUSTED",
+    "TRUSTED"
+  ],
+  "transition_table": {}
+}

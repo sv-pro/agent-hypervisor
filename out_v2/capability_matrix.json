@@ -1,0 +1,34 @@
+{
+  "by_side_effect": {
+    "approve_irreversible": [
+      "TRUSTED"
+    ],
+    "external_boundary": [
+      "TRUSTED"
+    ],
+    "internal_write": [
+      "SEMI_TRUSTED",
+      "TRUSTED"
+    ],
+    "read_only": [
+      "SEMI_TRUSTED",
+      "TRUSTED",
+      "UNTRUSTED"
+    ]
+  },
+  "by_trust_level": {
+    "SEMI_TRUSTED": [
+      "internal_write",
+      "read_only"
+    ],
+    "TRUSTED": [
+      "approve_irreversible",
+      "external_boundary",
+      "internal_write",
+      "read_only"
+    ],
+    "UNTRUSTED": [
+      "read_only"
+    ]
+  }
+}
