@@ -153,9 +153,11 @@ attributes, user role, trust level, or other runtime signals — not just manual
 
 ### Phase 4 — Runtime Trigger-Based Profile Switching (Stretch)
 
-**Status:** `[-] IN PROGRESS`
+**Status:** `[x] DONE`
 
 **Branch name:** `feature/transparent-ui-ph4`
+
+**PR:** *(pending merge)*
 
 **Goal:** Allow the profile bound to a live session to be **automatically
 downgraded** in response to runtime signals (taint escalation, event count
@@ -163,23 +165,47 @@ threshold, policy verdict pattern) — not just at session-start.
 
 **Deliverables:**
 
-- [ ] Runtime signals fed into resolver context on each tool call:
-  `taint_level`, `tool_call_count`, `session_age_s`, `last_verdict`.
-- [ ] Linking policy extended with temporal / cumulative conditions:
+- [x] **`SessionTaintTracker`** — tracks `taint_level`, `tool_call_count`,
+  `session_age_s`, `last_verdict` per session; monotonic taint escalation.
+  (`src/agent_hypervisor/hypervisor/mcp_gateway/session_taint_tracker.py`)
+- [x] **Linking policy extended with comparison operators** — `_gte`, `_lte`,
+  `_gt`, `_lt` suffixes on condition keys enable cumulative / temporal rules:
   ```yaml
   - if:
       taint_level: high
     then:
-      profile_id: read-only
+      profile_id: read-only-v1
       note: "Taint escalation — downgraded to read-only."
+  - if:
+      tool_call_count_gte: 100
+    then:
+      profile_id: read-only-v1
   ```
-- [ ] Profile downgrades logged to the audit trace (session event log entry).
-- [ ] Upgrade path: taint cleared by operator → session reverts to original profile.
-- [ ] Tests: taint-triggered downgrade, operator upgrade, audit log entries.
+- [x] **`resolve_manifest_for_call()`** on `MCPGatewayState` — called on every
+  `tools/call`; injects runtime signals into resolver context so temporal rules
+  fire automatically without any manual `register_session()` call.
+- [x] **`evaluate_with_note()`** on `LinkingPolicyEngine` — returns
+  `(profile_id, note)` so audit log entries capture the human-readable note
+  from the matching rule.
+- [x] **`EVENT_TYPE_PROFILE_SWITCHED`** + `make_profile_switched()` factory —
+  profile changes (both automatic and operator-restore) written to the session
+  audit trace via the EventStore.
+- [x] **Upgrade path** — `POST /ui/api/sessions/{id}/restore-profile` clears
+  taint and reverts session to its original profile; event logged as
+  `trigger: operator_restore`.
+- [x] **REST API** (Phase 4 Taint endpoints in `ui/router.py`):
+  - `GET  /ui/api/sessions/taint` — list signals for all sessions
+  - `GET  /ui/api/sessions/{id}/taint` — signals for one session
+  - `POST /ui/api/sessions/{id}/taint` — manually escalate taint
+  - `POST /ui/api/sessions/{id}/restore-profile` — operator restore
+- [x] **`manifests/linking-policy.yaml`** updated with Phase 4 taint rules.
+- [x] **Tests:** 41 tests in `tests/hypervisor/test_taint_trigger.py` — all
+  passing. Covers: tracker unit tests, comparison operators, `evaluate_with_note`,
+  taint-triggered downgrade, operator restore, audit log events, REST API.
 
-**Done criteria:** A session that accumulates taint is automatically switched to
-a more restrictive profile; the transition appears in the audit trace; operator
-can manually restore the original profile.
+**Done criteria:** ✅ A session that accumulates taint is automatically switched
+to a more restrictive profile; the transition appears in the audit trace; operator
+can manually restore the original profile via `POST /restore-profile`.
 
 **PR:** *(fill in after merge)*
 

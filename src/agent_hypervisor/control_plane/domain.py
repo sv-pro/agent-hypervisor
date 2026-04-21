@@ -220,6 +220,7 @@ EVENT_TYPE_APPROVAL_REQUESTED = "approval_requested"
 EVENT_TYPE_APPROVAL_RESOLVED = "approval_resolved"
 EVENT_TYPE_OVERLAY_ATTACHED = "overlay_attached"
 EVENT_TYPE_OVERLAY_DETACHED = "overlay_detached"
+EVENT_TYPE_PROFILE_SWITCHED = "profile_switched"  # Phase 4: taint-triggered profile change
 
 
 # ---------------------------------------------------------------------------

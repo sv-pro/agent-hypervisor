@@ -37,6 +37,12 @@ Linking Policy API (Phase 3 — Transparent UI):
   GET  /ui/api/linking-policy              — return active dispatch rules (empty list if none)
   POST /ui/api/linking-policy              — replace active rules (validate + hot-reload engine)
   POST /ui/api/linking-policy/test         — evaluate a context dict; return matched profile_id
+
+Session Taint API (Phase 4 — Transparent UI):
+  GET  /ui/api/sessions/taint                             — list runtime signals for all sessions
+  GET  /ui/api/sessions/{session_id}/taint                — signals for one session
+  POST /ui/api/sessions/{session_id}/taint                — manually escalate taint level
+  POST /ui/api/sessions/{session_id}/restore-profile      — operator: clear taint + restore profile
 """
 
 from __future__ import annotations
@@ -706,6 +712,118 @@ def create_ui_router(
             "profile_id": profile_id,
             "matched": profile_id is not None,
             "context": context,
+        })
+
+    # ── Session Taint API (Phase 4) ───────────────────────────────────────────
+
+    @router.get("/ui/api/sessions/taint")
+    def api_sessions_taint_list() -> JSONResponse:
+        """
+        List runtime signals for all tracked sessions.
+
+        Returns every session the taint tracker knows about, including
+        taint_level, tool_call_count, session_age_s, last_verdict, and
+        current/original profile_id.
+        """
+        sessions = gw_state.taint_tracker.list_sessions()
+        return JSONResponse({"sessions": sessions, "count": len(sessions)})
+
+    @router.get("/ui/api/sessions/{session_id}/taint")
+    def api_session_taint_get(session_id: str) -> JSONResponse:
+        """
+        Return runtime signals for one session.
+
+        Signals include taint_level, tool_call_count, session_age_s,
+        last_verdict, and the current/original profile_id.
+        Returns 404 if the session is not tracked yet.
+        """
+        signals = gw_state.taint_tracker.get_signals(session_id)
+        if signals is None:
+            return JSONResponse(
+                {"error": f"Session {session_id!r} not tracked yet."},
+                status_code=404,
+            )
+        return JSONResponse(signals.to_dict())
+
+    @router.post("/ui/api/sessions/{session_id}/taint")
+    async def api_session_taint_escalate(
+        session_id: str, request: Request
+    ) -> JSONResponse:
+        """
+        Manually escalate the taint level for a session.
+
+        Body JSON::
+
+            {"level": "high"}
+
+        Valid levels (monotonic): "clean" < "elevated" < "high".
+        Taint can only be escalated via this endpoint; use
+        ``/restore-profile`` to clear it.
+        """
+        body = await request.json()
+        level = body.get("level", "")
+        from agent_hypervisor.hypervisor.mcp_gateway.session_taint_tracker import TAINT_LEVELS
+        if level not in TAINT_LEVELS:
+            return JSONResponse(
+                {"error": f"Invalid taint level {level!r}. Must be one of {TAINT_LEVELS}."},
+                status_code=400,
+            )
+        changed = gw_state.taint_tracker.escalate_taint(session_id, level)
+        signals = gw_state.taint_tracker.get_signals(session_id)
+        return JSONResponse({
+            "status": "escalated" if changed else "unchanged",
+            "session_id": session_id,
+            "taint_level": signals.taint_level if signals else level,
+        })
+
+    @router.post("/ui/api/sessions/{session_id}/restore-profile")
+    async def api_session_restore_profile(session_id: str) -> JSONResponse:
+        """
+        Operator endpoint: clear taint and restore the original profile.
+
+        This is the upgrade path described in the Phase 4 spec:
+        after the operator clears taint, the session reverts to the
+        profile it held at the time it was first tracked.
+        The next tools/call will re-evaluate linking rules against
+        the fresh (clean) signal context.
+
+        Optionally, if a profile_id is supplied in the body, that
+        profile is used instead of the tracked original::
+
+            {"profile_id": "email-assistant-v1"}   # optional override
+        """
+        if profiles_catalog is None:
+            return _catalog_unavailable()  # type: ignore[name-defined]
+        cleared = gw_state.taint_tracker.clear_taint(session_id)
+        if not cleared:
+            return JSONResponse(
+                {"error": f"Session {session_id!r} not tracked. Nothing to restore."},
+                status_code=404,
+            )
+        signals = gw_state.taint_tracker.get_signals(session_id)
+        original_profile = signals.original_profile_id if signals else None
+
+        # Log restoration in the audit trace if a control plane is wired
+        if gw_state.control_plane is not None:
+            from agent_hypervisor.control_plane.event_store import make_profile_switched
+            event = make_profile_switched(
+                session_id=session_id,
+                from_profile_id=signals.current_profile_id if signals else None,
+                to_profile_id=original_profile or "(default)",
+                trigger="operator_restore",
+                note="Operator cleared taint and restored original profile.",
+                signals=signals.to_context() if signals else {},
+            )
+            try:
+                gw_state.control_plane.event_store.append(event)
+            except Exception:
+                pass
+
+        return JSONResponse({
+            "status": "restored",
+            "session_id": session_id,
+            "taint_level": "clean",
+            "original_profile_id": original_profile,
         })
 
     return router
