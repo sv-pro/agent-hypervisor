@@ -20,6 +20,7 @@ Data API (all GET, JSON):
   /ui/api/decisions                        — all approvals (pending + history)
   /ui/api/traces                           — sessions with their event logs
   /ui/api/provenance                       — provenance policy rule list
+  /ui/api/provenance/graph                 — execution graph (sessions × tool-call chains)
   /ui/api/simulate                         — dry-run a tool call against the manifest (POST)
   /ui/api/benchmarks                       — benchmark report files
 
@@ -208,6 +209,65 @@ def create_ui_router(
         except Exception as exc:
             return JSONResponse({"rules": [], "error": str(exc), "source": str(policy_path), "count": 0})
         return JSONResponse({"rules": rules, "source": str(policy_path), "count": len(rules)})
+
+    @router.get("/ui/api/provenance/graph")
+    def api_provenance_graph() -> JSONResponse:
+        """
+        Execution provenance graph — sessions with their tool call chains.
+
+        Returns each session as a list of nodes (tool calls, approvals) connected
+        by sequential edges.  Suitable for rendering as a directed flow graph.
+
+        Node types: tool_call | approval_requested | approval_resolved
+        Verdict values: allow | deny | ask | pending | None
+        """
+        if cp_state is None:
+            return JSONResponse({"sessions": [], "total_sessions": 0, "total_nodes": 0})
+
+        _GRAPH_TYPES = {
+            "tool_call",
+            "approval_requested",
+            "approval_resolved",
+        }
+
+        sessions_out = []
+        total_nodes = 0
+
+        for session in cp_state.session_store.list():
+            events = cp_state.event_store.get_session_events(session.session_id, limit=200)
+            graph_events = [e for e in events if e.type in _GRAPH_TYPES]
+
+            nodes = []
+            for e in graph_events:
+                payload = e.payload or {}
+                label = payload.get("tool") or payload.get("action") or e.type
+                nodes.append({
+                    "node_id": e.event_id,
+                    "node_type": e.type,
+                    "label": label,
+                    "verdict": e.decision,
+                    "rule_hit": e.rule_hit,
+                    "timestamp": e.timestamp,
+                    "payload": payload,
+                })
+
+            edges = [
+                {"from_node": nodes[i]["node_id"], "to_node": nodes[i + 1]["node_id"], "relation": "next"}
+                for i in range(len(nodes) - 1)
+            ]
+
+            sessions_out.append({
+                "session_id": session.session_id,
+                "nodes": nodes,
+                "edges": edges,
+            })
+            total_nodes += len(nodes)
+
+        return JSONResponse({
+            "sessions": sessions_out,
+            "total_sessions": len(sessions_out),
+            "total_nodes": total_nodes,
+        })
 
     @router.get("/ui/api/benchmarks")
     def api_benchmarks() -> JSONResponse:

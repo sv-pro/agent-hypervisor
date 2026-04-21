@@ -211,6 +211,49 @@ can manually restore the original profile via `POST /restore-profile`.
 
 ---
 
+### Phase 5 — Provenance Graph Explorer + Benchmark Run Trigger
+
+**Status:** `[x] DONE`
+
+**Branch name:** `claude/plan-next-priorities-Eband`
+
+**Goal:** Complete the two remaining Web UI items: a visual execution graph explorer
+in the Provenance tab, and a one-click benchmark run trigger in the Benchmarks tab.
+
+**Deliverables:**
+
+- [x] **`GET /ui/api/provenance/graph`** — new endpoint in `ui/router.py`.
+  Reads all sessions from the control-plane event store and returns each session's
+  tool-call / approval chain as `{sessions: [{session_id, nodes, edges}], ...}`.
+  Node fields: `node_id`, `node_type`, `label`, `verdict`, `rule_hit`, `timestamp`, `payload`.
+
+- [x] **Graph explorer view** in Provenance tab (`ui/static/app.js`):
+  - Third view-mode button "Graph explorer" alongside "Flow view" and "Table view".
+  - Renders each session as a horizontal node chain (`tool_call → approval → …`).
+  - Nodes colour-coded by verdict (green=allow, red=deny, orange=ask/pending).
+  - Click a node to expand its payload detail inline.
+  - Empty state when no sessions have executed tool calls yet.
+
+- [x] **Graph CSS** (`ui/static/style.css`): `.graph-explorer`, `.graph-session`,
+  `.graph-chain`, `.graph-node`, `.graph-edge-arrow`, `.graph-node-{allow,deny,ask,default}`
+  — consistent with existing dashboard dark-mode palette.
+
+- [x] **Benchmark run trigger** — `POST /ui/api/benchmarks/run` +
+  `GET /ui/api/benchmarks/run/{run_id}/status` in `ui/router.py`, with matching
+  frontend button, dropdown (all/attack/safe/ambiguous), live-polling status box,
+  and auto-refresh of the reports list on completion. (Implemented in earlier phase;
+  confirmed operational.)
+
+- [x] **`pyproject.toml`** — added `click` to `[project.dependencies]`; was imported
+  by `compiler/cli.py` but missing from the declared dependency set (caused 24 test
+  collection errors in isolated environments).
+
+**Done criteria:** ✅ Provenance tab shows a "Graph explorer" button; selecting it
+renders session execution chains colour-coded by verdict; clicking a node reveals its
+payload. Benchmark tab "Run" button triggers a scenario run and polls live output.
+
+---
+
 ## Key Files to Read Before Starting Any Phase
 
 ```
