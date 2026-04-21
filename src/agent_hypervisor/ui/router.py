@@ -47,6 +47,11 @@ Session Taint API (Phase 4 — Transparent UI):
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -63,8 +68,13 @@ from agent_hypervisor.hypervisor.mcp_gateway.profiles_catalog import (
 from agent_hypervisor.hypervisor.mcp_gateway.linking_policy import LinkingPolicyEngine
 
 _STATIC = Path(__file__).parent / "static"
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent
 # Reports live in _research/ at the repo root.
-_BENCHMARK_DIR = Path(__file__).parent.parent.parent.parent / "_research" / "benchmarks" / "reports"
+_BENCHMARK_DIR = _REPO_ROOT / "_research" / "benchmarks" / "reports"
+_SCENARIOS_RUNNER = _REPO_ROOT / "_research" / "benchmarks" / "run_scenarios.py"
+
+# In-memory store for benchmark run state {run_id: dict}
+_benchmark_runs: dict[str, dict] = {}
 
 
 def create_ui_router(
@@ -210,6 +220,88 @@ def create_ui_router(
                 except Exception:
                     pass
         return JSONResponse({"reports": reports, "count": len(reports)})
+
+    @router.post("/ui/api/benchmarks/run")
+    async def api_benchmarks_run(request: Request) -> JSONResponse:
+        """
+        Trigger a benchmark scenario run.
+
+        Body JSON (all fields optional)::
+
+            {"class": "all"}   # "all" | "attack" | "safe" | "ambiguous"
+
+        Returns a run_id you can poll via GET /ui/api/benchmarks/run/{run_id}/status.
+        """
+        body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+        scenario_class = body.get("class", "all") if isinstance(body, dict) else "all"
+        if scenario_class not in ("all", "attack", "safe", "ambiguous"):
+            return JSONResponse({"error": f"Invalid class {scenario_class!r}"}, status_code=400)
+
+        if not _SCENARIOS_RUNNER.exists():
+            return JSONResponse(
+                {"error": "Scenario runner not found. Expected: _research/benchmarks/run_scenarios.py"},
+                status_code=503,
+            )
+
+        run_id = str(uuid.uuid4())[:8]
+        _benchmark_runs[run_id] = {
+            "run_id": run_id,
+            "status": "running",
+            "class": scenario_class,
+            "started_at": time.time(),
+            "output": "",
+            "exit_code": None,
+        }
+
+        def _run() -> None:
+            env = {
+                **__import__("os").environ,
+                "PYTHONPATH": str(_REPO_ROOT / "src" / "agent_hypervisor"),
+            }
+            cmd = [sys.executable, str(_SCENARIOS_RUNNER), "--class", scenario_class]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env=env,
+                    cwd=str(_REPO_ROOT),
+                )
+                _benchmark_runs[run_id]["output"] = (proc.stdout + proc.stderr).strip()
+                _benchmark_runs[run_id]["exit_code"] = proc.returncode
+                _benchmark_runs[run_id]["status"] = "done"
+            except subprocess.TimeoutExpired:
+                _benchmark_runs[run_id]["status"] = "timeout"
+                _benchmark_runs[run_id]["output"] = "Run timed out after 120 seconds."
+            except Exception as exc:
+                _benchmark_runs[run_id]["status"] = "error"
+                _benchmark_runs[run_id]["output"] = str(exc)
+            _benchmark_runs[run_id]["elapsed_s"] = round(time.time() - _benchmark_runs[run_id]["started_at"], 2)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return JSONResponse({"run_id": run_id, "status": "running", "class": scenario_class}, status_code=202)
+
+    @router.get("/ui/api/benchmarks/run/{run_id}/status")
+    def api_benchmarks_run_status(run_id: str) -> JSONResponse:
+        """
+        Poll a benchmark run started via POST /ui/api/benchmarks/run.
+
+        Returns {status, output, exit_code, elapsed_s}.
+        Status is "running" while in progress, "done", "error", or "timeout".
+        """
+        run = _benchmark_runs.get(run_id)
+        if run is None:
+            return JSONResponse({"error": f"Run {run_id!r} not found."}, status_code=404)
+        elapsed = run.get("elapsed_s") or round(time.time() - run["started_at"], 2)
+        return JSONResponse({
+            "run_id": run_id,
+            "status": run["status"],
+            "class": run["class"],
+            "output": run["output"],
+            "exit_code": run["exit_code"],
+            "elapsed_s": elapsed,
+        })
 
     # ── Manifest Editor API ───────────────────────────────────────────────────
 
