@@ -87,6 +87,7 @@ from .protocol import (
     make_result,
 )
 from .session_world_resolver import SessionWorldResolver
+from .session_taint_tracker import SessionTaintTracker
 from .tool_call_enforcer import InvocationProvenance, ToolCallEnforcer
 from .tool_surface_renderer import ToolSurfaceRenderer
 
@@ -104,6 +105,7 @@ class MCPGatewayState:
       - ToolSurfaceRenderer   — tools/list rendering
       - ToolCallEnforcer      — tools/call enforcement
       - ToolRegistry          — adapter dispatch
+      - SessionTaintTracker   — per-session runtime signals (Phase 4)
 
     ToolSurfaceRenderer and ToolCallEnforcer are rebuilt on manifest reload.
     """
@@ -121,6 +123,7 @@ class MCPGatewayState:
         self.control_plane = control_plane
 
         self.resolver = SessionWorldResolver(self.manifest_path)
+        self.taint_tracker = SessionTaintTracker()  # Phase 4
         self._rebuild_components()
 
         self.started_at = datetime.now(timezone.utc).isoformat()
@@ -164,6 +167,70 @@ class MCPGatewayState:
         if ok:
             self._rebuild_components()
         return ok
+
+    def resolve_manifest_for_call(
+        self,
+        session_id: str,
+        verdict: str = "allow",
+        profiles_catalog: Optional[Any] = None,
+    ):
+        """
+        Resolve the active WorldManifest for a tools/call, injecting runtime
+        signals into the context so Phase 4 taint-trigger rules can fire.
+
+        Workflow:
+          1. Record the tool call in the taint tracker (increments counter).
+          2. Build a context dict from the current signals.
+          3. Call resolver.resolve() with that context — the linking-policy
+             engine may pick a different profile than the explicit registration.
+          4. If the resolved profile changed, note the switch in the tracker
+             and write a ``profile_switched`` audit event.
+
+        Args:
+            session_id:       Current session identifier.
+            verdict:          Latest enforcement verdict (passed after enforce()).
+            profiles_catalog: ProfilesCatalog for looking up resolved profile id.
+
+        Returns:
+            The resolved WorldManifest.
+        """
+        # Step 1: record this tool call
+        self.taint_tracker.record_tool_call(session_id, verdict=verdict)
+
+        # Step 2: inject signals into context for rule evaluation
+        signals = self.taint_tracker.get_context(session_id)
+
+        # Step 3: resolve — merges explicit registration + rule engine + default
+        manifest = self.resolver.resolve(session_id=session_id, context=signals)
+
+        # Step 4: detect and record profile switches
+        if profiles_catalog is not None and self.resolver._engine is not None:
+            result = self.resolver._engine.evaluate_with_note(signals)
+            if result is not None:
+                new_profile_id, note = result
+                tracker_signals = self.taint_tracker.get_signals(session_id)
+                current_profile = (
+                    tracker_signals.current_profile_id if tracker_signals else None
+                )
+                if new_profile_id != current_profile:
+                    # Profile changed — record it
+                    self.taint_tracker.note_profile_switch(session_id, new_profile_id)
+                    if self.control_plane is not None:
+                        from agent_hypervisor.control_plane.event_store import make_profile_switched
+                        event = make_profile_switched(
+                            session_id=session_id,
+                            from_profile_id=current_profile,
+                            to_profile_id=new_profile_id,
+                            trigger=str(signals.get("taint_level", "rule")),
+                            note=note,
+                            signals=signals,
+                        )
+                        try:
+                            self.control_plane.event_store.append(event)
+                        except Exception:
+                            pass  # never crash the enforcement path
+
+        return manifest
 
 
 # ---------------------------------------------------------------------------
@@ -668,9 +735,18 @@ def _handle_tools_call(
             "'arguments' must be an object",
         )
 
-    # Resolve per-session manifest and enforce
-    manifest = state.resolver.resolve(session_id=provenance.session_id)
+    # Resolve per-session manifest with runtime signal injection (Phase 4).
+    # resolve_manifest_for_call() records the call in the taint tracker,
+    # injects signals into the resolver context, and logs profile-switch events
+    # when a taint-triggered rule fires.
+    manifest = state.resolve_manifest_for_call(
+        session_id=provenance.session_id,
+        verdict="allow",  # optimistic — updated below if enforcement denies
+    )
     decision = state.enforcer_for(manifest).enforce(tool_name, arguments, provenance)
+    # Update the tracker with the actual verdict so next-call rules see it.
+    if provenance.session_id and decision.verdict != "allow":
+        state.taint_tracker.record_tool_call(provenance.session_id, verdict=decision.verdict)
 
     if decision.asked:
         # Policy engine returned "ask": route to approval workflow if control plane

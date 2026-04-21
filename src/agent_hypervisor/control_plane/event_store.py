@@ -24,6 +24,7 @@ from .domain import (
     EVENT_TYPE_MODE_CHANGED,
     EVENT_TYPE_OVERLAY_ATTACHED,
     EVENT_TYPE_OVERLAY_DETACHED,
+    EVENT_TYPE_PROFILE_SWITCHED,
     EVENT_TYPE_SESSION_CLOSED,
     EVENT_TYPE_SESSION_CREATED,
     EVENT_TYPE_TOOL_CALL,
@@ -224,6 +225,42 @@ def make_overlay_detached(session_id: str, overlay_id: str) -> SessionEvent:
         timestamp=_now(),
         type=EVENT_TYPE_OVERLAY_DETACHED,
         payload={"overlay_id": overlay_id},
+    )
+
+
+def make_profile_switched(
+    session_id: str,
+    from_profile_id: Optional[str],
+    to_profile_id: str,
+    trigger: str,
+    note: Optional[str] = None,
+    signals: Optional[dict] = None,
+) -> SessionEvent:
+    """
+    Record an automatic taint-triggered profile switch in the audit log.
+
+    Args:
+        session_id:     The session whose profile was switched.
+        from_profile_id: The profile before the switch (None if default).
+        to_profile_id:  The new profile after the switch.
+        trigger:        Short string identifying the trigger
+                        (e.g. "taint_level:high", "tool_call_count_gte:50").
+        note:           Optional human-readable note from the linking-policy
+                        rule's ``then.note`` field.
+        signals:        Snapshot of the session signals that caused the switch.
+    """
+    return SessionEvent(
+        event_id=_new_id(),
+        session_id=session_id,
+        timestamp=_now(),
+        type=EVENT_TYPE_PROFILE_SWITCHED,
+        payload={
+            "from_profile_id": from_profile_id,
+            "to_profile_id": to_profile_id,
+            "trigger": trigger,
+            "note": note,
+            "signals": signals or {},
+        },
     )
 
 

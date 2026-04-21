@@ -5,12 +5,39 @@
 # (specifies the profile_id to activate).
 # The `default` entry has no `if` block and matches when no earlier rule fires.
 #
-# Context keys are set by the caller of SessionWorldResolver.resolve(context=...).
-# Common keys: workflow_tag, trust_level, user_role.
+# Context keys are set by the caller of SessionWorldResolver.resolve(context=...)
+# or automatically injected by SessionTaintTracker on each tools/call (Phase 4):
+#
+#   Automatic (Phase 4 runtime signals):
+#     taint_level         "clean" | "elevated" | "high"
+#     tool_call_count     cumulative invocations this session
+#     session_age_s       seconds since first tool call
+#     last_verdict        "allow" | "deny" | "ask"
+#
+#   Manual (caller-supplied at session start):
+#     workflow_tag, trust_level, user_role, etc.
+#
+# Comparison-operator suffixes (Phase 4):
+#   <key>_gte  ≥ value     <key>_lte  ≤ value
+#   <key>_gt   > value     <key>_lt   < value
 #
 # Profile IDs must match entries in manifests/profiles-index.yaml.
 
 rules:
+  # ── Phase 4: taint-triggered automatic downgrades ───────────────────
+  - if:
+      taint_level: high
+    then:
+      profile_id: read-only-v1
+      note: "Taint escalation — session automatically downgraded to read-only."
+
+  - if:
+      tool_call_count_gte: 100
+    then:
+      profile_id: read-only-v1
+      note: "High call volume — throttled to read-only after 100 invocations."
+
+  # ── Phase 3: workflow-tag rules ──────────────────────────────────────
   - if:
       workflow_tag: finance
       trust_level: low

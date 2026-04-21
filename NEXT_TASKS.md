@@ -34,11 +34,11 @@
   - Implemented linear-interpolation `percentile()` in `economic/cost_profile_store.py`.
   - 26 tests in `tests/economic/test_cost_profile_store.py` (empty, single, bounds, interpolation, scoping, large dataset).
 
-- [-] **T6 — Transparent Capabilities Profile / Dynamic MCP Registry**
+- [x] **T6 — Transparent Capabilities Profile / Dynamic MCP Registry**
   - See [`TRANSPARENT_UI.md`](TRANSPARENT_UI.md) for the complete feature spec, phase
     checklist, and "how to resume" instructions.
   - **Phase 1 DONE** — Profile Catalog + Session Assignment API (37 tests passing).
   - **Phase 2 DONE** — Manifest Editor UI: `GET /ui/api/tools`, `GET /ui/api/profiles/{id}/rendered-surface`, full profile editor tab (tool checklist, constraints, live preview, diff, save/clone). 47 tests passing. *(branch: claude/plan-next-priorities-pGbM8)*
   - **Phase 3 DONE** — Dynamic Workflow→Profile Linking: `LinkingPolicyEngine`, `manifests/linking-policy.yaml`, engine wired into `SessionWorldResolver.resolve()`, `GET/POST /ui/api/linking-policy`, `POST /ui/api/linking-policy/test`, Linking tab in Web UI. 37 tests passing. *(branch: feature/transparent-ui-ph3)*
-  - **Current phase:** Phase 4 — Runtime Trigger-Based Profile Switching (Stretch).
-  - Any agent can read `TRANSPARENT_UI.md` to know exactly what to build next.
+  - **Phase 4 DONE** — Runtime Trigger-Based Profile Switching: `SessionTaintTracker`, comparison operators in `LinkingPolicyEngine`, `resolve_manifest_for_call()` on `MCPGatewayState`, `EVENT_TYPE_PROFILE_SWITCHED` + `make_profile_switched()`, REST API (`/ui/api/sessions/{id}/taint`, `/restore-profile`). 41 tests passing. *(branch: feature/transparent-ui-ph4)*
+  - **All phases complete.** Feature fully implemented.
