@@ -1,0 +1,46 @@
+{
+  "allowed_tools": [
+    "add_calendar_event_participants",
+    "append_to_file",
+    "cancel_calendar_event",
+    "create_calendar_event_personal",
+    "create_calendar_event_with_participants",
+    "create_file",
+    "delete_email",
+    "delete_file",
+    "get_current_day",
+    "get_day_calendar_events",
+    "get_file_by_id",
+    "list_files",
+    "read_emails_drafts",
+    "read_emails_received",
+    "read_emails_sent",
+    "read_emails_unread",
+    "reschedule_calendar_event",
+    "search_calendar_events",
+    "search_contacts_by_email",
+    "search_contacts_by_name",
+    "search_emails",
+    "search_files",
+    "search_files_by_filename",
+    "send_email",
+    "share_file"
+  ],
+  "budgets": {
+    "max_actions_per_session": null,
+    "max_external_reads": null,
+    "max_external_writes": null,
+    "max_session_duration_s": null,
+    "max_tokens": null,
+    "tool_limits": {}
+  },
+  "forbidden_patterns": [],
+  "irreversible_tools": [
+    "add_calendar_event_participants",
+    "create_calendar_event_with_participants",
+    "delete_email",
+    "delete_file",
+    "send_email",
+    "share_file"
+  ]
+}

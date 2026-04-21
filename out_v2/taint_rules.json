@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "operation": "summarize",
+      "result": "preserve",
+      "source_taint": "tainted"
+    },
+    {
+      "operation": "quote",
+      "result": "preserve",
+      "source_taint": "tainted"
+    },
+    {
+      "operation": "extract",
+      "result": "preserve",
+      "source_taint": "tainted"
+    },
+    {
+      "operation": "derive",
+      "result": "preserve",
+      "source_taint": "tainted"
+    }
+  ]
+}

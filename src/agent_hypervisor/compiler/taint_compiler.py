@@ -138,8 +138,67 @@ def compile_taint_rules(taint_rules: list[dict]) -> dict:
 
 def compile_from_manifest(manifest: dict) -> dict:
     """Compile taint rules directly from a parsed manifest dict."""
+    if manifest.get("version") == "2.0":
+        return compile_v2_taint_machine(manifest)
     rules = manifest.get("taint_rules", [])
     return compile_taint_rules(rules)
+
+
+def compile_v2_taint_machine(manifest: dict) -> dict:
+    """Compile v2 data_classes and transition_policies into the runtime state machine.
+    
+    Translates Zone->Zone transition policies into TrustLevel->SideEffect containment rules.
+    """
+    data_classes = manifest.get("data_classes", {})
+    transition_policies = manifest.get("transition_policies", [])
+    side_effect_surfaces = manifest.get("side_effect_surfaces", [])
+    actions = manifest.get("actions", {})
+    trust_zones = manifest.get("trust_zones", {})
+    
+    # 1. Build sanitization index from data classes
+    sanitization_index: dict[str, dict[str, Any]] = {}
+    for dc_name, dc_meta in data_classes.items():
+        label = dc_meta.get("taint_label", dc_name)
+        sanitization_index[label] = {
+            "requires": dc_meta.get("confirmation", "hard_confirm"),
+            "log_entry": True
+        }
+        
+    # 2. Build containment rules mapping trust_level -> side_effect -> gate
+    # Start with defaults
+    containment_rules = dict(_DEFAULT_CONTAINMENT)
+    for level in TAINT_ORDER:
+        containment_rules.setdefault(level, {})
+        
+    for policy in transition_policies:
+        from_zone = policy.get("from_zone")
+        to_zone = policy.get("to_zone")
+        
+        # Get trust level of the from_zone
+        from_trust = trust_zones.get(from_zone, {}).get("default_trust")
+        if not from_trust:
+            continue
+            
+        gate = "BLOCK" if not policy.get("allowed", False) else policy.get("confirmation", "auto")
+        if not policy.get("allowed", False) and policy.get("confirmation") in ["require_human", "hard_confirm"]:
+            # If allowed: false but has a confirmation, we treat the confirmation as the gate.
+            gate = policy.get("confirmation")
+            
+        # Find all actions that touch the to_zone
+        for surface in side_effect_surfaces:
+            if to_zone in surface.get("touches", []):
+                action_name = surface.get("action")
+                action_meta = actions.get(action_name, {})
+                for se in action_meta.get("side_effects", []):
+                    containment_rules[from_trust][se] = gate
+
+    return {
+        "taint_order": TAINT_ORDER,
+        "transition_table": {},  # v2 uses transition_policies instead of transition_table
+        "containment_rules": containment_rules,
+        "sanitization_index": sanitization_index,
+        "conflicts": [],
+    }
 
 
 def emit_state_machine(manifest: dict, output_dir: Path) -> Path:

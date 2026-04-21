@@ -124,7 +124,7 @@ Stage 3 is a mini-product, not a universal framework. The scope is bounded: one 
 | M2 Core Engine | Complete |
 | M3 Tool Boundary | Complete |
 | M4 Proof | Complete — 0% ASR, 80% utility (clean + under attack) on 560-pair workspace benchmark |
-| M5 Beta Product | In progress — Docker stack present; Web UI feature-complete (profiles, decisions, traces, provenance, benchmarks, manifest editor, simulator, diff/coverage, linking policy, runtime profile switching — T1–T6 all complete). Remaining: provenance graph explorer (visual graph), benchmark run trigger, quick-start tutorial (#33) |
+| M5 Beta Product | Complete — Docker stack present; Web UI fully featured (profiles, decisions, traces, provenance graph, benchmarks, editor, simulator). Quick-start tutorial available. |
 
 ---
 
@@ -155,8 +155,8 @@ A developer unfamiliar with the project can run `docker compose up`, complete th
 - [x] Diff/coverage views — Profiles tab (diff, rendered surface, clone)
 - [x] Session linking policy — Linking tab (workflow→profile dispatch rules + live test)
 - [x] Runtime trigger-based profile switching — SessionTaintTracker, comparison operators, profile switch audit events (T6 Phase 4)
-- [ ] Provenance graph explorer tab (Provenance tab shows rule table; visual graph pending)
-- [ ] Benchmark run trigger (Benchmarks tab renders reports; run trigger pending)
+- [x] Provenance graph explorer tab (Provenance tab shows rule table; visual graph using Mermaid)
+- [x] Benchmark run trigger (Benchmarks tab renders reports; run trigger implemented)
 
 ---
 
