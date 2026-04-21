@@ -140,7 +140,7 @@ The hypervisor enforces **what is in the World Manifest at design time**. It doe
 - **Manifest completeness** — a manifest that allows `*` for all tools provides no boundary. Coverage is the designer's responsibility.
 - **LLM-generated content safety** — the hypervisor controls what tools the agent can call and with what provenance, not what the LLM says.
 
-The full threat model is in [`docs/architecture/threat-model.md`](architecture/threat-model.md) (if present) or in the [whitepaper](../WHITEPAPER.md).
+The full threat model is in [`docs/architecture.md`](architecture.md) or the [whitepaper](../WHITEPAPER.md).
 
 ---
 
@@ -153,3 +153,4 @@ The full threat model is in [`docs/architecture/threat-model.md`](architecture/t
 | Understand the architecture | `WHITEPAPER.md` — four-layer model, AI Aikido, World Manifest Compiler |
 | See the ZombieAgent scenario | `scenarios/zombie-agent/` |
 | Explore the program layer | `docs/program_layer.md` |
+| Run the poisoned tool output demo | `python examples/poisoned_tool_output_demo.py` |
