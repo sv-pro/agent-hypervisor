@@ -39,5 +39,6 @@
     checklist, and "how to resume" instructions.
   - **Phase 1 DONE** — Profile Catalog + Session Assignment API (37 tests passing).
   - **Phase 2 DONE** — Manifest Editor UI: `GET /ui/api/tools`, `GET /ui/api/profiles/{id}/rendered-surface`, full profile editor tab (tool checklist, constraints, live preview, diff, save/clone). 47 tests passing. *(branch: claude/plan-next-priorities-pGbM8)*
-  - **Current phase:** Phase 3 — Dynamic Workflow→Profile Linking (Rule Engine).
+  - **Phase 3 DONE** — Dynamic Workflow→Profile Linking: `LinkingPolicyEngine`, `manifests/linking-policy.yaml`, engine wired into `SessionWorldResolver.resolve()`, `GET/POST /ui/api/linking-policy`, `POST /ui/api/linking-policy/test`, Linking tab in Web UI. 37 tests passing. *(branch: feature/transparent-ui-ph3)*
+  - **Current phase:** Phase 4 — Runtime Trigger-Based Profile Switching (Stretch).
   - Any agent can read `TRANSPARENT_UI.md` to know exactly what to build next.

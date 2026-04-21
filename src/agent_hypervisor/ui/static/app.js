@@ -58,6 +58,7 @@ async function loadTab(tab) {
     if (tab === 'provenance') await loadProvenance();
     if (tab === 'simulator')  await loadSimulator();
     if (tab === 'benchmarks') await loadBenchmarks();
+    if (tab === 'linking')    await loadLinking();
     lastRefresh = Date.now();
     setRefreshLabel();
   } catch (err) {
@@ -1216,6 +1217,236 @@ function renderMdTable(rows) {
         `<tr>${row.map(c => `<td>${mdInline(c)}</td>`).join('')}</tr>`
       ).join('')}</tbody>
     </table>`;
+}
+
+// ── Linking Policy tab ────────────────────────────────────────────────────
+
+// In-memory copy of the rules being edited
+let linkingRules = [];
+// Draft rule being built in the "Add rule" form
+let linkingDraftConditions = []; // [{key, value}]
+
+async function loadLinking() {
+  const panel = document.getElementById('tab-linking');
+  try {
+    const data = await apiFetch('/ui/api/linking-policy');
+    linkingRules = data.rules || [];
+    renderLinkingPanel(panel);
+  } catch (err) {
+    panel.innerHTML = `<div class="error-box">Failed to load linking policy: ${esc(String(err))}</div>`;
+  }
+}
+
+function renderLinkingPanel(panel) {
+  panel.innerHTML = `
+    <div class="section">
+      <div class="section-header">
+        <h2>Workflow → Profile Linking Rules</h2>
+        <p class="section-desc">
+          Rules are evaluated top-to-bottom. The first matching rule selects the
+          profile for the session. The <code>default</code> entry matches when no
+          earlier rule fires.
+        </p>
+      </div>
+      ${renderLinkingRulesTable()}
+      <div class="linking-actions">
+        <button class="btn-primary" onclick="saveLinkingRules()">Save rules</button>
+        <span id="linking-save-status" class="save-status"></span>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Add rule</h3>
+      <div class="linking-add-form" id="linking-add-form">
+        <div class="form-row">
+          <label>Type</label>
+          <select id="linking-rule-type" onchange="renderLinkingAddForm()">
+            <option value="conditional">Conditional (if → then)</option>
+            <option value="default">Default (catch-all)</option>
+          </select>
+        </div>
+        <div id="linking-conditions-block">
+          <div class="form-row conditions-header">
+            <label>Conditions (all must match)</label>
+            <button class="btn-sm" onclick="addLinkingCondition()">+ condition</button>
+          </div>
+          <div id="linking-conditions-list"></div>
+        </div>
+        <div class="form-row">
+          <label>Profile ID</label>
+          <input type="text" id="linking-profile-id" placeholder="e.g. read-only-v1" style="width:240px">
+        </div>
+        <button class="btn-secondary" onclick="commitLinkingRule()">Add rule</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Test linking policy</h3>
+      <div class="form-row">
+        <label>Context JSON</label>
+        <textarea id="linking-test-ctx" rows="4" style="width:400px;font-family:monospace"
+          placeholder='{"workflow_tag": "finance", "trust_level": "low"}'></textarea>
+      </div>
+      <button class="btn-secondary" onclick="testLinkingPolicy()">Evaluate</button>
+      <div id="linking-test-result" style="margin-top:8px"></div>
+    </div>`;
+
+  renderLinkingConditionsList();
+}
+
+function renderLinkingRulesTable() {
+  if (linkingRules.length === 0) {
+    return emptyState('No rules', 'Add a rule below or save an empty list to clear the policy.');
+  }
+  const rows = linkingRules.map((rule, idx) => {
+    const isDefault = 'default' in rule;
+    const conditions = isDefault
+      ? '<em>default</em>'
+      : Object.entries(rule.if || {})
+          .map(([k, v]) => `<code>${esc(k)} = ${esc(String(v))}</code>`)
+          .join(', ') || '(no conditions)';
+    const profileId = isDefault
+      ? esc(rule.default?.profile_id || '—')
+      : esc(rule.then?.profile_id || '—');
+    const moveUp = idx > 0
+      ? `<button class="btn-sm" onclick="moveLinkingRule(${idx}, -1)">↑</button>`
+      : '';
+    const moveDown = idx < linkingRules.length - 1
+      ? `<button class="btn-sm" onclick="moveLinkingRule(${idx}, 1)">↓</button>`
+      : '';
+    return `<tr>
+      <td class="mono small">${conditions}</td>
+      <td><span class="badge">${profileId}</span></td>
+      <td>${moveUp}${moveDown}<button class="btn-sm danger" onclick="deleteLinkingRule(${idx})">✕</button></td>
+    </tr>`;
+  }).join('');
+  return `
+    <table class="data-table">
+      <thead><tr><th>If (conditions)</th><th>Then (profile)</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderLinkingAddForm() {
+  const type = document.getElementById('linking-rule-type')?.value;
+  const block = document.getElementById('linking-conditions-block');
+  if (block) block.style.display = type === 'default' ? 'none' : '';
+}
+
+function renderLinkingConditionsList() {
+  const container = document.getElementById('linking-conditions-list');
+  if (!container) return;
+  if (linkingDraftConditions.length === 0) {
+    container.innerHTML = '<div class="empty-hint">No conditions — add one above.</div>';
+    return;
+  }
+  container.innerHTML = linkingDraftConditions.map((c, i) => `
+    <div class="form-row condition-row">
+      <input type="text" value="${esc(c.key)}" placeholder="key"
+        oninput="linkingDraftConditions[${i}].key=this.value" style="width:140px">
+      <span>=</span>
+      <input type="text" value="${esc(c.value)}" placeholder="value"
+        oninput="linkingDraftConditions[${i}].value=this.value" style="width:140px">
+      <button class="btn-sm danger" onclick="removeLinkingCondition(${i})">✕</button>
+    </div>`).join('');
+}
+
+function addLinkingCondition() {
+  linkingDraftConditions.push({ key: '', value: '' });
+  renderLinkingConditionsList();
+}
+
+function removeLinkingCondition(idx) {
+  linkingDraftConditions.splice(idx, 1);
+  renderLinkingConditionsList();
+}
+
+function commitLinkingRule() {
+  const type = document.getElementById('linking-rule-type')?.value;
+  const profileId = document.getElementById('linking-profile-id')?.value?.trim();
+  if (!profileId) {
+    alert('Profile ID is required.');
+    return;
+  }
+  if (type === 'default') {
+    linkingRules.push({ default: { profile_id: profileId } });
+  } else {
+    const conditions = {};
+    for (const c of linkingDraftConditions) {
+      if (c.key.trim()) conditions[c.key.trim()] = c.value;
+    }
+    linkingRules.push({ if: conditions, then: { profile_id: profileId } });
+  }
+  linkingDraftConditions = [];
+  const panel = document.getElementById('tab-linking');
+  renderLinkingPanel(panel);
+}
+
+function deleteLinkingRule(idx) {
+  linkingRules.splice(idx, 1);
+  const panel = document.getElementById('tab-linking');
+  renderLinkingPanel(panel);
+}
+
+function moveLinkingRule(idx, direction) {
+  const target = idx + direction;
+  if (target < 0 || target >= linkingRules.length) return;
+  [linkingRules[idx], linkingRules[target]] = [linkingRules[target], linkingRules[idx]];
+  const panel = document.getElementById('tab-linking');
+  renderLinkingPanel(panel);
+}
+
+async function saveLinkingRules() {
+  const statusEl = document.getElementById('linking-save-status');
+  if (statusEl) statusEl.textContent = 'Saving…';
+  try {
+    const resp = await fetch('/ui/api/linking-policy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: linkingRules }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (statusEl) statusEl.textContent = `Error: ${data.error || resp.statusText}`;
+      return;
+    }
+    if (statusEl) statusEl.textContent = `Saved (${data.count} rule${data.count !== 1 ? 's' : ''})`;
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `Error: ${err}`;
+  }
+}
+
+async function testLinkingPolicy() {
+  const ctxRaw = document.getElementById('linking-test-ctx')?.value || '{}';
+  const resultEl = document.getElementById('linking-test-result');
+  let context;
+  try {
+    context = JSON.parse(ctxRaw);
+  } catch {
+    if (resultEl) resultEl.innerHTML = '<span class="error-text">Invalid JSON in context field.</span>';
+    return;
+  }
+  try {
+    const resp = await fetch('/ui/api/linking-policy/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (resultEl) resultEl.innerHTML = `<span class="error-text">${esc(data.error || resp.statusText)}</span>`;
+      return;
+    }
+    if (resultEl) {
+      if (data.matched) {
+        resultEl.innerHTML = `<span class="badge success">Profile: ${esc(data.profile_id)}</span>`;
+      } else {
+        resultEl.innerHTML = `<span class="badge muted">No match — ${esc(data.reason || 'default manifest will be used')}</span>`;
+      }
+    }
+  } catch (err) {
+    if (resultEl) resultEl.innerHTML = `<span class="error-text">${esc(String(err))}</span>`;
+  }
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────

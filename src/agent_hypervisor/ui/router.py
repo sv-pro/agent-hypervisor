@@ -32,6 +32,11 @@ Profile Catalog API (Phase 1 — Transparent UI):
   POST /ui/api/sessions/{session_id}/profile           — assign a profile to a live session
   DELETE /ui/api/sessions/{session_id}/profile         — revert session to default profile
   GET  /ui/api/sessions                                — list active sessions + their bound profile
+
+Linking Policy API (Phase 3 — Transparent UI):
+  GET  /ui/api/linking-policy              — return active dispatch rules (empty list if none)
+  POST /ui/api/linking-policy              — replace active rules (validate + hot-reload engine)
+  POST /ui/api/linking-policy/test         — evaluate a context dict; return matched profile_id
 """
 
 from __future__ import annotations
@@ -49,6 +54,7 @@ from agent_hypervisor.hypervisor.mcp_gateway.profiles_catalog import (
     ProfileEntry,
     ProfilesCatalog,
 )
+from agent_hypervisor.hypervisor.mcp_gateway.linking_policy import LinkingPolicyEngine
 
 _STATIC = Path(__file__).parent / "static"
 # Reports live in _research/ at the repo root.
@@ -60,22 +66,36 @@ def create_ui_router(
     cp_state: Optional[Any] = None,
     policy_path: Optional[Path] = None,
     profiles_catalog: Optional["ProfilesCatalog"] = None,
+    linking_policy_path: Optional[Path] = None,
 ) -> APIRouter:
     """
     Build and return the FastAPI router for the Web UI.
 
     Args:
-        gw_state:         MCPGatewayState — provides manifest and session info.
-        cp_state:         Optional ControlPlaneState — approvals and event log.
-        policy_path:      Path to the provenance policy YAML.
-        profiles_catalog: Optional ProfilesCatalog. When provided, the
-                          /ui/api/profiles* and /ui/api/sessions* endpoints
-                          are active. Without it those endpoints return 503.
+        gw_state:             MCPGatewayState — provides manifest and session info.
+        cp_state:             Optional ControlPlaneState — approvals and event log.
+        policy_path:          Path to the provenance policy YAML.
+        profiles_catalog:     Optional ProfilesCatalog. When provided, the
+                              /ui/api/profiles* and /ui/api/sessions* endpoints
+                              are active. Without it those endpoints return 503.
+        linking_policy_path:  Path to the linking-policy YAML file used for
+                              GET/POST persistence. When provided the resolver
+                              is pre-loaded with rules from this file.
 
     Returns:
         APIRouter with /ui/* routes (no prefix set; caller includes directly).
     """
     router = APIRouter()
+
+    # Pre-load linking policy from disk if a path is configured
+    if linking_policy_path is not None and Path(linking_policy_path).exists():
+        try:
+            _lp_data = yaml.safe_load(Path(linking_policy_path).read_text(encoding="utf-8")) or {}
+            _engine = LinkingPolicyEngine.from_dict(_lp_data)
+            if profiles_catalog is not None:
+                gw_state.resolver.set_linking_policy(_engine, profiles_catalog)
+        except Exception:
+            pass  # Startup continues with no engine if the file is malformed
 
     # ── Static files ─────────────────────────────────────────────────────────
 
@@ -578,6 +598,114 @@ def create_ui_router(
                 default_manifest.workflow_id if default_manifest else None
             ),
             "session_count": len(registry),
+        })
+
+    # ── Linking Policy API ────────────────────────────────────────────────────
+
+    @router.get("/ui/api/linking-policy")
+    def api_linking_policy_get() -> JSONResponse:
+        """
+        Return the active workflow→profile dispatch rules.
+
+        Returns an empty list when no linking policy is configured.
+        """
+        rules = gw_state.resolver.linking_policy_rules
+        return JSONResponse({"rules": rules, "count": len(rules)})
+
+    @router.post("/ui/api/linking-policy")
+    async def api_linking_policy_post(request: Request) -> JSONResponse:
+        """
+        Replace the active linking-policy rules.
+
+        Body JSON::
+
+            {"rules": [{"if": {"workflow_tag": "finance"}, "then": {"profile_id": "read-only-v1"}}, ...]}
+
+        Validates that:
+        - ``rules`` is a list.
+        - Each rule has either ``if``+``then`` or ``default``.
+        - profile_ids referenced in rules exist in the catalog (when catalog is set).
+
+        On success, hot-reloads the engine and persists the new rules to
+        ``linking_policy_path`` (if configured).
+        """
+        if profiles_catalog is None:
+            return JSONResponse(
+                {"error": "Profiles catalog not configured; linking policy unavailable."},
+                status_code=503,
+            )
+        body = await request.json()
+        rules = body.get("rules")
+        if not isinstance(rules, list):
+            return JSONResponse(
+                {"error": "'rules' must be a list."},
+                status_code=400,
+            )
+        # Validate rule structure
+        for i, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                return JSONResponse(
+                    {"error": f"Rule at index {i} must be a dict."},
+                    status_code=400,
+                )
+            has_if_then = "if" in rule and "then" in rule
+            has_default = "default" in rule
+            if not has_if_then and not has_default:
+                return JSONResponse(
+                    {"error": f"Rule at index {i} must have 'if'+'then' or 'default'."},
+                    status_code=400,
+                )
+            # Check profile_id exists in catalog
+            profile_id = (
+                rule.get("then", {}).get("profile_id")
+                if has_if_then
+                else rule.get("default", {}).get("profile_id")
+            )
+            if profile_id and profiles_catalog.get(profile_id) is None:
+                return JSONResponse(
+                    {"error": f"Unknown profile_id {profile_id!r} in rule at index {i}."},
+                    status_code=400,
+                )
+        # Build and activate new engine
+        new_engine = LinkingPolicyEngine(rules)
+        gw_state.resolver.set_linking_policy(new_engine, profiles_catalog)
+        # Persist to disk if a path is configured
+        if linking_policy_path is not None:
+            try:
+                Path(linking_policy_path).write_text(
+                    yaml.dump({"rules": rules}, default_flow_style=False, sort_keys=False),
+                    encoding="utf-8",
+                )
+            except Exception as exc:
+                return JSONResponse(
+                    {"status": "active", "persisted": False, "error": str(exc), "count": len(rules)},
+                )
+        return JSONResponse({"status": "active", "persisted": linking_policy_path is not None, "count": len(rules)})
+
+    @router.post("/ui/api/linking-policy/test")
+    async def api_linking_policy_test(request: Request) -> JSONResponse:
+        """
+        Test the active linking-policy against a context dict.
+
+        Body JSON::
+
+            {"context": {"workflow_tag": "finance", "trust_level": "low"}}
+
+        Returns which profile_id would be selected, or null if no rule matches.
+        """
+        body = await request.json()
+        context = body.get("context", {})
+        if not isinstance(context, dict):
+            return JSONResponse({"error": "'context' must be a dict."}, status_code=400)
+        rules = gw_state.resolver.linking_policy_rules
+        if not rules:
+            return JSONResponse({"profile_id": None, "matched": False, "reason": "no linking policy configured"})
+        engine = LinkingPolicyEngine(rules)
+        profile_id = engine.evaluate(context)
+        return JSONResponse({
+            "profile_id": profile_id,
+            "matched": profile_id is not None,
+            "context": context,
         })
 
     return router
