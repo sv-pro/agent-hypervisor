@@ -108,7 +108,7 @@ Full results: `research/benchmarks/agentdojo/results.md`
 | Deliverable | Issue | What it enables |
 | --- | --- | --- |
 | Docker local stack | #31 | `docker compose up` starts a complete working demo |
-| Web UI | #32 | **Phase 1 delivered:** manifests/decisions/traces/provenance/benchmark-report ops tabs. **Remaining:** manifest editor/simulator, diff/coverage/tune, provenance graph explorer, benchmark run trigger |
+| Web UI | #32 | **Delivered:** profiles/decisions/traces/provenance/benchmark-report ops tabs; manifest editor with inline validation; simulation panel with decision table; diff/coverage views; session linking policy; runtime trigger-based profile switching (T6, all 4 phases). **Remaining:** provenance graph explorer (visual graph), benchmark run trigger |
 | Hello-world tutorial | #33 | A developer can wire up a new agent in under an hour |
 | Positioning and comparisons | #34 | Clear differentiation from guardrails, sandboxes, and policy engines |
 
@@ -124,7 +124,7 @@ Stage 3 is a mini-product, not a universal framework. The scope is bounded: one 
 | M2 Core Engine | Complete |
 | M3 Tool Boundary | Complete |
 | M4 Proof | Complete — 0% ASR, 80% utility (clean + under attack) on 560-pair workspace benchmark |
-| M5 Beta Product | In progress — Docker stack present, hello-world and positioning docs complete; Web UI ops tabs shipped (manifests/decisions/traces/provenance/benchmark reports), authoring/simulation features pending |
+| M5 Beta Product | In progress — Docker stack present; Web UI feature-complete (profiles, decisions, traces, provenance, benchmarks, manifest editor, simulator, diff/coverage, linking policy, runtime profile switching — T1–T6 all complete). Remaining: provenance graph explorer (visual graph), benchmark run trigger, quick-start tutorial (#33) |
 
 ---
 
@@ -150,11 +150,13 @@ A developer unfamiliar with the project can run `docker compose up`, complete th
 - [x] Approvals/decisions dashboard (pending, resolved, filterable status)
 - [x] Session timeline/inspection surface
 - [x] Policy/version/traces visibility for operators
-- [ ] Manifest editor with inline validation (`ahc validate`)
-- [ ] Simulation panel (`ahc simulate`) and decision table preview
-- [ ] Diff/coverage/tuning views (`ahc diff`, `ahc coverage`, `ahc tune`)
-- [ ] Provenance graph explorer tab (current UI shows provenance rule table; graph explorer pending)
-- [ ] Benchmark run trigger tab (current UI renders benchmark reports from `_research/benchmarks/reports/`)
+- [x] Manifest editor with inline validation — Editor tab (save, validate, hot-reload)
+- [x] Simulation panel and decision table preview — Simulator tab
+- [x] Diff/coverage views — Profiles tab (diff, rendered surface, clone)
+- [x] Session linking policy — Linking tab (workflow→profile dispatch rules + live test)
+- [x] Runtime trigger-based profile switching — SessionTaintTracker, comparison operators, profile switch audit events (T6 Phase 4)
+- [ ] Provenance graph explorer tab (Provenance tab shows rule table; visual graph pending)
+- [ ] Benchmark run trigger (Benchmarks tab renders reports; run trigger pending)
 
 ---
 

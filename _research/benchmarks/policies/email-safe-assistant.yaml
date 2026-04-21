@@ -1,0 +1,24 @@
+# email-safe-assistant — policy for the safe email assistant world
+# Covers: list_inbox, read_email, send_email
+# Default: deny (fail-closed)
+
+rules:
+  - id: allow-list-inbox
+    tool: list_inbox
+    verdict: allow
+
+  - id: allow-read-email
+    tool: read_email
+    verdict: allow
+
+  - id: deny-email-external-recipient
+    tool: send_email
+    argument: to
+    provenance: external_document
+    verdict: deny
+
+  - id: ask-email-user-recipient
+    tool: send_email
+    argument: to
+    provenance: user_declared
+    verdict: ask

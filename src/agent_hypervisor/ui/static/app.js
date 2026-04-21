@@ -1141,6 +1141,9 @@ async function runSimulation() {
 
 // ── Benchmarks tab ────────────────────────────────────────────────────────
 
+let _benchRunId = null;
+let _benchPollTimer = null;
+
 async function loadBenchmarks() {
   const data = await apiFetch('/ui/api/benchmarks');
   renderBenchmarks(data);
@@ -1148,19 +1151,124 @@ async function loadBenchmarks() {
 
 function renderBenchmarks(data) {
   const panel = document.getElementById('tab-benchmarks');
-  if (!data.reports || data.reports.length === 0) {
-    panel.innerHTML = emptyState(
-      'No benchmark reports',
-      'Run the benchmark suite to generate reports: python benchmarks/runner.py'
-    );
-    return;
-  }
-  panel.innerHTML = data.reports.map(r => `
-    <div class="report-card">
-      <div class="report-filename">${esc(r.filename)}</div>
-      ${mdToHtml(r.content)}
+
+  const toolbar = `
+    <div class="bench-toolbar">
+      <span class="section-title">Benchmark reports</span>
+      <div class="bench-run-controls">
+        <select id="bench-class-select" class="filter-select" style="width:auto;margin-right:6px;">
+          <option value="all">All scenarios</option>
+          <option value="attack">Attack only</option>
+          <option value="safe">Safe only</option>
+          <option value="ambiguous">Ambiguous only</option>
+        </select>
+        <button id="bench-run-btn" class="action-btn" onclick="triggerBenchmarkRun()">Run benchmark</button>
+      </div>
     </div>
-  `).join('');
+    <div id="bench-run-status" style="display:none;" class="bench-status-box"></div>
+  `;
+
+  const reports = (!data.reports || data.reports.length === 0)
+    ? `<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">No benchmark reports yet</div><div class="empty-sub">Click "Run benchmark" to evaluate all scenarios.</div></div>`
+    : data.reports.map(r => `
+        <div class="report-card">
+          <div class="report-filename">${esc(r.filename)}</div>
+          ${mdToHtml(r.content)}
+        </div>
+      `).join('');
+
+  panel.innerHTML = toolbar + reports;
+}
+
+async function triggerBenchmarkRun() {
+  const btn = document.getElementById('bench-run-btn');
+  const statusBox = document.getElementById('bench-run-status');
+  const scenarioClass = document.getElementById('bench-class-select')?.value || 'all';
+
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  statusBox.style.display = 'block';
+  statusBox.className = 'bench-status-box running';
+  statusBox.textContent = 'Starting benchmark run…';
+
+  try {
+    const res = await fetch('/ui/api/benchmarks/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ class: scenarioClass }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      statusBox.className = 'bench-status-box error';
+      statusBox.textContent = `Error: ${err.error || res.statusText}`;
+      btn.disabled = false;
+      btn.textContent = 'Run benchmark';
+      return;
+    }
+    const { run_id } = await res.json();
+    _benchRunId = run_id;
+    statusBox.textContent = `Run ${run_id} started — polling…`;
+    if (_benchPollTimer) clearInterval(_benchPollTimer);
+    _benchPollTimer = setInterval(() => pollBenchmarkRun(run_id), 1500);
+  } catch (e) {
+    statusBox.className = 'bench-status-box error';
+    statusBox.textContent = `Request failed: ${e.message}`;
+    btn.disabled = false;
+    btn.textContent = 'Run benchmark';
+  }
+}
+
+async function pollBenchmarkRun(run_id) {
+  const btn = document.getElementById('bench-run-btn');
+  const statusBox = document.getElementById('bench-run-status');
+  if (!btn || !statusBox) { clearInterval(_benchPollTimer); return; }
+
+  try {
+    const res = await fetch(`/ui/api/benchmarks/run/${run_id}/status`);
+    const data = await res.json();
+    const elapsed = data.elapsed_s != null ? ` (${data.elapsed_s}s)` : '';
+
+    if (data.status === 'running') {
+      statusBox.textContent = `Running${elapsed}…`;
+      return;
+    }
+
+    clearInterval(_benchPollTimer);
+    _benchPollTimer = null;
+
+    if (data.status === 'done' && data.exit_code === 0) {
+      statusBox.className = 'bench-status-box success';
+      statusBox.innerHTML = `<strong>✅ Done${elapsed}</strong><pre class="bench-output">${esc(data.output)}</pre>`;
+    } else {
+      statusBox.className = 'bench-status-box error';
+      statusBox.innerHTML = `<strong>⚠️ ${data.status}${elapsed}</strong><pre class="bench-output">${esc(data.output)}</pre>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Run benchmark';
+
+    // Reload reports list to show the new report
+    const reports = await apiFetch('/ui/api/benchmarks');
+    const reportsHtml = (!reports.reports || reports.reports.length === 0)
+      ? ''
+      : reports.reports.map(r => `
+          <div class="report-card">
+            <div class="report-filename">${esc(r.filename)}</div>
+            ${mdToHtml(r.content)}
+          </div>
+        `).join('');
+
+    // Replace everything after the status box
+    const panel = document.getElementById('tab-benchmarks');
+    const existing = panel.querySelectorAll('.report-card');
+    existing.forEach(el => el.remove());
+    const oldEmpty = panel.querySelector('.empty-state');
+    if (oldEmpty) oldEmpty.remove();
+    panel.insertAdjacentHTML('beforeend', reportsHtml || '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">No reports found</div></div>');
+
+  } catch (e) {
+    // Network error — keep polling
+  }
 }
 
 // Minimal markdown → HTML for benchmark reports (handles headers, tables, lists)

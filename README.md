@@ -28,6 +28,15 @@ Dangerous actions are not prohibited. They are absent.
 
 ---
 
+## Getting Started
+
+**5–10 minutes to first result:** [`docs/quickstart.md`](docs/quickstart.md)
+
+Start the gateway, open the Web UI, observe an attack blocked in real time, and
+change a manifest rule to see how it affects enforcement — no API keys required.
+
+---
+
 ## How to Read This Repository
 
 This repository contains both canonical documents and research notes accumulated
@@ -38,6 +47,7 @@ during development. Start here:
 | Document | What it is |
 |---|---|
 | This file | Entry point and navigation |
+| [`docs/quickstart.md`](docs/quickstart.md) | **Start here** — 5-10 min walkthrough: gateway → UI → attack → trace → manifest edit |
 | [`WHITEPAPER.md`](WHITEPAPER.md) | Full architecture: four-layer model, AI Aikido, World Manifest Compiler, Design-Time HITL |
 | [`GLOSSARY.md`](GLOSSARY.md) | Term definitions, derived from scenarios |
 | [`scenarios/zombie-agent/SCENARIO.md`](scenarios/zombie-agent/SCENARIO.md) | **Leading scenario document** — the ZombieAgent attack and how AH breaks it |

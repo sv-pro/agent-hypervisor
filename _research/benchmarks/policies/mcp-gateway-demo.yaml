@@ -1,0 +1,28 @@
+# mcp-gateway-demo — policy for the MCP gateway demo world
+# Covers: mcp_list_directory, mcp_read_file, mcp_write_file, mcp_run_code
+# Default: deny (fail-closed)
+
+rules:
+  - id: allow-mcp-list-dir
+    tool: mcp_list_directory
+    verdict: allow
+
+  - id: allow-mcp-read-file
+    tool: mcp_read_file
+    verdict: allow
+
+  - id: deny-mcp-write-derived
+    tool: mcp_write_file
+    argument: content
+    provenance: derived
+    verdict: deny
+
+  - id: deny-mcp-write-external
+    tool: mcp_write_file
+    argument: content
+    provenance: external_document
+    verdict: deny
+
+  - id: ask-mcp-run-code
+    tool: mcp_run_code
+    verdict: ask
