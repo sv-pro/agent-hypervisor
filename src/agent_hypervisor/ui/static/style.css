@@ -810,6 +810,77 @@ main {
   line-height: 1;
 }
 
+/* ── Provenance graph explorer ── */
+
+.graph-explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.graph-session {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.graph-session-label {
+  margin-bottom: 8px;
+}
+
+.graph-chain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.graph-edge-arrow {
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.graph-node {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 80px;
+  max-width: 180px;
+  transition: border-color 0.15s;
+}
+
+.graph-node:hover { border-color: var(--accent); }
+
+.graph-node-label {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-node-detail {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+.graph-node-default { background: var(--surface2); color: var(--text-dim); }
+.graph-node-allow   { background: var(--allow-bg); border-color: rgba(34,197,94,0.3); color: var(--allow); }
+.graph-node-deny    { background: var(--deny-bg);  border-color: rgba(239,68,68,0.3); color: var(--deny); }
+.graph-node-ask     { background: var(--ask-bg);   border-color: rgba(245,158,11,0.3); color: var(--ask); }
+
 /* ── Simulator tab ── */
 
 .sim-layout {

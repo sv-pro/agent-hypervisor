@@ -19,7 +19,7 @@ let selectedSessionId = null;
 let editorDirty = false;
 
 // Provenance tab state
-let provenanceViewMode = 'flow'; // 'flow' | 'table'
+let provenanceViewMode = 'flow'; // 'flow' | 'table' | 'graph'
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 
@@ -912,27 +912,28 @@ function fmtPayload(p) {
 // ── Provenance tab ────────────────────────────────────────────────────────
 
 async function loadProvenance() {
-  const data = await apiFetch('/ui/api/provenance');
-  renderProvenance(data);
+  if (provenanceViewMode === 'graph') {
+    const data = await apiFetch('/ui/api/provenance/graph');
+    renderProvenanceGraphExplorer(data);
+  } else {
+    const data = await apiFetch('/ui/api/provenance');
+    renderProvenance(data);
+  }
 }
 
 function renderProvenance(data) {
   const panel = document.getElementById('tab-provenance');
 
   if (!data.rules || data.rules.length === 0) {
-    panel.innerHTML = emptyState(
-      'No policy loaded',
-      'Policy rules appear here when a provenance firewall is configured.'
-    );
+    panel.innerHTML =
+      viewToggle() +
+      emptyState('No policy loaded', 'Policy rules appear here when a provenance firewall is configured.');
     return;
   }
 
   const denyCount  = data.rules.filter(r => r.verdict === 'deny').length;
   const askCount   = data.rules.filter(r => r.verdict === 'ask').length;
   const allowCount = data.rules.filter(r => r.verdict === 'allow').length;
-
-  const flowBtn  = provenanceViewMode === 'flow'  ? 'active' : '';
-  const tableBtn = provenanceViewMode === 'table' ? 'active' : '';
 
   panel.innerHTML = `
     <div class="stats-row">
@@ -948,10 +949,7 @@ function renderProvenance(data) {
       Source: <span class="mono small">${esc(data.source || '—')}</span>
     </div>
 
-    <div class="view-toggle" style="margin-bottom:16px">
-      <button class="filter-btn ${flowBtn}"  onclick="setProvenanceView('flow')">Flow view</button>
-      <button class="filter-btn ${tableBtn}" onclick="setProvenanceView('table')">Table view</button>
-    </div>
+    ${viewToggle()}
 
     ${provenanceViewMode === 'flow'
       ? renderProvenanceFlow(data.rules)
@@ -960,9 +958,94 @@ function renderProvenance(data) {
   `;
 }
 
+function viewToggle() {
+  const flowBtn  = provenanceViewMode === 'flow'  ? 'active' : '';
+  const tableBtn = provenanceViewMode === 'table' ? 'active' : '';
+  const graphBtn = provenanceViewMode === 'graph' ? 'active' : '';
+  return `
+    <div class="view-toggle" style="margin-bottom:16px">
+      <button class="filter-btn ${flowBtn}"  onclick="setProvenanceView('flow')">Flow view</button>
+      <button class="filter-btn ${tableBtn}" onclick="setProvenanceView('table')">Table view</button>
+      <button class="filter-btn ${graphBtn}" onclick="setProvenanceView('graph')">Graph explorer</button>
+    </div>`;
+}
+
 function setProvenanceView(mode) {
   provenanceViewMode = mode;
   loadProvenance();
+}
+
+function renderProvenanceGraphExplorer(data) {
+  const panel = document.getElementById('tab-provenance');
+
+  if (!data.sessions || data.sessions.length === 0) {
+    panel.innerHTML =
+      viewToggle() +
+      emptyState('No execution data', 'Run a tool call through the hypervisor to see the execution graph here.');
+    return;
+  }
+
+  const sessionBlocks = data.sessions.map(s => {
+    if (!s.nodes || s.nodes.length === 0) return '';
+
+    const nodeHtml = s.nodes.map((n, i) => {
+      const isLast = i === s.nodes.length - 1;
+      const verdictCls = graphNodeVerdictCls(n.verdict, n.node_type);
+      const label = esc(truncate(n.label || n.node_type, 22));
+      const verdict = n.verdict ? `<span class="tag ${verdictTagCls(n.verdict)}" style="font-size:10px">${esc(n.verdict)}</span>` : '';
+      const tooltip = buildTooltip(n);
+      return `
+        <div class="graph-node ${verdictCls}" title="${tooltip}" onclick="toggleGraphNodeDetail(this)">
+          <div class="graph-node-type muted" style="font-size:10px">${esc(n.node_type.replace('_', ' '))}</div>
+          <div class="graph-node-label mono">${label}</div>
+          ${verdict}
+          <div class="graph-node-detail" style="display:none">${esc(fmtPayload(n.payload || {}))}</div>
+        </div>
+        ${!isLast ? '<div class="graph-edge-arrow">→</div>' : ''}
+      `;
+    }).join('');
+
+    const sid = esc(s.session_id.slice(0, 12) + '…');
+    return `
+      <div class="graph-session">
+        <div class="graph-session-label muted small mono">${sid}</div>
+        <div class="graph-chain">${nodeHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="stats-row">
+      <div class="stat"><div class="stat-val">${data.total_sessions}</div><div class="stat-label">sessions</div></div>
+      <div class="stat"><div class="stat-val">${data.total_nodes}</div><div class="stat-label">nodes</div></div>
+    </div>
+    ${viewToggle()}
+    <div class="graph-explorer">${sessionBlocks}</div>
+  `;
+}
+
+function graphNodeVerdictCls(verdict, nodeType) {
+  if (nodeType === 'approval_requested') return 'graph-node-ask';
+  if (nodeType === 'approval_resolved') return 'graph-node-allow';
+  return { allow: 'graph-node-allow', allowed: 'graph-node-allow',
+           deny: 'graph-node-deny', denied: 'graph-node-deny',
+           ask: 'graph-node-ask', pending: 'graph-node-ask' }[verdict] || 'graph-node-default';
+}
+
+function buildTooltip(n) {
+  const parts = [`type: ${n.node_type}`, `time: ${fmtTime(n.timestamp)}`];
+  if (n.verdict) parts.push(`verdict: ${n.verdict}`);
+  if (n.rule_hit) parts.push(`rule: ${n.rule_hit}`);
+  return parts.join(' | ').replace(/"/g, '&quot;');
+}
+
+function toggleGraphNodeDetail(el) {
+  const detail = el.querySelector('.graph-node-detail');
+  if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+}
+
+function truncate(s, max) {
+  return s && s.length > max ? s.slice(0, max) + '…' : (s || '');
 }
 
 function renderProvenanceFlow(rules) {

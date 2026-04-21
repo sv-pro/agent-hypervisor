@@ -2,7 +2,7 @@
 
 > Deterministic virtualization of reality for AI agents.
 
-**Status:** Proof-of-concept research project. Not a product.  
+**Status:** Research proof-of-concept. Stage 3 (Beta Product). Not a product.  
 **Author:** Personal project — does not represent Radware's position.
 
 ---
@@ -37,64 +37,45 @@ change a manifest rule to see how it affects enforcement — no API keys require
 
 ---
 
-## How to Read This Repository
+## Proof Artifacts
 
-This repository contains both canonical documents and research notes accumulated
-during development. Start here:
+The articles in this series are backed by runnable code. Each claim maps to a
+specific executable artifact.
 
-### Canonical — read these
+| Article | Core claim | Executable proof |
+|---------|-----------|-----------------|
+| [1 — Every AI Defense Broke][art1] | Permission security fails by design | `python examples/poisoned_tool_output_demo.py` — baseline attack succeeds; hypervisor blocks it |
+| [2 — AI Aikido][art2] | Stochastic design-time → deterministic runtime | `awc run --scenario unsafe --compare` — shows raw surface vs. compiled boundary |
+| [3 — Design-Time HITL][art3] | O(n) runtime HITL doesn't scale; O(log n) design-time does | `python _research/benchmarks/replay.py --walkthrough` — Design→Compile→Deploy→Learn→Redesign cycle |
+| [4 — MCP and the Missing Layer][art4] | Tool virtualization breaks the attack chain | `docker compose up gateway` → `http://localhost:8090/ui` — live gateway with provenance firewall |
 
-| Document | What it is |
-|---|---|
-| This file | Entry point and navigation |
-| [`docs/quickstart.md`](docs/quickstart.md) | **Start here** — 5-10 min walkthrough: gateway → UI → attack → trace → manifest edit |
-| [`WHITEPAPER.md`](WHITEPAPER.md) | Full architecture: four-layer model, AI Aikido, World Manifest Compiler, Design-Time HITL |
-| [`GLOSSARY.md`](GLOSSARY.md) | Term definitions, derived from scenarios |
-| [`scenarios/zombie-agent/SCENARIO.md`](scenarios/zombie-agent/SCENARIO.md) | **Leading scenario document** — the ZombieAgent attack and how AH breaks it |
-| [`scenarios/zombie-agent/manifest.yaml`](scenarios/zombie-agent/manifest.yaml) | World Manifest for the ZombieAgent scenario |
+[art1]: _research/docs/pub/the-missing-layer/01-the-pattern/full-01-the-pattern.md
+[art2]: _research/docs/pub/the-missing-layer/02-ai-aikido/full-02-ai-aikido.md
+[art3]: _research/docs/pub/the-missing-layer/03-design-time-hitl/full-03-design-time-hitl.md
+[art4]: _research/docs/pub/the-missing-layer/04-mcp-missing-layer/full-04-mcp-missing-layer.md
 
-### Code — run these
+### Benchmark result
 
-| File | What it is |
-|---|---|
-| [`src/core/hypervisor.py`](src/core/hypervisor.py) | Core framework — manifest resolution, taint propagation, provenance tracking. Zero dependency on any scenario. |
-| [`scenarios/zombie-agent/src/demo.py`](scenarios/zombie-agent/src/demo.py) | ZombieAgent scenario runner. Depends on `src/core` only. |
+**AgentDojo workspace benchmark (560 task × attack pairs):**
 
-```bash
-# Run the demo (no dependencies beyond Python 3.10+)
-python scenarios/zombie-agent/src/demo.py
+| Metric | Value |
+|--------|-------|
+| Attack success rate (ASR) | **0.0%** — all attacks contained |
+| Utility (safe task completion) | **80.0%** — false-deny rate near zero |
+| Policy evaluation latency | ~0.5 ms per call |
 
-# With interactive ASK dialogs
-python scenarios/zombie-agent/src/demo.py --interactive
-```
-
-### Research notes — background reading
-
-The following folders contain working documents, explorations, and earlier
-iterations. They are not obsolete — they record the thinking that produced
-the canonical documents above. But they are not the starting point.
-
-| Folder | Contents |
-|---|---|
-| `architecture/` | Architecture explorations, component specs, earlier whitepaper drafts |
-| `components/` | Component-level specs: compiler, runtime, authoring DSL |
-| `concept/` | Conceptual foundations: perception model, semantic space, positioning |
-| `content/` | Draft content: Crutch/Workaround/Bridge framework posts |
-| `positioning/` | Competitive positioning, security comparison |
-| `research/` | Research notes and benchmarking plans |
-| `examples/` | Additional usage examples |
-| `experiments/` | Experimental implementations |
-| `lab/` | Scratch space |
+Run it yourself: `python _research/benchmarks/run_scenarios.py`  
+Verify determinism: `python _research/benchmarks/replay.py`
 
 ---
 
-## The Architecture in One Diagram
+## Architecture
 
 ```
 [ Raw Reality ]
       ↓
 ┌─────────────────────────────────────┐
-│  Layer 0: Execution Physics         │  Infrastructure isolation
+│  Layer 0: Execution Physics         │  Container / network isolation
 │  Layer 1: Base Ontology             │  What actions exist (design-time)
 │  Layer 2: Dynamic Ontology          │  What the agent can propose now
 │  Layer 3: Execution Governance      │  Allow / Deny / Ask / Simulate
@@ -103,7 +84,7 @@ the canonical documents above. But they are not the starting point.
 [ Agent — virtualized world ]
 ```
 
-**Manifest Resolution Law** — the runtime decision rule:
+**Manifest Resolution Law:**
 
 ```
 proposed action
@@ -117,9 +98,43 @@ proposed action
 
 The world is **closed-for-execution, open-for-extension.**
 
+Full architecture: [`WHITEPAPER.md`](WHITEPAPER.md)
+
 ---
 
-## The Key Distinction from CaMeL and Similar Work
+## Key Documents
+
+| Document | What it is |
+|---|---|
+| [`docs/quickstart.md`](docs/quickstart.md) | **Start here** — 5-10 min walkthrough |
+| [`WHITEPAPER.md`](WHITEPAPER.md) | Full architecture: four-layer model, AI Aikido, World Manifest Compiler, Design-Time HITL |
+| [`docs/architecture.md`](docs/architecture.md) | Runtime and compilation paths; component map |
+| [`scenarios/zombie-agent/SCENARIO.md`](scenarios/zombie-agent/SCENARIO.md) | ZombieAgent attack and how AH breaks it |
+| [`manifests/example_world.yaml`](manifests/example_world.yaml) | World Manifest template |
+| [`manifests/schema_v2.yaml`](manifests/schema_v2.yaml) | Full v2 schema reference |
+
+---
+
+## Runnable Demos
+
+```bash
+# Poisoned tool output: attack succeeds without hypervisor, blocked with it
+python examples/poisoned_tool_output_demo.py
+
+# Scenario suite (9 scenarios: attack / safe / ambiguous)
+python _research/benchmarks/run_scenarios.py
+
+# Trace replay — verify determinism, walkthrough the design cycle
+python _research/benchmarks/replay.py --walkthrough
+
+# Web UI gateway (requires Docker)
+docker compose up gateway
+# then open http://localhost:8090/ui
+```
+
+---
+
+## The Key Distinction from CaMeL
 
 [CaMeL](https://arxiv.org/abs/2503.18813) (Google DeepMind, 2025) shares the
 same foundations: capability-based security, information flow control, a
@@ -134,10 +149,6 @@ The architectural difference is **when** the LLM operates:
 | Policy scope | Per-query | Per-workflow (World Manifest) |
 | Cross-session taint | Not addressed | Core scenario (ZombieAgent) |
 
-Agent Hypervisor's claim: **compile intent into physics** — use LLM intelligence
-at design-time to generate deterministic artifacts; never on the runtime
-enforcement path.
-
 ---
 
 ## Honest Constraints
@@ -146,29 +157,8 @@ This is **bounded, measurable security** — not perfect security.
 
 - The World Manifest covers what was anticipated at design-time. Novel attacks require redesign.
 - Semantic ambiguity ("forward this to Alex") is not resolved — it is the open "semantic gap" problem.
-- Current input sanitization is trivial: regex + Unicode normalization. Semantic injection is not covered.
-- The manifest authoring tooling does not exist yet. It is the next thing to build.
-
----
-
-## Current Status
-
-- [x] Core execution model defined (Manifest Resolution Law, three modes)
-- [x] ZombieAgent scenario: canonical document + World Manifest
-- [x] Core framework: `src/core/hypervisor.py` — deterministic, LLM-free, 8/8 tests pass
-- [x] Demo: `scenarios/zombie-agent/src/demo.py` — three-step ZombieAgent scenario
-- [ ] Manifest authoring tooling (AI Aikido pipeline)
-- [ ] AgentDojo benchmark integration
-- [ ] Additional scenarios
-
----
-
-## Reference
-
-- **ZombieAgent** — Radware research (January 2026): persistent memory poisoning, 90% data leakage rate
-- **CaMeL** — Debenedetti et al. (2025): capability-based defense, 77% secure task completion on AgentDojo
-- **Capability-Based Security** — Dennis & Van Horn (1966)
-- **Information Flow Control** — Denning (1976)
+- Manifest authoring tooling (AI Aikido pipeline) is not yet implemented.
+- The 0% ASR result is on a specific benchmark with specific attack patterns. Not a universal claim.
 
 ---
 
