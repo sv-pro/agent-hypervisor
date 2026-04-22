@@ -202,10 +202,10 @@ docker build -t agent-hypervisor .
 ### Module Responsibilities
 
 - `runtime/` — No I/O except subprocess dispatch. No LLM calls. No mutable shared state.
-- `compiler/` — Pure transformation: YAML → deterministic policy artifacts. CLI wrappers only.
+- `compiler/` — Pure transformation: YAML → deterministic policy artifacts. CLI wrappers only. All v0.3 toolchain CLI commands (`ahc validate`, `ahc simulate`, `ahc diff`, `ahc coverage`, `ahc tune`, `ahc cost-estimate`, `ahc cost-profile`) live here.
 - `authoring/` — Design-time only. Defines what is possible; does not execute anything.
 - `hypervisor/` — PoC-quality gateway and policy engine. Not production hardened.
-- `economic/` — First-class budget enforcement. Cost decisions happen at IR construction, not post-hoc.
+- `economic/` — First-class budget enforcement. Cost decisions happen at IR construction, not post-hoc. Cost CLI tools are surfaced through `compiler/cli.py`, not added directly to this package.
 
 ### File Naming
 
@@ -233,7 +233,7 @@ gh project item-list 7 --owner sv-pro --limit 50 --format json
 
 Or use the `/gh-board` command for a full audit with drift detection.
 
-Issue → milestone mapping: M2 (#10–17), M3 (#18–23), M4 (#24–30), M5 (#31–34)
+Issue → milestone mapping: M2 (#10–17), M3 (#18–23), M4 (#24–30), M5 (#31–34), v0.2 (#120), v0.3 (#121–#128)
 
 ---
 
@@ -259,8 +259,12 @@ Issue → milestone mapping: M2 (#10–17), M3 (#18–23), M4 (#24–30), M5 (#3
 - Capability DSL, named policy presets
 - MCP integration wrapper
 - Hypervisor PoC and gateway
-- Economic constraints
+- Economic constraints (Phases 1–3 complete; Phases 4–5 tracked with v0.3 toolchain)
 - Program layer
+
+**In Progress**:
+- v0.2 Phase 4 — Compiler integration (v2 schema → M2 compiler; blocker for v0.3)
+- v0.3 toolchain — `ahc validate`, `ahc simulate`, `ahc diff`, `ahc coverage`, `ahc tune`, `ahc cost-estimate`, `ahc cost-profile` (see `NEXT_TASKS.md` for task-by-task status)
 
 **Do not modify**:
 - `archive/` — Historical experimental code
@@ -282,7 +286,10 @@ Issue → milestone mapping: M2 (#10–17), M3 (#18–23), M4 (#24–30), M5 (#3
 | Published articles | `docs/pub/the-missing-layer/` |
 | Changelog | `CHANGELOG.md` |
 | Roadmap | `ROADMAP.md` |
+| Next tasks (checklist) | `NEXT_TASKS.md` |
+| Session context / quick-ref | `MEMORY.md` |
 | Component maturity | `STATUS.md` |
+| Wiki (curated knowledge) | `wiki/index.md` |
 
 ---
 
@@ -330,3 +337,4 @@ Issue → milestone mapping: M2 (#10–17), M3 (#18–23), M4 (#24–30), M5 (#3
 - Do not modify `archive/` or `lab/` directories.
 - Do not add probabilistic filtering ("check if this looks safe") to the runtime layer — use deterministic constraints.
 - Do not add backwards-compatibility shims unless explicitly required; prefer clean API changes with updated callers.
+- Do not add cost CLI commands outside of `compiler/cli.py`. The `economic/` package contains enforcement logic; the CLI surface lives in the compiler toolchain.
