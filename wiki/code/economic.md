@@ -76,8 +76,23 @@ Compiled once at startup from the `economic` section of the world manifest. Immu
 5. **Immutable pricing table** — `PricingRegistry` is frozen after compilation.
 6. **First-class enforcement** — `BudgetExceeded` is a `ConstructionError` subclass; it fires before any handler code runs.
 
+## Toolchain Integration (v0.3)
+
+Cost CLI commands are delivered through the v0.3 toolchain as part of `compiler/cli.py`, not added directly to this package. The `economic/` package contains enforcement logic; the CLI surface lives in the compiler toolchain.
+
+| CLI Command | GH Issue | Status |
+|-------------|----------|--------|
+| `ahc cost-profile <trace-set>` | #122 | Planned |
+| `ahc cost-estimate <plan>` | #123 | Planned |
+| Cost projections in `ahc simulate` | #124 | Planned |
+| Budget utilization in `ahc coverage` | #126 | Planned |
+| Budget suggestions in `ahc tune` | #127 | Planned |
+
+**Known gap (as of 2026-04-22):** `EconomicPolicyEngine.evaluate_budget()` is not yet wired onto the runtime enforcement path. Cost enforcement is currently inert. This will be fixed in GH #122 (v0.3-T2).
+
 ## See Also
 
 - [Runtime package](runtime.md) — `BudgetExceeded` in the `ConstructionError` hierarchy
 - [IRBuilder module](modules/ir.md) — where economic constraints are checked at build time
 - [Compile Phase](modules/compile.md) — `CompiledBudget` compiled from manifest
+- [Compiler package](compiler.md) — v0.3 toolchain CLI commands

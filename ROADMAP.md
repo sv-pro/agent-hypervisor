@@ -217,28 +217,43 @@ The following phases extend beyond Stage 3. Each builds directly on evidence fro
 
 **Deliverables:**
 
+*Policy toolchain:*
+
 | Artifact | Description |
 | --- | --- |
-| `ahc validate` | Schema-level validation: required fields, type checks, cross-reference integrity, unknown action detection |
-| `ahc simulate` | Dry-run a trace or scenario set against a manifest without executing real tools; outputs a decision table |
-| `ahc diff` | Structural diff between two manifest versions: what actions were added/removed, what taint rules changed, what escalations changed |
-| `ahc coverage` | Given a benchmark result, annotate which manifest actions/rules were exercised, which were never triggered |
-| `ahc tune` | Interactive CLI: given a failing scenario, suggest manifest edits that would have blocked or allowed it |
+| `ahc validate` | Schema-level validation: required fields, type checks, cross-reference integrity, unknown action detection; includes budget sanity check (declared budgets must cover at least one known model) |
+| `ahc simulate` | Dry-run a trace or scenario set against a manifest without executing real tools; outputs a decision table with cost projection per step alongside policy decisions |
+| `ahc diff` | Structural diff between two manifest versions: what actions were added/removed, what taint rules changed, what escalations changed, what budget limits changed |
+| `ahc coverage` | Given a benchmark result, annotate which manifest actions/rules were exercised, which were never triggered; includes budget utilization — which budget buckets were hit, which are unreachable given the scenario set |
+| `ahc tune` | Interactive CLI: given a failing scenario, suggest manifest edits that would have blocked or allowed it; also suggests budget adjustments derived from trace cost profiles |
 | LLM authoring integration | `ahc draft --description "..."` uses LLM at design-time to generate a manifest draft from a natural-language description of the world |
 | Manifest test harness | `ahc test` runs a YAML-defined scenario set against the manifest and reports pass/fail per case |
 | Web UI integration (M5+) | Manifest editor tab in the Web UI with inline validation, simulation panel, diff viewer |
 | Manifest format stability | Freeze the v2 schema with a compatibility guarantee; document breaking change policy |
 
-**Architectural Significance:** This phase closes the Design → Compile → Learn → Redesign loop at the toolchain level. Without it, the loop exists in theory but requires manual work at every step. With it, a designer can iterate manifests in response to benchmark failures without touching runtime code.
+*Cost estimation toolchain (Economic Phases 4–5, delivered here):*
 
-**Dependencies:** v0.2 schema (v2 manifests are the compiler input), M4 benchmark suite (provides scenarios for simulation and coverage), M5 Web UI (surface for non-CLI users).
+| Artifact | Description |
+| --- | --- |
+| `ahc cost-profile <trace-set>` | Derive and print cost profiles (p50/p90/p99) from a trace set; feeds back into `CostEstimator` at design-time |
+| `ahc cost-estimate <plan>` | Estimate total cost for a declared plan using `CostProfileStore` percentiles before any execution |
+| `REPLAN` verdict wiring | Wire `EconomicPolicyEngine.evaluate_budget()` onto the runtime enforcement path; add `REPLAN` verdict alongside `ALLOW`/`DENY`/`ASK` |
+| Role-based budget policies | `economic.policies` section in World Manifest v2: bind budget limits to roles, provenance classes, and task types; compiled into `CompiledPolicy` |
+
+**Architectural Significance:** This phase closes the Design → Compile → Learn → Redesign loop at the toolchain level — for both policy decisions *and* cost. Without it, the loop exists in theory but requires manual work at every step. With it, a designer can iterate manifests and budgets in response to benchmark failures and cost overruns without touching runtime code.
+
+**Dependencies:** v0.2 schema (v2 manifests are the compiler input), M4 benchmark suite (provides scenarios for simulation and coverage), M5 Web UI (surface for non-CLI users), Economic Phase 3 (CostProfileStore with percentile summaries).
 
 **Success Criteria:**
 
 - Full Design→Compile→Learn→Redesign cycle completable without editing source code
 - `ahc simulate` produces the same decisions as the live runtime for a reference scenario set (simulation fidelity test)
-- `ahc coverage` identifies at least one dead manifest rule in the workspace manifest
+- `ahc simulate` also reports cost estimate per step consistent with `ahc cost-estimate`
+- `ahc coverage` identifies at least one dead manifest rule and one unused budget bucket in the workspace manifest
 - At least one manifest iteration driven by `ahc tune` output rather than manual analysis
+- `ahc cost-estimate` uses trace-derived profiles (not static defaults) when profiles exist
+- `REPLAN` verdict fires correctly when a plan exceeds budget; replan hint resolves to a cheaper path
+- A manifest with role-differentiated budgets compiles and enforces correctly; all decisions appear in the audit trace
 
 ---
 
@@ -501,9 +516,11 @@ artifacts, not live runtime lookups.
 
 ---
 
-### Phase 4 — Cost-Aware Replanning
+### Phase 4 — Cost-Aware Replanning *(delivered in v0.3 toolchain)*
 
 **Goal:** On a budget `DENY`, propose a cheaper alternative execution path — deterministically.
+
+> **Delivery note:** This phase is implemented as part of the v0.3 Manifest Designer / Compiler / Tuner toolchain, specifically the `REPLAN` verdict wiring and `ahc cost-estimate` CLI command. See v0.3 deliverables above.
 
 **Scope:**
 - New verdict: `REPLAN` (alongside `ALLOW`, `DENY`, `ASK`)
@@ -524,9 +541,11 @@ generated narrative.
 
 ---
 
-### Phase 5 — Economic Governance
+### Phase 5 — Economic Governance *(delivered in v0.3 toolchain)*
 
 **Goal:** Bind budget limits to roles, provenance classes, and task types in the World Manifest.
+
+> **Delivery note:** This phase is implemented as part of the v0.3 Manifest Designer / Compiler / Tuner toolchain, specifically the role-based budget policies in World Manifest v2. See v0.3 deliverables above.
 
 **Scope:**
 - Budget policies expressed in the manifest `economic.policies` section
