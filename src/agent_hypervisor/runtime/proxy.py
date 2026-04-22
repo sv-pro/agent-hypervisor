@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional
 
 from .models import (
     ApprovalRequired,
+    BudgetExceeded,
     ConstraintViolation,
     ConstructionError,
     NonExistentAction,
@@ -156,6 +157,13 @@ class SafeMCPProxy:
                 action=action_name,
                 reason=exc.reason,
                 denial_kind="taint_violation",
+            )
+        except BudgetExceeded as exc:
+            return ProxyResponse(
+                status="impossible",
+                action=action_name,
+                reason=exc.reason,
+                denial_kind="budget_exceeded",
             )
         except ConstructionError as exc:
             # Catch-all for any future ConstructionError subclasses.

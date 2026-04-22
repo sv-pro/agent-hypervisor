@@ -24,17 +24,19 @@ Construction-time constraint checking (IRBuilder.build):
       3. Approval: approval-required actions block construction (deferred)
       4. Taint propagation: taint is computed from required TaintContext
       5. Taint rule: TAINTED + EXTERNAL → ConstructionError
+      6. Budget: estimated cost must not exceed compiled budget limits
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .compile import CompiledAction, CompiledPolicy
 from .channel import Source
 from .models import (
     ActionType,
     ApprovalRequired,
+    BudgetExceeded,
     ConstraintViolation,
     ConstructionError,
     NonExistentAction,
@@ -43,6 +45,10 @@ from .models import (
     TrustLevel,
 )
 from .taint import TaintContext, TaintedValue
+
+if TYPE_CHECKING:
+    from agent_hypervisor.economic.economic_policy import EconomicPolicyEngine
+    from agent_hypervisor.economic.cost_estimator import CostEstimate
 
 
 # ── Module-private IR seal ────────────────────────────────────────────────────
@@ -110,10 +116,21 @@ class IRBuilder:
     All constraint checking happens inside build(). If build() returns,
     the IR is valid. If build() raises ConstructionError, the action is
     not representable — not denied at execution, not possible at all.
+
+    Args:
+        policy:          Compiled world policy (frozen, immutable).
+        economic_engine: Optional budget enforcer. When provided alongside a
+                         cost_estimate in build(), enforces budget limits as
+                         constraint 6. Absent → budget check skipped (opt-in).
     """
 
-    def __init__(self, policy: CompiledPolicy) -> None:
+    def __init__(
+        self,
+        policy: CompiledPolicy,
+        economic_engine: Optional["EconomicPolicyEngine"] = None,
+    ) -> None:
         self._policy = policy
+        self._economic_engine = economic_engine
 
     def build(
         self,
@@ -121,6 +138,7 @@ class IRBuilder:
         source: Source,
         params: Dict[str, Any],
         taint_context: TaintContext,
+        cost_estimate: Optional["CostEstimate"] = None,
     ) -> IntentIR:
         """
         Build an IntentIR or raise ConstructionError.
@@ -135,6 +153,9 @@ class IRBuilder:
             Execution parameters passed to the action handler.
         taint_context : TaintContext
             Required. Cannot be omitted — callers cannot drop taint silently.
+        cost_estimate : CostEstimate, optional
+            When provided alongside an economic_engine, enforces budget limits
+            at construction time (constraint 6). Omit to skip budget checking.
         """
         policy = self._policy
 
@@ -172,6 +193,14 @@ class IRBuilder:
             raise TaintViolation(
                 f"Taint rule violation: {taint_rule.reason} — IR cannot be formed"
             )
+
+        # ── 6. Budget enforcement (opt-in) ─────────────────────────────────────
+        # Requires both an economic_engine (set at IRBuilder construction) and a
+        # cost_estimate (provided per-call). Either absent → budget check skipped.
+        # evaluate_budget() raises BudgetExceeded (a ConstructionError) if the
+        # estimate exceeds the compiled limit. Silent return means within budget.
+        if self._economic_engine is not None and cost_estimate is not None:
+            self._economic_engine.evaluate_budget(cost_estimate)
 
         return IntentIR(
             _seal=_IR_SEAL,
