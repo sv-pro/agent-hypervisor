@@ -26,10 +26,10 @@
   - Rewrite the AgentDojo workspace manifest using the v2 schema.
   - Ensure it provides more precise taint containment decisions.
 
-- [-] **Phase 4 — Compiler integration** *(PR: pending)* — GH #120
+- [x] **Phase 4 — Compiler integration** *(completed in 6e1f62f, PR #118)* — GH #120
   - Wire v2 schema into the M2 compiler.
   - Update `ahc build` to parse and output artifacts based on the new types (e.g., data-class taint propagation table).
-  - **Blocker for all v0.3 tasks below.**
+  - Round-trip integration test added in `tests/compiler/test_build_roundtrip.py`.
 
 ---
 
@@ -38,12 +38,12 @@
 > Cost estimation (Economic Phases 4–5) is delivered through this toolchain, not as a separate track.
 > See ROADMAP.md v0.3 section for full rationale and success criteria.
 
-- [ ] **v0.3-T1 — `ahc validate`** — GH #121
+- [-] **v0.3-T1 — `ahc validate`** — GH #121
   - Schema-level validation: required fields, type checks, cross-references, unknown action detection.
   - Budget sanity check: declared budgets must cover at least one known model in the pricing registry.
   - Tests: `tests/compiler/test_validate.py`.
 
-- [ ] **v0.3-T2 — `ahc cost-profile` + runtime enforcement wiring** — GH #122
+- [-] **v0.3-T2 — `ahc cost-profile` + runtime enforcement wiring** — GH #122
   - Implement `ahc cost-profile <trace-set>` CLI command (currently in roadmap but unimplemented).
   - Wire `EconomicPolicyEngine.evaluate_budget()` onto the runtime enforcement path (currently not called).
   - Tests: extend `tests/economic/` and `tests/runtime/test_invariants.py`.

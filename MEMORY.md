@@ -7,9 +7,13 @@
 
 ## Current Milestone
 
-**v0.2 Phase 4 — Compiler Integration** is the immediate blocker (GH #120, PR pending).
+**v0.3 — Manifest Designer / Compiler / Tuner** is now underway.
 
-Once merged, all v0.3 tasks unblock.
+v0.2 Phase 4 (GH #120) was completed in PR #118 (`6e1f62f`). All v0.3 tasks are unblocked.
+
+Active tasks (can run in parallel):
+- **v0.3-T1** — `ahc validate` (GH #121)
+- **v0.3-T2** — `ahc cost-profile` + runtime wiring (GH #122)
 
 ---
 
@@ -62,14 +66,21 @@ These are known gaps in the current codebase that must be closed during v0.3:
 
 ---
 
-## Key Files for Next Task (v0.2 Phase 4)
+## Key Files for v0.3-T1 (ahc validate)
 
-- `src/agent_hypervisor/compiler/loader_v2.py` — v2 schema loader (extend to parse new entity types)
-- `src/agent_hypervisor/compiler/emitter.py` — policy table emitter (extend to emit v2 artifacts)
-- `src/agent_hypervisor/compiler/cli.py` — `ahc build` command
-- `manifests/schema_v2.yaml` — authoritative v2 schema definition
-- `manifests/workspace_v2.yaml` — reference v2 manifest for testing
-- `tests/compiler/` — add test for v2 compiler round-trip
+- `src/agent_hypervisor/compiler/validator.py` — new module (to create)
+- `src/agent_hypervisor/compiler/cli.py` — add `ahc validate` command
+- `src/agent_hypervisor/economic/pricing_registry.py` — `PricingRegistry` for budget sanity check
+- `tests/compiler/test_validate.py` — new test file
+
+## Key Files for v0.3-T2 (ahc cost-profile + runtime wiring)
+
+- `src/agent_hypervisor/compiler/cli.py` — add `ahc cost-profile` command
+- `src/agent_hypervisor/economic/cost_profile_store.py` — `CostProfileStore`
+- `src/agent_hypervisor/economic/economic_policy.py` — `EconomicPolicyEngine.evaluate_budget()`
+- `src/agent_hypervisor/runtime/ir.py` — wire budget check into `IRBuilder.build()`
+- `src/agent_hypervisor/runtime/models.py` — `BudgetExceeded` (already defined)
+- `tests/economic/` and `tests/runtime/test_invariants.py` — extend with budget tests
 
 ---
 
