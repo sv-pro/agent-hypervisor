@@ -505,6 +505,200 @@ def cmd_cost_profile(trace_file: str, action_filter: str | None, model_filter: s
     click.echo()
 
 
+@cli.command("cost-estimate")
+@click.argument("action_name")
+@click.option("--model", "model_name", default="",
+              help="Model name to query (default: empty key, matches observations with no model).")
+@click.option("--percentile", "pct", type=click.Choice(["50", "90", "99"]), default="90",
+              show_default=True, help="Percentile to report.")
+@click.option("--trace", "trace_path", required=True, type=click.Path(exists=True),
+              help="JSONL trace file or directory to load observations from.")
+def cmd_cost_estimate(action_name: str, model_name: str, pct: str, trace_path: str):
+    """Estimate the budget for an action from historical trace data.
+
+    \b
+    Reads ACTION_NAME observations from TRACE_FILE (JSONL) and prints the
+    requested percentile cost as a recommended budget.per_request value.
+
+    \b
+    Example:
+      ahc cost-estimate read_file --model gpt-4o --trace traces/run.jsonl
+      ahc cost-estimate summarize --percentile 99 --trace traces/
+    """
+    import json as _json
+    from ..economic.cost_profile_store import CostObservation, CostProfileStore
+
+    path = Path(trace_path)
+    lines: list[str] = []
+    if path.is_dir():
+        for jsonl in sorted(path.glob("*.jsonl")):
+            lines.extend(jsonl.read_text(encoding="utf-8").splitlines())
+    else:
+        lines = path.read_text(encoding="utf-8").splitlines()
+
+    store = CostProfileStore()
+    for i, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = _json.loads(line)
+            obs = CostObservation(
+                action_name=obj["action_name"],
+                actual_cost=float(obj["actual_cost"]),
+                workflow_id=obj.get("workflow_id", ""),
+                model_name=obj.get("model_name", ""),
+                input_tokens=int(obj.get("input_tokens", 0)),
+                output_tokens=int(obj.get("output_tokens", 0)),
+            )
+            store.record(obs)
+        except (KeyError, ValueError, _json.JSONDecodeError) as exc:
+            click.echo(_col(f"  [line {i}] skipped: {exc}", _DIM), err=True)
+
+    p_value = float(pct)
+    try:
+        cost = store.percentile(action_name, model_name, p_value)
+    except KeyError:
+        model_label = model_name or "(any)"
+        click.echo(
+            _col(
+                f"No observations found for action={action_name!r} model={model_label!r}.",
+                _RED,
+            ),
+            err=True,
+        )
+        raise SystemExit(1)
+
+    model_label = model_name or "(any)"
+    click.echo()
+    click.echo(_col(
+        f"Cost estimate — action: {action_name}  model: {model_label}  p{pct}", _BOLD
+    ))
+    click.echo(_col("─" * 60, _DIM))
+    click.echo(f"  estimated cost:  ${cost:.4f}")
+    click.echo()
+    click.echo(_col("  Recommended manifest snippet:", _DIM))
+    click.echo(_col("    budgets:", _DIM))
+    click.echo(_col(f"      per_request: {cost:.4f}", _DIM))
+    click.echo()
+
+
+@cli.command("diff")
+@click.argument("manifest_a", type=click.Path(exists=True))
+@click.argument("manifest_b", type=click.Path(exists=True))
+def cmd_diff(manifest_a: str, manifest_b: str):
+    """Show structural differences between two World Manifests.
+
+    \b
+    Compares the actions, trust_channels, capability_matrix, budgets,
+    entities, data_classes, trust_zones, side_effect_surfaces, and
+    transition_policies sections of two manifest files.
+
+    \b
+    Exits 0 if the manifests are identical, 1 if differences are found.
+
+    \b
+    Example:
+      ahc diff manifests/workspace_v1.yaml manifests/workspace_v2.yaml
+    """
+    import yaml as _yaml
+
+    path_a = Path(manifest_a)
+    path_b = Path(manifest_b)
+
+    try:
+        raw_a = _yaml.safe_load(path_a.read_text(encoding="utf-8")) or {}
+        raw_b = _yaml.safe_load(path_b.read_text(encoding="utf-8")) or {}
+    except _yaml.YAMLError as exc:
+        click.echo(_col(f"YAML parse error: {exc}", _RED), err=True)
+        raise SystemExit(1)
+
+    _DIFF_SECTIONS = [
+        "actions",
+        "trust_channels",
+        "capability_matrix",
+        "budgets",
+        "entities",
+        "data_classes",
+        "trust_zones",
+        "side_effect_surfaces",
+        "transition_policies",
+    ]
+
+    total_additions = 0
+    total_removals = 0
+    total_changes = 0
+    any_diff = False
+
+    click.echo()
+    click.echo(_col(f"Manifest diff: {path_a.name} → {path_b.name}", _BOLD))
+    click.echo(_col("─" * 60, _DIM))
+
+    for section in _DIFF_SECTIONS:
+        val_a = raw_a.get(section)
+        val_b = raw_b.get(section)
+
+        if val_a is None and val_b is None:
+            continue
+
+        dict_a = _diff_normalize(val_a)
+        dict_b = _diff_normalize(val_b)
+
+        added   = set(dict_b.keys()) - set(dict_a.keys())
+        removed = set(dict_a.keys()) - set(dict_b.keys())
+        changed = {k for k in dict_a.keys() & dict_b.keys() if dict_a[k] != dict_b[k]}
+
+        if not added and not removed and not changed:
+            continue
+
+        any_diff = True
+        total_additions += len(added)
+        total_removals  += len(removed)
+        total_changes   += len(changed)
+
+        click.echo()
+        click.echo(f"  {_col(section + ':', _BOLD)}")
+        for k in sorted(added):
+            click.echo(f"    {_col('+', _GREEN)} {k}")
+        for k in sorted(removed):
+            click.echo(f"    {_col('-', _RED)} {k}")
+        for k in sorted(changed):
+            old_str = str(dict_a[k])[:40]
+            new_str = str(dict_b[k])[:40]
+            click.echo(
+                f"    {_col('~', _YELLOW)} {k}  "
+                f"{_col(old_str, _DIM)} → {_col(new_str, _DIM)}"
+            )
+
+    if not any_diff:
+        click.echo(_col("  (no differences)", _DIM))
+        click.echo()
+        return  # exit 0
+
+    click.echo()
+    parts = []
+    if total_additions:
+        parts.append(_col(f"{total_additions} addition(s)", _GREEN))
+    if total_removals:
+        parts.append(_col(f"{total_removals} removal(s)", _RED))
+    if total_changes:
+        parts.append(_col(f"{total_changes} change(s)", _YELLOW))
+    click.echo("  " + ", ".join(parts))
+    click.echo()
+    raise SystemExit(1)
+
+
+def _diff_normalize(val: object) -> dict:
+    """Normalise a section value to a flat dict keyed by string for diffing."""
+    if val is None:
+        return {}
+    if isinstance(val, dict):
+        return {str(k): v for k, v in val.items()}
+    if isinstance(val, list):
+        return {str(i): v for i, v in enumerate(val)}
+    return {"_value": val}
+
+
 @cli.command("migrate")
 @click.argument("manifest_file", type=click.Path(exists=True))
 @click.option("--output", "-o", default=None, help="Output path for the v2 manifest YAML.")

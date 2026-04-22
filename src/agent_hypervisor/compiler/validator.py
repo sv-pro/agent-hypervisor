@@ -115,7 +115,7 @@ def _validate_v2(raw: dict, result: ValidationResult) -> None:
     _validate_v2_trust_zones(raw.get("trust_zones") or {}, raw, result)
     _validate_v2_side_effect_surfaces(raw.get("side_effect_surfaces") or {}, actions, result)
     _validate_v2_transition_policies(raw.get("transition_policies") or {}, raw, result)
-    _validate_v2_budgets(raw.get("budgets") or {}, raw.get("economic") or {}, result)
+    _validate_v2_budgets(raw.get("budgets") or {}, raw.get("economic") or {}, result, raw)
 
 
 def _validate_v2_actions(actions: dict, result: ValidationResult) -> None:
@@ -269,11 +269,18 @@ def _validate_v2_transition_policies(policies: dict | list, raw: dict, result: V
                 )
 
 
-def _validate_v2_budgets(budgets: dict, economic: dict, result: ValidationResult) -> None:
+def _validate_v2_budgets(
+    budgets: dict | list, economic: dict, result: ValidationResult, raw: dict | None = None
+) -> None:
     """Budget sanity: if budgets declared, at least one model must have pricing."""
     if not budgets and not economic:
         return
 
+    if isinstance(budgets, list):
+        _validate_v2_budget_list(budgets, economic, result, raw or {})
+        return
+
+    # Scalar dict form: {per_request: ..., per_session: ...}
     # Check that declared per_request / per_session are positive numbers.
     for key in ("per_request", "per_session"):
         val = budgets.get(key)
@@ -290,6 +297,56 @@ def _validate_v2_budgets(budgets: dict, economic: dict, result: ValidationResult
     # EconomicPolicyEngine can produce replan hints.
     has_budget_limit = budgets.get("per_request") or budgets.get("per_session")
     if has_budget_limit:
+        model_pricing = economic.get("model_pricing") or {}
+        if not model_pricing:
+            result.warn(
+                "budgets declares per_request/per_session limits but "
+                "economic.model_pricing is empty. The EconomicPolicyEngine "
+                "will always produce deny verdicts (unknown model cost = ∞). "
+                "Add at least one model entry to economic.model_pricing."
+            )
+
+
+def _validate_v2_budget_list(
+    budgets: list, economic: dict, result: ValidationResult, raw: dict
+) -> None:
+    """Validate a list-form budgets section (role-based budget policies, T8)."""
+    declared_actors = set((raw.get("actors") or {}).keys())
+    has_any_limit = False
+
+    for i, entry in enumerate(budgets):
+        prefix = f"budgets[{i}]"
+        if not isinstance(entry, dict):
+            result.error(f"{prefix}: each budget entry must be a mapping.")
+            continue
+
+        # At least per_request or per_session must be present.
+        has_request = "per_request" in entry
+        has_session = "per_session" in entry
+        if not has_request and not has_session:
+            result.error(f"{prefix}: must declare at least one of per_request or per_session.")
+
+        for key in ("per_request", "per_session"):
+            val = entry.get(key)
+            if val is not None:
+                try:
+                    f = float(val)
+                    if f <= 0:
+                        result.error(f"{prefix}.{key}: must be a positive number, got {val!r}.")
+                    else:
+                        has_any_limit = True
+                except (TypeError, ValueError):
+                    result.error(f"{prefix}.{key}: must be a number, got {val!r}.")
+
+        # Optional role cross-reference.
+        role = entry.get("role")
+        if role is not None and declared_actors and role not in declared_actors:
+            result.warn(
+                f"{prefix}.role: {role!r} is not declared in actors. "
+                f"Declared actors: {sorted(declared_actors)}"
+            )
+
+    if has_any_limit:
         model_pricing = economic.get("model_pricing") or {}
         if not model_pricing:
             result.warn(

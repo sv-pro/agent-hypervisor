@@ -139,6 +139,8 @@ class IRBuilder:
         params: Dict[str, Any],
         taint_context: TaintContext,
         cost_estimate: Optional["CostEstimate"] = None,
+        role: Optional[str] = None,
+        provenance_source: Optional[str] = None,
     ) -> IntentIR:
         """
         Build an IntentIR or raise ConstructionError.
@@ -156,6 +158,12 @@ class IRBuilder:
         cost_estimate : CostEstimate, optional
             When provided alongside an economic_engine, enforces budget limits
             at construction time (constraint 6). Omit to skip budget checking.
+        role : str, optional
+            Caller's actor role. Passed to evaluate_budget() for role-based
+            budget policy selection. Ignored when no economic_engine is set.
+        provenance_source : str, optional
+            Caller's provenance source. Passed to evaluate_budget() for
+            provenance-scoped budget policy selection.
         """
         policy = self._policy
 
@@ -200,7 +208,11 @@ class IRBuilder:
         # evaluate_budget() raises BudgetExceeded (a ConstructionError) if the
         # estimate exceeds the compiled limit. Silent return means within budget.
         if self._economic_engine is not None and cost_estimate is not None:
-            self._economic_engine.evaluate_budget(cost_estimate)
+            self._economic_engine.evaluate_budget(
+                cost_estimate,
+                role=role,
+                provenance_source=provenance_source,
+            )
 
         return IntentIR(
             _seal=_IR_SEAL,

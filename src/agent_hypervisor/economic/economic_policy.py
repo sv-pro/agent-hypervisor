@@ -59,9 +59,19 @@ class CompiledBudget:
 
     Populated from the world manifest ``economic.budgets`` section
     at compile time.  Immutable thereafter.
+
+    Attributes:
+        per_request:       USD ceiling per single intent evaluation.
+        per_session:       USD cumulative ceiling for the session.
+        role:              Optional actor role this entry applies to.
+                           None means "applies to all roles" (wildcard).
+        provenance_source: Optional provenance source this entry applies to.
+                           None means "applies to all provenance sources".
     """
-    per_request: float   # USD — ceiling per single intent evaluation
-    per_session: float   # USD — cumulative ceiling for the session
+    per_request: float
+    per_session: float
+    role:              str | None = None
+    provenance_source: str | None = None
 
 
 class EconomicPolicyEngine:
@@ -84,10 +94,14 @@ class EconomicPolicyEngine:
         budget: CompiledBudget,
         pricing_registry: PricingRegistry,
         session_spent: float = 0.0,
+        role_budgets: list["CompiledBudget"] | None = None,
     ) -> None:
         self._budget = budget
         self._registry = pricing_registry
         self._session_spent = session_spent
+        # Role-specific budget entries, consulted when role/provenance is known.
+        # Each entry may restrict per_request further for matched callers.
+        self._role_budgets: list[CompiledBudget] = list(role_budgets or [])
 
     # ------------------------------------------------------------------
     # External update (called by trace recorder after execution)
@@ -111,6 +125,8 @@ class EconomicPolicyEngine:
         self,
         estimate: CostEstimate,
         request_budget_override: float | None = None,
+        role: str | None = None,
+        provenance_source: str | None = None,
     ) -> None:
         """
         Enforce budget limits for one proposed action.
@@ -118,21 +134,38 @@ class EconomicPolicyEngine:
         Raises ``BudgetExceeded`` if the estimate exceeds the applicable
         budget.  Returns silently if the estimate is within budget.
 
+        When ``role`` or ``provenance_source`` is provided, all matching
+        role-budget entries are consulted and the tightest (lowest) limit
+        wins.  A role-budget entry matches when its ``role`` field is None
+        (wildcard) or equals the supplied role, AND its ``provenance_source``
+        field is None or equals the supplied provenance_source.
+
         Args:
             estimate:                CostEstimate from CostEstimator.
             request_budget_override: Per-policy budget override from a matched
                                      economic policy rule, if any.
+            role:                    Caller's actor role, if known.
+            provenance_source:       Caller's provenance source, if known.
 
         Raises:
             BudgetExceeded: estimate > applicable limit.
                             ``.replan_hint`` is set if a cheaper path exists,
                             None otherwise.
         """
-        per_request_limit = (
-            request_budget_override
-            if request_budget_override is not None
-            else self._budget.per_request
-        )
+        if request_budget_override is not None:
+            per_request_limit = request_budget_override
+        else:
+            per_request_limit = self._budget.per_request
+            # Consult role-specific budget entries; tightest match wins.
+            for rb in self._role_budgets:
+                role_match = rb.role is None or rb.role == role
+                prov_match = (
+                    rb.provenance_source is None
+                    or rb.provenance_source == provenance_source
+                )
+                if role_match and prov_match:
+                    per_request_limit = min(per_request_limit, rb.per_request)
+
         remaining_session = self._budget.per_session - self._session_spent
 
         # Determine binding limit (most restrictive wins).

@@ -215,6 +215,207 @@ class TestIRBuilderBudget:
             builder.build("nonexistent_action", source, {}, self._clean_taint(), cost_estimate=estimate)
 
 
+# ── Role-based budget policies (T8) ──────────────────────────────────────────
+
+class TestRoleBasedBudgets:
+    """EconomicPolicyEngine role-based budget policy selection."""
+
+    def _make_engine_with_roles(
+        self,
+        default_per_request: float,
+        role_budgets: list,
+    ) -> "EconomicPolicyEngine":
+        from agent_hypervisor.economic.economic_policy import CompiledBudget, EconomicPolicyEngine
+        budget = CompiledBudget(per_request=default_per_request, per_session=999.0)
+        return EconomicPolicyEngine(
+            budget=budget,
+            pricing_registry=_make_registry(),
+            role_budgets=role_budgets,
+        )
+
+    def test_no_role_budgets_uses_global_limit(self):
+        engine = _make_engine(per_request=1.0)
+        estimate = _make_estimate(0.50)
+        engine.evaluate_budget(estimate, role="analyst")  # must not raise
+
+    def test_matching_role_tightens_limit(self):
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        rb = CompiledBudget(per_request=0.10, per_session=999.0, role="analyst")
+        engine = self._make_engine_with_roles(default_per_request=1.0, role_budgets=[rb])
+        estimate = _make_estimate(0.50)
+        with pytest.raises(BudgetExceeded) as exc_info:
+            engine.evaluate_budget(estimate, role="analyst")
+        assert exc_info.value.budget_limit == pytest.approx(0.10)
+
+    def test_non_matching_role_falls_back_to_global(self):
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        rb = CompiledBudget(per_request=0.10, per_session=999.0, role="analyst")
+        engine = self._make_engine_with_roles(default_per_request=1.0, role_budgets=[rb])
+        estimate = _make_estimate(0.50)
+        engine.evaluate_budget(estimate, role="admin")  # global=1.0, must not raise
+
+    def test_role_budget_higher_than_global_does_not_loosen(self):
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        # Role says 2.0 but global is 0.20 → binding limit stays 0.20
+        rb = CompiledBudget(per_request=2.0, per_session=999.0, role="admin")
+        engine = self._make_engine_with_roles(default_per_request=0.20, role_budgets=[rb])
+        estimate = _make_estimate(0.50)
+        with pytest.raises(BudgetExceeded) as exc_info:
+            engine.evaluate_budget(estimate, role="admin")
+        assert exc_info.value.budget_limit == pytest.approx(0.20)
+
+    def test_provenance_source_matching(self):
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        rb = CompiledBudget(
+            per_request=0.05, per_session=999.0,
+            provenance_source="untrusted_email",
+        )
+        engine = self._make_engine_with_roles(default_per_request=1.0, role_budgets=[rb])
+        estimate = _make_estimate(0.30)
+        with pytest.raises(BudgetExceeded) as exc_info:
+            engine.evaluate_budget(estimate, provenance_source="untrusted_email")
+        assert exc_info.value.budget_limit == pytest.approx(0.05)
+
+    def test_provenance_non_match_uses_global(self):
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        rb = CompiledBudget(
+            per_request=0.05, per_session=999.0,
+            provenance_source="untrusted_email",
+        )
+        engine = self._make_engine_with_roles(default_per_request=1.0, role_budgets=[rb])
+        estimate = _make_estimate(0.30)
+        engine.evaluate_budget(estimate, provenance_source="trusted_user")  # must not raise
+
+    def test_wildcard_role_budget_applies_to_all_roles(self):
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        # role=None means wildcard — applies to every caller
+        rb = CompiledBudget(per_request=0.08, per_session=999.0, role=None)
+        engine = self._make_engine_with_roles(default_per_request=1.0, role_budgets=[rb])
+        estimate = _make_estimate(0.50)
+        with pytest.raises(BudgetExceeded) as exc_info:
+            engine.evaluate_budget(estimate, role="analyst")
+        assert exc_info.value.budget_limit == pytest.approx(0.08)
+
+    def test_ir_builder_passes_role_to_engine(self):
+        """IRBuilder.build(role=...) threads role through to evaluate_budget."""
+        from agent_hypervisor.economic.economic_policy import CompiledBudget
+        from agent_hypervisor.runtime.ir import IRBuilder
+        from agent_hypervisor.runtime.compile import compile_world
+        from agent_hypervisor.runtime.channel import Channel
+        from agent_hypervisor.runtime.taint import TaintContext
+        import tempfile, os, yaml
+
+        manifest = {
+            "metadata": {"workflow_id": "test"},
+            "actions": {"read_data": {"type": "internal", "approval_required": False}},
+            "capabilities": {"trusted": ["internal"]},
+            "taint_rules": [],
+            "trust": {"user": "trusted"},
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fh:
+            yaml.dump(manifest, fh)
+            tmp = fh.name
+        try:
+            policy = compile_world(tmp)
+        finally:
+            os.unlink(tmp)
+
+        rb = CompiledBudget(per_request=0.001, per_session=999.0, role="restricted")
+        budget = CompiledBudget(per_request=10.0, per_session=999.0)
+        from agent_hypervisor.economic.economic_policy import EconomicPolicyEngine
+        engine = EconomicPolicyEngine(
+            budget=budget, pricing_registry=_make_registry(), role_budgets=[rb]
+        )
+        builder = IRBuilder(policy, economic_engine=engine)
+        channel = Channel(identity="user", policy=policy)
+        source = channel.source
+        estimate = _make_estimate(total=0.50)
+
+        with pytest.raises(BudgetExceeded):
+            builder.build(
+                "read_data", source, {}, TaintContext.clean(),
+                cost_estimate=estimate, role="restricted",
+            )
+
+
+# ── Role-based budget validator (T8) ─────────────────────────────────────────
+
+class TestRoleBasedBudgetValidator:
+    """ahc validate: list-form budgets with optional role fields."""
+
+    def _validate(self, raw: dict):
+        import tempfile, os, yaml
+        from agent_hypervisor.compiler.validator import validate
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False
+        ) as fh:
+            yaml.dump(raw, fh)
+            tmp = fh.name
+        try:
+            return validate(tmp)
+        finally:
+            os.unlink(tmp)
+
+    def _base_v2(self):
+        return {
+            "version": "2.0",
+            "actions": {
+                "read_data": {"reversible": True, "side_effects": ["internal_read"]},
+            },
+            "trust_channels": {
+                "user": {"trust_level": "TRUSTED", "taint_by_default": False},
+            },
+            "capability_matrix": {"TRUSTED": ["read_only"]},
+        }
+
+    def test_list_budgets_with_valid_entries_passes(self):
+        raw = self._base_v2()
+        raw["budgets"] = [
+            {"role": "analyst", "per_request": 0.05, "per_session": 1.0},
+            {"role": "admin",   "per_request": 0.20, "per_session": 5.0},
+        ]
+        result = self._validate(raw)
+        assert result.ok, result.errors
+
+    def test_list_budget_negative_per_request_is_error(self):
+        raw = self._base_v2()
+        raw["budgets"] = [{"per_request": -0.05}]
+        result = self._validate(raw)
+        assert not result.ok
+        assert any("per_request" in e for e in result.errors)
+
+    def test_list_budget_missing_limit_is_error(self):
+        raw = self._base_v2()
+        raw["budgets"] = [{"role": "analyst"}]  # no per_request or per_session
+        result = self._validate(raw)
+        assert not result.ok
+
+    def test_list_budget_unknown_role_warns_if_actors_declared(self):
+        raw = self._base_v2()
+        raw["actors"] = {
+            "primary_agent": {"type": "agent", "trust_tier": "TRUSTED"},
+        }
+        raw["budgets"] = [{"role": "ghost_role", "per_request": 0.05}]
+        result = self._validate(raw)
+        assert result.ok  # warning, not error
+        assert any("ghost_role" in w for w in result.warnings)
+
+    def test_list_budget_known_role_does_not_warn(self):
+        raw = self._base_v2()
+        raw["actors"] = {
+            "analyst": {"type": "agent", "trust_tier": "TRUSTED"},
+        }
+        raw["budgets"] = [{"role": "analyst", "per_request": 0.05}]
+        result = self._validate(raw)
+        assert not any("analyst" in w for w in result.warnings)
+
+    def test_list_budget_no_model_pricing_warns(self):
+        raw = self._base_v2()
+        raw["budgets"] = [{"per_request": 0.10}]
+        result = self._validate(raw)
+        assert any("model_pricing" in w for w in result.warnings)
+
+
 # ── ahc cost-profile CLI ──────────────────────────────────────────────────────
 
 class TestCostProfileCLI:
