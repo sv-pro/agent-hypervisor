@@ -5,15 +5,19 @@ Each artifact is a standalone JSON file that the runtime can load without
 parsing or interpreting the original YAML. The same manifest always produces
 identical artifacts (determinism invariant).
 
-Artifacts emitted:
-  policy_table.json        — tool whitelist, forbidden patterns, budget limits
-  capability_matrix.json   — trust_level → permitted side_effect categories
-  taint_rules.json         — ordered taint propagation rules (human-readable)
-  taint_state_machine.json — compiled taint state machine for O(1) runtime lookup
-  escalation_table.json    — trigger conditions → decisions
-  provenance_schema.json   — required/optional provenance fields + learning gate
-  action_schemas.json      — per-action input schemas and metadata
-  manifest_meta.json       — manifest identity for audit / reproducibility
+Artifacts emitted (v1 + v2):
+  policy_table.json           — tool whitelist, forbidden patterns, budget limits
+  capability_matrix.json      — trust_level → permitted side_effect categories
+  taint_rules.json            — ordered taint propagation rules (human-readable)
+  taint_state_machine.json    — compiled taint state machine for O(1) runtime lookup
+  escalation_table.json       — trigger conditions → decisions
+  provenance_schema.json      — required/optional provenance fields + learning gate
+  action_schemas.json         — per-action input schemas and metadata
+  manifest_meta.json          — manifest identity for audit / reproducibility
+
+Additional v2-only artifacts:
+  data_class_taint_table.json — data_class → taint_label/confirmation/retention mapping
+  predicate_table.json        — raw tool name → ordered [{action, match}] predicates
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ def emit(manifest: dict, output_dir: Path) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
 
+    is_v2 = manifest.get("version") == "2.0"
+
     artifacts = {
         "policy_table.json": _build_policy_table(manifest),
         "capability_matrix.json": _build_capability_matrix(manifest),
@@ -46,6 +52,11 @@ def emit(manifest: dict, output_dir: Path) -> dict[str, Path]:
         "action_schemas.json": _build_action_schemas(manifest),
         "manifest_meta.json": _build_manifest_meta(manifest),
     }
+
+    # v2-only artifacts
+    if is_v2:
+        artifacts["data_class_taint_table.json"] = _build_data_class_taint_table(manifest)
+        artifacts["predicate_table.json"] = _build_predicate_table(manifest)
 
     for filename, data in artifacts.items():
         path = output_dir / filename
@@ -252,18 +263,23 @@ def _build_manifest_meta(manifest: dict) -> dict:
     Includes manifest name/version and a content hash of the full manifest
     so that any change to the source produces a different artifact set.
     """
+    # Both v1 and v2 store identity under a 'manifest:' block.
+    # v1 also stores version there; v2 stores it at the top level.
+    meta_block = manifest.get("manifest", {})
+    if not isinstance(meta_block, dict):
+        meta_block = {}
+
     if manifest.get("version") == "2.0":
-        meta_name = manifest.get("name", "")
-        meta_version = manifest.get("version", "2.0")
-        meta_desc = manifest.get("description", "")
-        meta_author = ""
+        meta_name = meta_block.get("name", "")
+        meta_version = str(manifest.get("version", "2.0"))
+        meta_desc = meta_block.get("description", "")
+        meta_author = meta_block.get("author", "")
     else:
-        meta = manifest.get("manifest", {})
-        meta_name = meta.get("name", "")
-        meta_version = meta.get("version", "")
-        meta_desc = meta.get("description", "")
-        meta_author = meta.get("author", "")
-        
+        meta_name = meta_block.get("name", "")
+        meta_version = meta_block.get("version", "")
+        meta_desc = meta_block.get("description", "")
+        meta_author = meta_block.get("author", "")
+
     # Deterministic hash of the manifest content
     content_hash = hashlib.sha256(
         json.dumps(manifest, sort_keys=True).encode("utf-8")
@@ -276,4 +292,51 @@ def _build_manifest_meta(manifest: dict) -> dict:
         "author": meta_author,
         "content_hash": content_hash,
     }
+
+
+def _build_data_class_taint_table(manifest: dict) -> dict:
+    """
+    v2-only: maps each data_class name to its taint_label, confirmation, and retention.
+
+    The runtime uses this table to assign a taint label to any entity it encounters
+    without having to re-parse the full manifest at call time.
+    """
+    data_classes = manifest.get("data_classes", {})
+    table: dict[str, Any] = {}
+    for name, spec in data_classes.items():
+        if not isinstance(spec, dict):
+            continue
+        table[name] = {
+            "taint_label": spec.get("taint_label", name),
+            "confirmation": spec.get("confirmation", "auto"),
+            "retention": spec.get("retention", "session"),
+        }
+    return {"data_classes": table}
+
+
+def _build_predicate_table(manifest: dict) -> dict:
+    """
+    v2-only: maps raw tool/function names to an ordered list of {action, match} predicates.
+
+    The runtime evaluates predicates in order; the first match selects the logical action.
+    If no predicate matches, the call is denied (INV-003).
+
+    For v1 manifests this section does not exist; the table is empty.
+    """
+    predicates = manifest.get("predicates", {})
+    if not isinstance(predicates, dict):
+        return {"predicates": {}}
+    # Normalise: ensure each entry is a list of {action, match} dicts
+    normalised: dict[str, list[dict]] = {}
+    for tool_name, entries in predicates.items():
+        if isinstance(entries, list):
+            normalised[tool_name] = [
+                {"action": e.get("action", ""), "match": e.get("match", {})}
+                for e in entries
+                if isinstance(e, dict)
+            ]
+        else:
+            # Unexpected shape — skip rather than crash
+            normalised[tool_name] = []
+    return {"predicates": normalised}
 
